@@ -57,6 +57,7 @@ export type Database = {
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
+        Relationships: [];
       };
       profiles: {
         Row: {
@@ -80,6 +81,7 @@ export type Database = {
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
+        Relationships: [];
       };
       school_members: {
         Row: {
@@ -100,6 +102,7 @@ export type Database = {
           user_id?: string;
           created_at?: Timestamp;
         };
+        Relationships: [];
       };
       requests: {
         Row: {
@@ -138,6 +141,7 @@ export type Database = {
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
+        Relationships: [];
       };
       request_uploads: {
         Row: {
@@ -167,6 +171,7 @@ export type Database = {
           file_size?: number | null;
           created_at?: Timestamp;
         };
+        Relationships: [];
       };
       designs: {
         Row: {
@@ -196,6 +201,7 @@ export type Database = {
           notes?: string | null;
           created_at?: Timestamp;
         };
+        Relationships: [];
       };
       calendar_items: {
         Row: {
@@ -234,6 +240,7 @@ export type Database = {
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
+        Relationships: [];
       };
       published_links: {
         Row: {
@@ -263,8 +270,12 @@ export type Database = {
           posted_at?: Timestamp;
           created_at?: Timestamp;
         };
+        Relationships: [];
       };
     };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    CompositeTypes: Record<string, never>;
     Enums: {
       user_role: UserRole;
       request_status: RequestStatus;

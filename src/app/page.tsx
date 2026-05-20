@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "./login/actions";
 import type { UserRole } from "@/lib/supabase/types";
@@ -62,6 +63,18 @@ export default async function Home() {
             {ROLE_NEXT_STEP[role]}
           </p>
         </div>
+
+        {role === "super_admin" && (
+          <Link
+            href="/admin"
+            className="block rounded-lg border border-zinc-900 bg-zinc-900 p-4 text-white transition-colors hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            <p className="text-sm font-medium">Manage agency →</p>
+            <p className="mt-1 text-xs opacity-80">
+              Add schools, invite users, assign designers.
+            </p>
+          </Link>
+        )}
 
         <form action={signOut}>
           <button
