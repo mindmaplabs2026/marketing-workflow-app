@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import type { NotificationEmailPref } from "@/lib/supabase/types";
 
 export async function openNotification(formData: FormData) {
   const id = String(formData.get("id") ?? "");
@@ -82,6 +83,34 @@ export async function subscribePush(payload: PushSubscriptionPayload) {
       },
       { onConflict: "endpoint" },
     );
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/notifications");
+}
+
+const VALID_PREFS: ReadonlyArray<NotificationEmailPref> = [
+  "off",
+  "daily",
+  "immediate",
+];
+
+export async function setEmailPref(formData: FormData) {
+  const raw = String(formData.get("pref") ?? "");
+  if (!(VALID_PREFS as readonly string[]).includes(raw)) {
+    throw new Error("Invalid preference.");
+  }
+  const pref = raw as NotificationEmailPref;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ email_pref: pref })
+    .eq("id", user.id);
   if (error) throw new Error(error.message);
 
   revalidatePath("/notifications");

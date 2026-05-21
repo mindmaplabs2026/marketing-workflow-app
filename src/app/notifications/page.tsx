@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { NotificationType } from "@/lib/supabase/types";
-import { markAllRead, openNotification } from "./actions";
+import type {
+  NotificationEmailPref,
+  NotificationType,
+} from "@/lib/supabase/types";
+import { markAllRead, openNotification, setEmailPref } from "./actions";
 import { PushToggle } from "./push-toggle";
 
 type NotificationRow = {
@@ -63,15 +66,24 @@ export default async function NotificationsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: rows, error } = await supabase
-    .from("notifications")
-    .select(
-      "id, type, body, read_at, created_at, request_id, calendar_item_id, actor_id",
-    )
-    .eq("recipient_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(100)
-    .returns<NotificationRow[]>();
+  const [{ data: rows, error }, profileRes] = await Promise.all([
+    supabase
+      .from("notifications")
+      .select(
+        "id, type, body, read_at, created_at, request_id, calendar_item_id, actor_id",
+      )
+      .eq("recipient_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(100)
+      .returns<NotificationRow[]>(),
+    supabase
+      .from("profiles")
+      .select("email_pref")
+      .eq("id", user.id)
+      .single<{ email_pref: NotificationEmailPref }>(),
+  ]);
+  const emailPref: NotificationEmailPref =
+    profileRes.data?.email_pref ?? "daily";
 
   const notifications = rows ?? [];
 
@@ -127,6 +139,8 @@ export default async function NotificationsPage() {
         vapidPublicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ""}
       />
 
+      <EmailPrefCard current={emailPref} />
+
       {notifications.length === 0 && !error && (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
           <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
@@ -149,6 +163,57 @@ export default async function NotificationsPage() {
         items={read}
         actorById={actorById}
       />
+    </div>
+  );
+}
+
+function EmailPrefCard({ current }: { current: NotificationEmailPref }) {
+  const options: { value: NotificationEmailPref; label: string; sub: string }[] =
+    [
+      { value: "daily", label: "Daily digest", sub: "One email per morning, what's waiting." },
+      { value: "immediate", label: "Immediate", sub: "Every event also pings your inbox." },
+      { value: "off", label: "Off", sub: "Push + the app only." },
+    ];
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+        Email backup
+      </p>
+      <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+        Push only fires while a device is awake. Email is the safety net.
+      </p>
+      <form action={setEmailPref} className="mt-3 space-y-2">
+        {options.map((opt) => (
+          <label
+            key={opt.value}
+            className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm transition-colors ${
+              current === opt.value
+                ? "border-zinc-900 bg-zinc-50 dark:border-zinc-50 dark:bg-zinc-800"
+                : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+            }`}
+          >
+            <input
+              type="radio"
+              name="pref"
+              value={opt.value}
+              defaultChecked={current === opt.value}
+              className="mt-0.5"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-zinc-900 dark:text-zinc-50">
+                {opt.label}
+              </span>
+              <span className="block text-xs text-zinc-500">{opt.sub}</span>
+            </span>
+          </label>
+        ))}
+        <button
+          type="submit"
+          className="mt-1 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          Save
+        </button>
+      </form>
     </div>
   );
 }

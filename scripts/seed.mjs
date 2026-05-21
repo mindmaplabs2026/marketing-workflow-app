@@ -22,7 +22,7 @@ const SCHOOL_NAME = "Test School";
 
 const TEST_USERS = [
   {
-    email: "school.admin@test.local",
+    email: "abhishek@mindmaplabs.in",
     password: "TestSchoolAdmin-2026",
     full_name: "Sam Principal",
     role: "school_admin",

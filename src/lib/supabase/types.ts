@@ -42,6 +42,8 @@ export type NotificationType =
   | "request_published"
   | "calendar_item_approved";
 
+export type NotificationEmailPref = "off" | "daily" | "immediate";
+
 type Timestamp = string;
 type DateOnly = string;
 
@@ -74,6 +76,7 @@ export type Database = {
           id: string;
           full_name: string | null;
           role: UserRole;
+          email_pref: NotificationEmailPref;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
@@ -81,6 +84,7 @@ export type Database = {
           id: string;
           full_name?: string | null;
           role?: UserRole;
+          email_pref?: NotificationEmailPref;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -88,6 +92,7 @@ export type Database = {
           id?: string;
           full_name?: string | null;
           role?: UserRole;
+          email_pref?: NotificationEmailPref;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -293,6 +298,7 @@ export type Database = {
           body: string;
           read_at: Timestamp | null;
           pushed_at: Timestamp | null;
+          emailed_at: Timestamp | null;
           created_at: Timestamp;
         };
         Insert: {
@@ -305,6 +311,7 @@ export type Database = {
           body: string;
           read_at?: Timestamp | null;
           pushed_at?: Timestamp | null;
+          emailed_at?: Timestamp | null;
           created_at?: Timestamp;
         };
         Update: {
@@ -317,6 +324,7 @@ export type Database = {
           body?: string;
           read_at?: Timestamp | null;
           pushed_at?: Timestamp | null;
+          emailed_at?: Timestamp | null;
           created_at?: Timestamp;
         };
         Relationships: [];
@@ -364,6 +372,7 @@ export type Database = {
       calendar_item_status: CalendarItemStatus;
       social_platform: SocialPlatform;
       notification_type: NotificationType;
+      notification_email_pref: NotificationEmailPref;
     };
   };
 };

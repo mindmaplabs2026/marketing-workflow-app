@@ -1,6 +1,7 @@
 import "server-only";
 import webpush from "web-push";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { dispatchImmediateEmails } from "@/lib/email/dispatch";
 import type { NotificationType } from "@/lib/supabase/types";
 
 // Configure web-push once per process. Throws at call-time if env is missing.
@@ -67,13 +68,21 @@ function titleFor(type: NotificationType): string {
 // Failures on individual sends don't block siblings; gone subscriptions are
 // pruned automatically.
 export async function dispatchPendingPushes(): Promise<void> {
+  // Email dispatch is independent of push, so run it in parallel — both
+  // are best-effort and either can fail without blocking the other.
+  const emailWork = dispatchImmediateEmails();
+
   const skip = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ? false : true;
-  if (skip) return;
+  if (skip) {
+    await emailWork;
+    return;
+  }
 
   try {
     configure();
   } catch (e) {
     console.warn("push dispatch skipped:", e instanceof Error ? e.message : e);
+    await emailWork;
     return;
   }
   const admin = createAdminClient();
@@ -168,4 +177,6 @@ export async function dispatchPendingPushes(): Promise<void> {
       .delete()
       .in("id", goneSubscriptionIds);
   }
+
+  await emailWork;
 }
