@@ -1,0 +1,228 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import type { RequestStatus, UserRole } from "@/lib/supabase/types";
+import { STATUS_SHORT, STATUS_BADGE_CLASS } from "./status";
+
+type RequestListRow = {
+  id: string;
+  title: string;
+  status: RequestStatus;
+  created_at: string;
+  school_id: string;
+  created_by: string;
+  assigned_designer_id: string | null;
+};
+
+type SchoolLite = { id: string; name: string };
+type ProfileLite = { id: string; full_name: string | null };
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export default async function RequestsListPage() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single<{ role: UserRole }>();
+
+  const role: UserRole = profile?.role ?? "teacher";
+  const canRaise = role === "teacher" || role === "school_admin";
+  const isReviewer = role === "school_admin" || role === "super_admin";
+  const isDesigner = role === "designer" || role === "super_admin";
+
+  const [requestsRes, schoolsRes] = await Promise.all([
+    supabase
+      .from("requests")
+      .select(
+        "id, title, status, created_at, school_id, created_by, assigned_designer_id",
+      )
+      .order("created_at", { ascending: false })
+      .returns<RequestListRow[]>(),
+    supabase
+      .from("schools")
+      .select("id, name")
+      .order("name", { ascending: true })
+      .returns<SchoolLite[]>(),
+  ]);
+
+  const requests = requestsRes.data ?? [];
+  const schoolsById = new Map((schoolsRes.data ?? []).map((s) => [s.id, s.name]));
+
+  const creatorIds = Array.from(new Set(requests.map((r) => r.created_by)));
+  let creators: ProfileLite[] = [];
+  if (creatorIds.length > 0) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", creatorIds)
+      .returns<ProfileLite[]>();
+    creators = data ?? [];
+  }
+  const creatorById = new Map(creators.map((p) => [p.id, p.full_name]));
+
+  const needsYou: RequestListRow[] = [];
+  const myDrafts: RequestListRow[] = [];
+  const inFlight: RequestListRow[] = [];
+  const published: RequestListRow[] = [];
+  const archived: RequestListRow[] = [];
+
+  for (const r of requests) {
+    if (r.status === "archived") {
+      archived.push(r);
+      continue;
+    }
+    if (r.status === "published") {
+      published.push(r);
+      continue;
+    }
+    if (r.status === "draft") {
+      if (r.created_by === user.id) myDrafts.push(r);
+      else if (isReviewer) inFlight.push(r);
+      continue;
+    }
+
+    let queued = false;
+    if (isReviewer) {
+      if (
+        r.status === "pending_admin_approval" ||
+        r.status === "design_pending_approval"
+      ) {
+        needsYou.push(r);
+        queued = true;
+      }
+    }
+    if (!queued && isDesigner) {
+      const mine = r.assigned_designer_id === user.id;
+      if (r.status === "approved") {
+        needsYou.push(r);
+        queued = true;
+      } else if (
+        mine &&
+        (r.status === "in_design" || r.status === "changes_requested")
+      ) {
+        needsYou.push(r);
+        queued = true;
+      }
+    }
+    if (!queued) inFlight.push(r);
+  }
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Requests
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Everything in flight for your school.
+          </p>
+        </div>
+        {canRaise && (
+          <Link
+            href="/requests/new"
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            + Raise
+          </Link>
+        )}
+      </div>
+
+      {requestsRes.error && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+          {requestsRes.error.message}
+        </p>
+      )}
+
+      <Section title="Needs you" items={needsYou} variant="urgent" />
+      <Section title="My drafts" items={myDrafts} variant="muted" />
+      <Section title="In flight" items={inFlight} />
+      <Section title="Published" items={published} />
+      <Section title="Archived" items={archived} variant="muted" />
+
+      {requests.length === 0 && (
+        <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+            Nothing here yet.
+          </p>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            {canRaise
+              ? "Raise your first request to get the loop started."
+              : "Once your team raises requests, you'll see them here."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
+  function Section({
+    title,
+    items,
+    variant,
+  }: {
+    title: string;
+    items: RequestListRow[];
+    variant?: "urgent" | "muted";
+  }) {
+    if (items.length === 0) return null;
+    return (
+      <section className="space-y-2">
+        <h2
+          className={
+            variant === "urgent"
+              ? "text-sm font-medium text-amber-700 dark:text-amber-300"
+              : variant === "muted"
+                ? "text-xs font-medium uppercase tracking-widest text-zinc-500"
+                : "text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          }
+        >
+          {title} ({items.length})
+        </h2>
+        <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+          {items.map((r) => {
+            const creatorName =
+              creatorById.get(r.created_by)?.trim() || "someone";
+            const schoolName = schoolsById.get(r.school_id) ?? "";
+            return (
+              <li key={r.id}>
+                <Link
+                  href={`/requests/${r.id}`}
+                  className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                      {r.title}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-zinc-500">
+                      {creatorName}
+                      {schoolName ? ` · ${schoolName}` : ""} ·{" "}
+                      {formatDate(r.created_at)}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_BADGE_CLASS[r.status]}`}
+                  >
+                    {STATUS_SHORT[r.status]}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
+  }
+}

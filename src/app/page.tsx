@@ -12,14 +12,13 @@ const ROLE_LABELS: Record<UserRole, string> = {
 };
 
 const ROLE_NEXT_STEP: Record<UserRole, string> = {
-  super_admin:
-    "Phase 3 will give you a cross-client dashboard for all schools.",
-  designer: "Phase 3 will give you a prioritized queue of assigned work.",
-  school_admin:
-    "Phase 4 will let you approve requests and review the monthly calendar.",
-  teacher: "Phase 4 will let you raise requests and upload photos.",
+  super_admin: "Manage schools and users, or jump into the request board.",
+  designer:
+    "Pick up approved requests, design, publish — all from the queue.",
+  school_admin: "Raise new requests, approve drafts, and track what's in flight.",
+  teacher: "Raise a request — your school admin gives the OK.",
   decision_maker:
-    "Phase 4 will give you a read-only calendar of published updates.",
+    "See the month's plan and every post that's gone live for your school.",
 };
 
 export default async function Home() {
@@ -64,13 +63,75 @@ export default async function Home() {
           </p>
         </div>
 
+        {(role === "teacher" ||
+          role === "school_admin" ||
+          role === "designer" ||
+          role === "super_admin") && (
+          <Link
+            href="/requests"
+            className="block rounded-lg border border-zinc-900 bg-zinc-900 p-4 text-white transition-colors hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            <p className="text-sm font-medium">Open requests →</p>
+            <p className="mt-1 text-xs opacity-80">
+              {role === "school_admin"
+                ? "Approve drafts, see what's in flight."
+                : role === "teacher"
+                  ? "Raise a new one or check your drafts."
+                  : role === "designer"
+                    ? "See requests across your assigned schools."
+                    : "Cross-client view of every request."}
+            </p>
+          </Link>
+        )}
+
+        {(role === "designer" ||
+          role === "school_admin" ||
+          role === "super_admin") && (
+          <Link
+            href="/calendar"
+            className="block rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
+          >
+            <p className="text-sm font-medium">Monthly calendar →</p>
+            <p className="mt-1 text-xs text-zinc-500">
+              {role === "designer"
+                ? "Plan the month's posts and slots."
+                : role === "school_admin"
+                  ? "Review the month's plan; approve what should go out."
+                  : "Plan + approve across every school."}
+            </p>
+          </Link>
+        )}
+
+        {role === "decision_maker" && (
+          <>
+            <Link
+              href="/calendar"
+              className="block rounded-lg border border-zinc-900 bg-zinc-900 p-4 text-white transition-colors hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              <p className="text-sm font-medium">Monthly calendar →</p>
+              <p className="mt-1 text-xs opacity-80">
+                What's coming up for your school.
+              </p>
+            </Link>
+            <Link
+              href="/feed"
+              className="block rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
+            >
+              <p className="text-sm font-medium">Published posts →</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Every post that's gone live, with links.
+              </p>
+            </Link>
+          </>
+        )}
+
         {role === "super_admin" && (
           <Link
             href="/admin"
-            className="block rounded-lg border border-zinc-900 bg-zinc-900 p-4 text-white transition-colors hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="block rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
           >
             <p className="text-sm font-medium">Manage agency →</p>
-            <p className="mt-1 text-xs opacity-80">
+            <p className="mt-1 text-xs text-zinc-500">
               Add schools, invite users, assign designers.
             </p>
           </Link>
