@@ -19,6 +19,16 @@ export default async function AdminHome() {
         </p>
       </div>
 
+      <Link
+        href="/admin/pipeline"
+        className="block rounded-lg border border-zinc-900 bg-zinc-900 p-4 text-white transition-colors hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+      >
+        <p className="text-sm font-medium">Pipeline →</p>
+        <p className="mt-1 text-xs opacity-80">
+          Every school&apos;s work, grouped by where it&apos;s stuck.
+        </p>
+      </Link>
+
       <div className="grid grid-cols-2 gap-4">
         <Link
           href="/admin/schools"

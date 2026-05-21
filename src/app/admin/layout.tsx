@@ -6,6 +6,7 @@ import { NotificationsBell } from "@/components/notifications-bell";
 import type { UserRole } from "@/lib/supabase/types";
 
 const NAV = [
+  { href: "/admin/pipeline", label: "Pipeline" },
   { href: "/admin/schools", label: "Schools" },
   { href: "/admin/users", label: "Users" },
 ];
