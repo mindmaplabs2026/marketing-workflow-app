@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/login/team", "/auth/callback"];
+const SETUP_PASSWORD_PATH = "/setup-password";
 
 function isPublicPath(pathname: string): boolean {
   // API routes do their own auth (Bearer secret, or via createClient() inside
@@ -47,6 +48,7 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const publicPath = isPublicPath(pathname);
+  const onSetupPath = pathname === SETUP_PASSWORD_PATH;
 
   if (!user && !publicPath) {
     const url = request.nextUrl.clone();
@@ -60,6 +62,23 @@ export async function updateSession(request: NextRequest) {
     url.pathname = "/";
     url.search = "";
     return NextResponse.redirect(url);
+  }
+
+  // Invited internal users land here right after redeeming their invite
+  // link. Force them through /setup-password before they can do anything
+  // else; the setPassword action flips password_set=true and lets them out.
+  if (user && !publicPath && !onSetupPath) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("password_set")
+      .eq("id", user.id)
+      .single();
+    if (profile && profile.password_set === false) {
+      const url = request.nextUrl.clone();
+      url.pathname = SETUP_PASSWORD_PATH;
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
   }
 
   return supabaseResponse;

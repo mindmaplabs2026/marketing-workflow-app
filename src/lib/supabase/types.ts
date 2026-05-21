@@ -77,6 +77,7 @@ export type Database = {
           full_name: string | null;
           role: UserRole;
           email_pref: NotificationEmailPref;
+          password_set: boolean;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
@@ -85,6 +86,7 @@ export type Database = {
           full_name?: string | null;
           role?: UserRole;
           email_pref?: NotificationEmailPref;
+          password_set?: boolean;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -93,6 +95,7 @@ export type Database = {
           full_name?: string | null;
           role?: UserRole;
           email_pref?: NotificationEmailPref;
+          password_set?: boolean;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { InviteForm } from "./invite-form";
 import { RoleSelect } from "./role-select";
 import type { UserRole } from "@/lib/supabase/types";
 
@@ -18,19 +19,25 @@ export default async function UsersPage() {
     data: { user: currentUser },
   } = await supabase.auth.getUser();
 
-  const [profilesRes, authListRes] = await Promise.all([
+  const [profilesRes, authListRes, schoolsRes] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, full_name, role, created_at")
       .order("created_at", { ascending: true })
       .returns<ProfileRow[]>(),
     adminClient.auth.admin.listUsers({ perPage: 200 }),
+    supabase
+      .from("schools")
+      .select("id, name")
+      .order("name", { ascending: true })
+      .returns<{ id: string; name: string }[]>(),
   ]);
 
   const profiles = profilesRes.data ?? [];
   const emailById = new Map(
     (authListRes.data?.users ?? []).map((u) => [u.id, u.email ?? ""]),
   );
+  const schools = schoolsRes.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -43,6 +50,8 @@ export default async function UsersPage() {
           <span className="font-medium">Teacher</span>; change roles here.
         </p>
       </div>
+
+      <InviteForm schools={schools} />
 
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <table className="w-full">

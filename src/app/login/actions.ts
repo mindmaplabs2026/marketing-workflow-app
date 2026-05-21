@@ -46,11 +46,25 @@ export async function signInWithMagicLink(
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
+      // Lock /login to known users. New accounts only come from the
+      // super-admin invite flow at /admin/users; strangers typing an email
+      // here would otherwise hit Supabase's signup-with-confirm gate,
+      // which violates the doc's "passwordless or persistent login" rule.
+      shouldCreateUser: false,
       emailRedirectTo: `${origin}/auth/callback`,
     },
   });
 
   if (error) {
+    if (
+      /signups?\s+not\s+allowed/i.test(error.message) ||
+      /user\s+not\s+found/i.test(error.message)
+    ) {
+      return {
+        error:
+          "We couldn't find an account for that email. Ask a super admin to invite you.",
+      };
+    }
     return { error: error.message };
   }
 
