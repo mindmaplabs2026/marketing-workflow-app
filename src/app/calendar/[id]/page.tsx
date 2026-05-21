@@ -29,6 +29,7 @@ type CalendarItemDetail = {
   title: string;
   description: string | null;
   status: CalendarItemStatus;
+  feedback: string | null;
   created_at: string;
 };
 
@@ -71,7 +72,7 @@ export default async function CalendarItemDetailPage({
   const { data: item } = await supabase
     .from("calendar_items")
     .select(
-      "id, school_id, created_by, linked_request_id, planned_date, title, description, status, created_at",
+      "id, school_id, created_by, linked_request_id, planned_date, title, description, status, feedback, created_at",
     )
     .eq("id", id)
     .single<CalendarItemDetail>();
@@ -228,7 +229,18 @@ export default async function CalendarItemDetailPage({
         </div>
       )}
 
-      <section className="flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-6 dark:border-zinc-800">
+      {item.feedback && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-4 dark:border-rose-900/40 dark:bg-rose-900/20">
+          <p className="text-xs font-medium uppercase tracking-widest text-rose-700 dark:text-rose-300">
+            Feedback from school admin
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-rose-900 dark:text-rose-100">
+            {item.feedback}
+          </p>
+        </div>
+      )}
+
+      <section className="space-y-3 border-t border-zinc-200 pt-6 dark:border-zinc-800">
         {canApprove && (
           <form action={approveCalendarItem}>
             <input type="hidden" name="id" value={item.id} />
@@ -241,14 +253,34 @@ export default async function CalendarItemDetailPage({
           </form>
         )}
         {canCancel && (
-          <form action={cancelCalendarItem} className="ml-auto">
+          <form action={cancelCalendarItem} className="space-y-2">
             <input type="hidden" name="id" value={item.id} />
-            <button
-              type="submit"
-              className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
-            >
-              Cancel item
-            </button>
+            <details className="text-xs">
+              <summary className="cursor-pointer text-zinc-500 hover:text-red-600 dark:hover:text-red-400">
+                Cancel item
+              </summary>
+              <div className="mt-2 space-y-2 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+                <label
+                  htmlFor="feedback"
+                  className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
+                  Optional note (the designer will see this)
+                </label>
+                <textarea
+                  id="feedback"
+                  name="feedback"
+                  rows={3}
+                  placeholder="e.g. Move this to next month — exam week."
+                  className="block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                />
+                <button
+                  type="submit"
+                  className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-300"
+                >
+                  Cancel item
+                </button>
+              </div>
+            </details>
           </form>
         )}
       </section>

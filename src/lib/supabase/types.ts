@@ -228,6 +228,7 @@ export type Database = {
           title: string;
           description: string | null;
           status: CalendarItemStatus;
+          feedback: string | null;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
@@ -240,6 +241,7 @@ export type Database = {
           title: string;
           description?: string | null;
           status?: CalendarItemStatus;
+          feedback?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -252,6 +254,7 @@ export type Database = {
           title?: string;
           description?: string | null;
           status?: CalendarItemStatus;
+          feedback?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };

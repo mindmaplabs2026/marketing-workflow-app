@@ -196,6 +196,7 @@ export async function approveCalendarItem(formData: FormData) {
 
 export async function cancelCalendarItem(formData: FormData) {
   const id = String(formData.get("id") ?? "");
+  const feedback = String(formData.get("feedback") ?? "").trim();
   if (!id) throw new Error("Missing id.");
 
   const actor = await loadActor();
@@ -217,7 +218,7 @@ export async function cancelCalendarItem(formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase
     .from("calendar_items")
-    .update({ status: "cancelled" })
+    .update({ status: "cancelled", feedback: feedback || null })
     .eq("id", id);
   if (error) throw new Error(error.message);
 

@@ -9,6 +9,7 @@ type RequestListRow = {
   title: string;
   status: RequestStatus;
   created_at: string;
+  updated_at: string;
   school_id: string;
   created_by: string;
   assigned_designer_id: string | null;
@@ -47,7 +48,7 @@ export default async function RequestsListPage() {
     supabase
       .from("requests")
       .select(
-        "id, title, status, created_at, school_id, created_by, assigned_designer_id",
+        "id, title, status, created_at, updated_at, school_id, created_by, assigned_designer_id",
       )
       .order("created_at", { ascending: false })
       .returns<RequestListRow[]>(),
@@ -120,6 +121,43 @@ export default async function RequestsListPage() {
     if (!queued) inFlight.push(r);
   }
 
+  // School-admin snapshot: clarity-doc "glances at the analytics from their
+  // last post." Scoped to whatever this user can already see (RLS-filtered).
+  let snapshot: {
+    publishedLast30: number;
+    avgDaysToPublish: number | null;
+    waitingOnYou: number;
+  } | null = null;
+  if (isReviewer) {
+    const since30Ms = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const recentPublished = requests.filter(
+      (r) =>
+        r.status === "published" &&
+        new Date(r.updated_at).getTime() >= since30Ms,
+    );
+    let avg: number | null = null;
+    if (recentPublished.length > 0) {
+      const sumDays = recentPublished.reduce((acc, r) => {
+        const days =
+          (new Date(r.updated_at).getTime() -
+            new Date(r.created_at).getTime()) /
+          (1000 * 60 * 60 * 24);
+        return acc + Math.max(0, days);
+      }, 0);
+      avg = Math.round((sumDays / recentPublished.length) * 10) / 10;
+    }
+    const waiting = requests.filter(
+      (r) =>
+        r.status === "pending_admin_approval" ||
+        r.status === "design_pending_approval",
+    ).length;
+    snapshot = {
+      publishedLast30: recentPublished.length,
+      avgDaysToPublish: avg,
+      waitingOnYou: waiting,
+    };
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between gap-4">
@@ -145,6 +183,25 @@ export default async function RequestsListPage() {
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
           {requestsRes.error.message}
         </p>
+      )}
+
+      {snapshot && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Stat label="Published (30d)" value={snapshot.publishedLast30} />
+          <Stat
+            label="Avg days to publish"
+            value={
+              snapshot.avgDaysToPublish === null
+                ? "—"
+                : snapshot.avgDaysToPublish
+            }
+          />
+          <Stat
+            label="Waiting on you"
+            value={snapshot.waitingOnYou}
+            urgent={snapshot.waitingOnYou > 0}
+          />
+        </div>
       )}
 
       <Section title="Needs you" items={needsYou} variant="urgent" />
@@ -225,4 +282,43 @@ export default async function RequestsListPage() {
       </section>
     );
   }
+}
+
+function Stat({
+  label,
+  value,
+  urgent,
+}: {
+  label: string;
+  value: number | string;
+  urgent?: boolean;
+}) {
+  return (
+    <div
+      className={
+        urgent
+          ? "rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20"
+          : "rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+      }
+    >
+      <p
+        className={
+          urgent
+            ? "text-3xl font-semibold text-amber-900 dark:text-amber-200"
+            : "text-3xl font-semibold text-zinc-900 dark:text-zinc-50"
+        }
+      >
+        {value}
+      </p>
+      <p
+        className={
+          urgent
+            ? "mt-1 text-sm text-amber-800 dark:text-amber-300"
+            : "mt-1 text-sm text-zinc-600 dark:text-zinc-400"
+        }
+      >
+        {label}
+      </p>
+    </div>
+  );
 }
