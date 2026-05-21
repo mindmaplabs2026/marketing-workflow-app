@@ -3,8 +3,15 @@ import { createClient } from "@/lib/supabase/server";
 import type {
   NotificationEmailPref,
   NotificationType,
+  RequestStatus,
+  UserRole,
 } from "@/lib/supabase/types";
-import { markAllRead, openNotification, setEmailPref } from "./actions";
+import {
+  batchAct,
+  markAllRead,
+  openNotification,
+  setEmailPref,
+} from "./actions";
 import { PushToggle } from "./push-toggle";
 
 type NotificationRow = {
@@ -78,14 +85,54 @@ export default async function NotificationsPage() {
       .returns<NotificationRow[]>(),
     supabase
       .from("profiles")
-      .select("email_pref")
+      .select("email_pref, role")
       .eq("id", user.id)
-      .single<{ email_pref: NotificationEmailPref }>(),
+      .single<{ email_pref: NotificationEmailPref; role: UserRole }>(),
   ]);
   const emailPref: NotificationEmailPref =
     profileRes.data?.email_pref ?? "daily";
+  const role: UserRole = profileRes.data?.role ?? "teacher";
+  const isReviewer = role === "school_admin" || role === "super_admin";
 
   const notifications = rows ?? [];
+
+  // For reviewers, surface a "Pending your approval" batch section. We need
+  // the live status of each linked request so we don't show a stale row that
+  // someone else already approved.
+  type PendingRow = NotificationRow & { request_status: RequestStatus };
+  let pendingApprovals: PendingRow[] = [];
+  if (isReviewer) {
+    const candidates = notifications.filter(
+      (n) =>
+        !n.read_at &&
+        n.request_id &&
+        (n.type === "request_submitted_for_approval" ||
+          n.type === "design_uploaded_for_review"),
+    );
+    if (candidates.length > 0) {
+      const reqIds = Array.from(
+        new Set(candidates.map((c) => c.request_id!).filter(Boolean)),
+      );
+      const { data: reqs } = await supabase
+        .from("requests")
+        .select("id, status")
+        .in("id", reqIds)
+        .returns<{ id: string; status: RequestStatus }[]>();
+      const statusById = new Map((reqs ?? []).map((r) => [r.id, r.status]));
+      pendingApprovals = candidates
+        .map((c) => ({
+          ...c,
+          request_status: statusById.get(c.request_id!) as RequestStatus,
+        }))
+        .filter(
+          (c) =>
+            (c.type === "request_submitted_for_approval" &&
+              c.request_status === "pending_admin_approval") ||
+            (c.type === "design_uploaded_for_review" &&
+              c.request_status === "design_pending_approval"),
+        );
+    }
+  }
 
   const actorIds = Array.from(
     new Set(notifications.map((n) => n.actor_id).filter((x): x is string => !!x)),
@@ -141,6 +188,10 @@ export default async function NotificationsPage() {
 
       <EmailPrefCard current={emailPref} />
 
+      {pendingApprovals.length > 0 && (
+        <PendingApprovalsForm items={pendingApprovals} actorById={actorById} />
+      )}
+
       {notifications.length === 0 && !error && (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
           <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
@@ -164,6 +215,77 @@ export default async function NotificationsPage() {
         actorById={actorById}
       />
     </div>
+  );
+}
+
+function PendingApprovalsForm({
+  items,
+  actorById,
+}: {
+  items: NotificationRow[];
+  actorById: Map<string, string | null>;
+}) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium text-amber-700 dark:text-amber-300">
+        Pending your approval ({items.length})
+      </h2>
+      <form
+        action={batchAct}
+        className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+      >
+        <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
+          {items.map((n) => {
+            const actorName =
+              (n.actor_id && actorById.get(n.actor_id)?.trim()) || "Someone";
+            const kind =
+              n.type === "request_submitted_for_approval" ? "Request" : "Design";
+            return (
+              <li key={n.id}>
+                <label className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                  <input
+                    type="checkbox"
+                    name="notification_id"
+                    value={n.id}
+                    defaultChecked
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                      {n.body}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-zinc-500">
+                      {kind} · {actorName}
+                    </p>
+                  </div>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <button
+            type="submit"
+            name="action"
+            value="approve"
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-emerald-700"
+          >
+            Approve selected
+          </button>
+          <button
+            type="submit"
+            name="action"
+            value="send_back"
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            Send back selected
+          </button>
+          <span className="ml-auto text-[10px] text-zinc-500">
+            Designs go back as &quot;changes requested&quot;
+          </span>
+        </div>
+      </form>
+    </section>
   );
 }
 

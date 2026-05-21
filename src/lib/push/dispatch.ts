@@ -63,6 +63,27 @@ function titleFor(type: NotificationType): string {
   }
 }
 
+// Inline approve / send-back buttons on the OS notification banner.
+// Only meaningful for the two types that target a school_admin reviewer.
+// Chrome/Edge render these; Safari/iOS ignore them gracefully.
+function actionsFor(
+  type: NotificationType,
+): Array<{ action: string; title: string }> | undefined {
+  if (type === "request_submitted_for_approval") {
+    return [
+      { action: "approve_request", title: "Approve" },
+      { action: "send_back_request", title: "Send back" },
+    ];
+  }
+  if (type === "design_uploaded_for_review") {
+    return [
+      { action: "approve_design", title: "Approve" },
+      { action: "request_design_changes", title: "Request changes" },
+    ];
+  }
+  return undefined;
+}
+
 // Drains all pending notifications across all users, pushes them, and marks
 // pushed_at. Safe to call repeatedly — does nothing when queue is empty.
 // Failures on individual sends don't block siblings; gone subscriptions are
@@ -131,6 +152,8 @@ export async function dispatchPendingPushes(): Promise<void> {
           body: row.body,
           url: deepLinkFor(row),
           tag: row.request_id ?? row.calendar_item_id ?? row.id,
+          actions: actionsFor(row.type),
+          request_id: row.request_id,
         });
 
         await Promise.all(

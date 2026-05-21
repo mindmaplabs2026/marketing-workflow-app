@@ -4,6 +4,10 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_PATHS = ["/login", "/login/team", "/auth/callback"];
 
 function isPublicPath(pathname: string): boolean {
+  // API routes do their own auth (Bearer secret, or via createClient() inside
+  // the handler) and should never be redirected to /login — programmatic
+  // callers expect 401 JSON, not a 307 to an HTML page.
+  if (pathname.startsWith("/api/")) return true;
   return PUBLIC_PATHS.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
