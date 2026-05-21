@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import type {
   UserRole,
   RequestStatus,
@@ -109,6 +110,7 @@ export async function createRequest(
   if (error || !data) return { error: error?.message ?? "Could not create." };
 
   revalidatePath("/requests");
+  await dispatchPendingPushes();
   return { requestId: data.id };
 }
 
@@ -163,6 +165,7 @@ export async function submitDraft(formData: FormData) {
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
+  await dispatchPendingPushes();
 }
 
 export async function approveRequest(formData: FormData) {
@@ -190,6 +193,7 @@ export async function approveRequest(formData: FormData) {
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
+  await dispatchPendingPushes();
 }
 
 export async function sendBackForChanges(formData: FormData) {
@@ -217,6 +221,7 @@ export async function sendBackForChanges(formData: FormData) {
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
+  await dispatchPendingPushes();
 }
 
 export async function archiveRequest(formData: FormData) {
@@ -368,6 +373,7 @@ export async function attachDesign(formData: FormData) {
 
   revalidatePath(`/requests/${requestId}`);
   revalidatePath("/requests");
+  await dispatchPendingPushes();
 }
 
 export async function removeDesign(formData: FormData) {
@@ -415,6 +421,7 @@ export async function approveDesign(formData: FormData) {
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
+  await dispatchPendingPushes();
 }
 
 export async function requestDesignChanges(formData: FormData) {
@@ -442,6 +449,7 @@ export async function requestDesignChanges(formData: FormData) {
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
+  await dispatchPendingPushes();
 }
 
 export async function publishRequest(formData: FormData) {
@@ -519,4 +527,5 @@ export async function publishRequest(formData: FormData) {
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
   revalidatePath("/calendar");
+  await dispatchPendingPushes();
 }

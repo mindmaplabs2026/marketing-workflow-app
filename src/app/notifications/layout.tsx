@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../login/actions";
-import { NotificationsBell } from "@/components/notifications-bell";
 import type { UserRole } from "@/lib/supabase/types";
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -13,7 +12,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   decision_maker: "Decision maker",
 };
 
-export default async function FeedLayout({
+export default async function NotificationsLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -32,6 +31,7 @@ export default async function FeedLayout({
 
   const role: UserRole = profile?.role ?? "teacher";
   const name = profile?.full_name?.trim() || user.email || "";
+  const homeHref = role === "decision_maker" ? "/feed" : "/requests";
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
@@ -39,31 +39,22 @@ export default async function FeedLayout({
         <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-4">
             <Link
-              href="/feed"
+              href="/notifications"
               className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
             >
-              Published
+              Notifications
             </Link>
             <Link
-              href="/calendar"
+              href={homeHref}
               className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
             >
-              Calendar
+              ← Back
             </Link>
-            {role !== "decision_maker" && (
-              <Link
-                href="/requests"
-                className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              >
-                Requests
-              </Link>
-            )}
           </div>
           <div className="flex items-center gap-3 text-xs text-zinc-600 dark:text-zinc-400">
             <span className="hidden sm:inline">
               {name} · {ROLE_LABELS[role]}
             </span>
-            <NotificationsBell />
             <form action={signOut}>
               <button
                 type="submit"

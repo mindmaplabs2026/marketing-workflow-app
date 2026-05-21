@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../login/actions";
+import { NotificationsBell } from "@/components/notifications-bell";
 import type { UserRole } from "@/lib/supabase/types";
 
 const NAV = [
@@ -35,13 +36,16 @@ export default async function AdminLayout({
   return (
     <div className="flex flex-1 bg-zinc-50 dark:bg-zinc-950">
       <aside className="flex w-56 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="border-b border-zinc-200 px-4 py-5 dark:border-zinc-800">
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">
-            Admin
-          </p>
-          <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-50">
-            {profile?.full_name?.trim() || user.email}
-          </p>
+        <div className="flex items-start justify-between gap-2 border-b border-zinc-200 px-4 py-5 dark:border-zinc-800">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">
+              Admin
+            </p>
+            <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-50">
+              {profile?.full_name?.trim() || user.email}
+            </p>
+          </div>
+          <NotificationsBell />
         </div>
 
         <nav className="flex-1 space-y-1 px-2 py-4 text-sm">

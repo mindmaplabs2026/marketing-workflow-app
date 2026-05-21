@@ -1,0 +1,19 @@
+{
+  "name": "Marketing Workflow",
+  "short_name": "Workflow",
+  "description": "One tracked pipeline for school clients and the design team.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#18181b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

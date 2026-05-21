@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import type {
   CalendarItemStatus,
   UserRole,
@@ -190,6 +191,7 @@ export async function approveCalendarItem(formData: FormData) {
   revalidatePath(`/calendar/${id}`);
   revalidatePath("/calendar");
   revalidatePath("/requests");
+  await dispatchPendingPushes();
 }
 
 export async function cancelCalendarItem(formData: FormData) {

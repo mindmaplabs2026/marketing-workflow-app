@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type {
+  NotificationType,
   RequestStatus,
   SocialPlatform,
   UserRole,
@@ -58,6 +59,25 @@ type PublishedLinkRow = {
   url: string;
   posted_by: string;
   posted_at: string;
+};
+
+type ActivityRow = {
+  id: string;
+  type: NotificationType;
+  body: string;
+  actor_id: string | null;
+  created_at: string;
+};
+
+const ACTIVITY_VERB: Record<NotificationType, string> = {
+  request_submitted_for_approval: "submitted for approval",
+  request_approved: "approved the request",
+  request_sent_back_to_draft: "sent the draft back",
+  design_uploaded_for_review: "uploaded a design",
+  design_approved: "approved the design",
+  design_changes_requested: "requested design changes",
+  request_published: "published",
+  calendar_item_approved: "approved a calendar item",
 };
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
@@ -123,6 +143,7 @@ export default async function RequestDetailPage({
     { data: links },
     { data: creator },
     { data: designer },
+    activityRes,
   ] = await Promise.all([
     supabase
       .from("schools")
@@ -159,11 +180,47 @@ export default async function RequestDetailPage({
           .eq("id", req.assigned_designer_id)
           .single<{ full_name: string | null }>()
       : Promise.resolve({ data: null }),
+    role === "decision_maker"
+      ? Promise.resolve({ data: [] as ActivityRow[] })
+      : supabase
+          .from("notifications")
+          .select("id, type, body, actor_id, created_at")
+          .eq("request_id", id)
+          .order("created_at", { ascending: true })
+          .returns<ActivityRow[]>(),
   ]);
 
   const uploadsList = uploads ?? [];
   const designsList = designs ?? [];
   const linksList = links ?? [];
+
+  // Each status change fans out 1 notification per recipient. Collapse those
+  // into a single timeline entry keyed by (type, actor, created_at).
+  const activityRaw = activityRes.data ?? [];
+  const seen = new Set<string>();
+  const activity: ActivityRow[] = [];
+  for (const row of activityRaw) {
+    const key = `${row.type}|${row.actor_id ?? ""}|${row.created_at}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    activity.push(row);
+  }
+
+  const activityActorIds = Array.from(
+    new Set(activity.map((a) => a.actor_id).filter((x): x is string => !!x)),
+  );
+  let activityActors: { id: string; full_name: string | null }[] = [];
+  if (activityActorIds.length > 0) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", activityActorIds)
+      .returns<{ id: string; full_name: string | null }[]>();
+    activityActors = data ?? [];
+  }
+  const activityActorById = new Map(
+    activityActors.map((p) => [p.id, p.full_name]),
+  );
 
   const signedUploadUrls = new Map<string, string>();
   if (uploadsList.length > 0) {
@@ -457,6 +514,35 @@ export default async function RequestDetailPage({
             Post to the school's social handles, then paste the live links here.
           </p>
           <PublishForm requestId={req.id} />
+        </section>
+      )}
+
+      {role !== "decision_maker" && activity.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Activity
+          </h2>
+          <ol className="space-y-2 border-l border-zinc-200 pl-4 dark:border-zinc-800">
+            {activity.map((a) => {
+              const actorName =
+                (a.actor_id && activityActorById.get(a.actor_id)?.trim()) ||
+                "Someone";
+              return (
+                <li key={a.id} className="relative text-xs">
+                  <span className="absolute -left-[1.3rem] top-1.5 h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-600" />
+                  <p className="text-zinc-700 dark:text-zinc-300">
+                    <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                      {actorName}
+                    </span>{" "}
+                    {ACTIVITY_VERB[a.type]}
+                  </p>
+                  <p className="text-[10px] text-zinc-500">
+                    {formatDateTime(a.created_at)}
+                  </p>
+                </li>
+              );
+            })}
+          </ol>
         </section>
       )}
 

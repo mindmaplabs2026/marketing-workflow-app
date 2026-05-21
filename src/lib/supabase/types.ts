@@ -32,6 +32,16 @@ export type SocialPlatform =
   | "youtube"
   | "other";
 
+export type NotificationType =
+  | "request_submitted_for_approval"
+  | "request_approved"
+  | "request_sent_back_to_draft"
+  | "design_uploaded_for_review"
+  | "design_approved"
+  | "design_changes_requested"
+  | "request_published"
+  | "calendar_item_approved";
+
 type Timestamp = string;
 type DateOnly = string;
 
@@ -272,6 +282,78 @@ export type Database = {
         };
         Relationships: [];
       };
+      notifications: {
+        Row: {
+          id: string;
+          recipient_id: string;
+          actor_id: string | null;
+          type: NotificationType;
+          request_id: string | null;
+          calendar_item_id: string | null;
+          body: string;
+          read_at: Timestamp | null;
+          pushed_at: Timestamp | null;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          recipient_id: string;
+          actor_id?: string | null;
+          type: NotificationType;
+          request_id?: string | null;
+          calendar_item_id?: string | null;
+          body: string;
+          read_at?: Timestamp | null;
+          pushed_at?: Timestamp | null;
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          recipient_id?: string;
+          actor_id?: string | null;
+          type?: NotificationType;
+          request_id?: string | null;
+          calendar_item_id?: string | null;
+          body?: string;
+          read_at?: Timestamp | null;
+          pushed_at?: Timestamp | null;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          endpoint: string;
+          p256dh: string;
+          auth: string;
+          user_agent: string | null;
+          created_at: Timestamp;
+          last_seen_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          endpoint: string;
+          p256dh: string;
+          auth: string;
+          user_agent?: string | null;
+          created_at?: Timestamp;
+          last_seen_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          endpoint?: string;
+          p256dh?: string;
+          auth?: string;
+          user_agent?: string | null;
+          created_at?: Timestamp;
+          last_seen_at?: Timestamp;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -281,6 +363,7 @@ export type Database = {
       request_status: RequestStatus;
       calendar_item_status: CalendarItemStatus;
       social_platform: SocialPlatform;
+      notification_type: NotificationType;
     };
   };
 };

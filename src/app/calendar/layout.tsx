@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../login/actions";
+import { NotificationsBell } from "@/components/notifications-bell";
 import type { UserRole } from "@/lib/supabase/types";
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -62,6 +63,7 @@ export default async function CalendarLayout({
             <span className="hidden sm:inline">
               {name} · {ROLE_LABELS[role]}
             </span>
+            <NotificationsBell />
             {role === "super_admin" && (
               <Link
                 href="/admin"
