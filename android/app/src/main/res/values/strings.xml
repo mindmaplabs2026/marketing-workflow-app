@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Mindmap Workflow</string>
+    <string name="title_activity_main">Mindmap Workflow</string>
+    <string name="package_name">com.mindmaplabs.workflow</string>
+    <string name="custom_url_scheme">com.mindmaplabs.workflow</string>
+</resources>

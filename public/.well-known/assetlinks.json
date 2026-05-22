@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.mindmaplabs.workflow",
+      "sha256_cert_fingerprints": [
+        "74:F7:DD:42:C8:E0:4F:C2:E6:5C:64:70:5A:FB:43:0E:BF:94:8C:7F:B0:9E:C4:B2:67:F6:2B:8E:BC:E9:C7:1D"
+      ]
+    }
+  }
+]
