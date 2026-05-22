@@ -339,10 +339,9 @@ Runs at **02:30 UTC daily**. The endpoint requires the `CRON_SECRET` header to e
 
 ---
 
-## Repositories
+## Repository
 
 - **Primary (organization):** https://github.com/mindmaplabs2026/marketing-workflow-app
-- **Personal mirror:** https://github.com/Abhishek99M/marketing-workflow-app
 
 ---
 
