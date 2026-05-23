@@ -75,6 +75,7 @@ export type Database = {
         Row: {
           id: string;
           full_name: string | null;
+          email: string | null;
           role: UserRole;
           email_pref: NotificationEmailPref;
           password_set: boolean;
@@ -84,6 +85,7 @@ export type Database = {
         Insert: {
           id: string;
           full_name?: string | null;
+          email?: string | null;
           role?: UserRole;
           email_pref?: NotificationEmailPref;
           password_set?: boolean;
@@ -93,6 +95,7 @@ export type Database = {
         Update: {
           id?: string;
           full_name?: string | null;
+          email?: string | null;
           role?: UserRole;
           email_pref?: NotificationEmailPref;
           password_set?: boolean;
@@ -132,6 +135,7 @@ export type Database = {
           title: string;
           description: string | null;
           status: RequestStatus;
+          change_feedback: string | null;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
@@ -144,6 +148,7 @@ export type Database = {
           title: string;
           description?: string | null;
           status?: RequestStatus;
+          change_feedback?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -156,6 +161,7 @@ export type Database = {
           title?: string;
           description?: string | null;
           status?: RequestStatus;
+          change_feedback?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -302,6 +308,7 @@ export type Database = {
           request_id: string | null;
           calendar_item_id: string | null;
           body: string;
+          feedback: string | null;
           read_at: Timestamp | null;
           pushed_at: Timestamp | null;
           emailed_at: Timestamp | null;
@@ -315,6 +322,7 @@ export type Database = {
           request_id?: string | null;
           calendar_item_id?: string | null;
           body: string;
+          feedback?: string | null;
           read_at?: Timestamp | null;
           pushed_at?: Timestamp | null;
           emailed_at?: Timestamp | null;
@@ -328,6 +336,7 @@ export type Database = {
           request_id?: string | null;
           calendar_item_id?: string | null;
           body?: string;
+          feedback?: string | null;
           read_at?: Timestamp | null;
           pushed_at?: Timestamp | null;
           emailed_at?: Timestamp | null;

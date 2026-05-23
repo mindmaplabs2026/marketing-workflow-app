@@ -1,8 +1,8 @@
-import type { RequestStatus } from "@/lib/supabase/types";
+import type { RequestStatus, UserRole } from "@/lib/supabase/types";
 
 export const STATUS_LABELS: Record<RequestStatus, string> = {
   draft: "Draft",
-  pending_admin_approval: "Awaiting your approval",
+  pending_admin_approval: "Pending admin approval",
   approved: "Approved — with design team",
   in_design: "In design",
   design_pending_approval: "Design ready for review",
@@ -10,6 +10,33 @@ export const STATUS_LABELS: Record<RequestStatus, string> = {
   published: "Published",
   archived: "Archived",
 };
+
+/**
+ * Returns a role-aware status label for the request detail page.
+ * Falls back to STATUS_LABELS for statuses that don't vary by role.
+ */
+export function getStatusLabel(
+  status: RequestStatus,
+  role: UserRole,
+  req?: { created_by: string; approved_by: string | null },
+): string {
+  if (status === "pending_admin_approval") {
+    if (role === "school_admin" || role === "super_admin") {
+      return "Awaiting your approval";
+    }
+    return "Submitted — awaiting admin approval";
+  }
+
+  if (
+    status === "approved" &&
+    req &&
+    req.created_by === req.approved_by
+  ) {
+    return "Sent to design team";
+  }
+
+  return STATUS_LABELS[status];
+}
 
 export const STATUS_SHORT: Record<RequestStatus, string> = {
   draft: "Draft",

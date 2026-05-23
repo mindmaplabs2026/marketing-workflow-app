@@ -7,7 +7,7 @@ import type {
   SocialPlatform,
   UserRole,
 } from "@/lib/supabase/types";
-import { STATUS_LABELS, STATUS_BADGE_CLASS } from "../status";
+import { STATUS_BADGE_CLASS, getStatusLabel } from "../status";
 import {
   approveDesign,
   approveRequest,
@@ -21,6 +21,7 @@ import {
 } from "../actions";
 import { UploadDesignForm } from "./upload-design-form";
 import { PublishForm } from "./publish-form";
+import { ConfirmForm } from "@/components/confirm-form";
 
 type RequestRow = {
   id: string;
@@ -65,6 +66,7 @@ type ActivityRow = {
   id: string;
   type: NotificationType;
   body: string;
+  feedback: string | null;
   actor_id: string | null;
   created_at: string;
 };
@@ -170,21 +172,21 @@ export default async function RequestDetailPage({
       .returns<PublishedLinkRow[]>(),
     supabase
       .from("profiles")
-      .select("full_name")
+      .select("full_name, email")
       .eq("id", req.created_by)
-      .single<{ full_name: string | null }>(),
+      .single<{ full_name: string | null; email: string | null }>(),
     req.assigned_designer_id
       ? supabase
           .from("profiles")
-          .select("full_name")
+          .select("full_name, email")
           .eq("id", req.assigned_designer_id)
-          .single<{ full_name: string | null }>()
+          .single<{ full_name: string | null; email: string | null }>()
       : Promise.resolve({ data: null }),
     role === "decision_maker"
       ? Promise.resolve({ data: [] as ActivityRow[] })
       : supabase
           .from("notifications")
-          .select("id, type, body, actor_id, created_at")
+          .select("id, type, body, feedback, actor_id, created_at")
           .eq("request_id", id)
           .order("created_at", { ascending: true })
           .returns<ActivityRow[]>(),
@@ -209,17 +211,17 @@ export default async function RequestDetailPage({
   const activityActorIds = Array.from(
     new Set(activity.map((a) => a.actor_id).filter((x): x is string => !!x)),
   );
-  let activityActors: { id: string; full_name: string | null }[] = [];
+  let activityActors: { id: string; full_name: string | null; email: string | null }[] = [];
   if (activityActorIds.length > 0) {
     const { data } = await supabase
       .from("profiles")
-      .select("id, full_name")
+      .select("id, full_name, email")
       .in("id", activityActorIds)
-      .returns<{ id: string; full_name: string | null }[]>();
+      .returns<{ id: string; full_name: string | null; email: string | null }[]>();
     activityActors = data ?? [];
   }
   const activityActorById = new Map(
-    activityActors.map((p) => [p.id, p.full_name]),
+    activityActors.map((p) => [p.id, p.full_name?.trim() || p.email || null]),
   );
 
   const signedUploadUrls = new Map<string, string>();
@@ -289,11 +291,11 @@ export default async function RequestDetailPage({
           <span
             className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_BADGE_CLASS[req.status]}`}
           >
-            {STATUS_LABELS[req.status]}
+            {getStatusLabel(req.status, role, req)}
           </span>
         </div>
         <p className="mt-1 text-xs text-zinc-500">
-          {creator?.full_name?.trim() || "Someone"}
+          {creator?.full_name?.trim() || creator?.email || "A team member"}
           {schoolRow?.name ? ` · ${schoolRow.name}` : ""} ·{" "}
           {formatDateTime(req.created_at)}
           {designer?.full_name && (
@@ -356,7 +358,7 @@ export default async function RequestDetailPage({
                       {formatBytes(u.file_size)}
                     </span>
                     {canDelete && (
-                      <form action={removeUpload}>
+                      <ConfirmForm action={removeUpload} message="Remove this file? This cannot be undone.">
                         <input type="hidden" name="upload_id" value={u.id} />
                         <input type="hidden" name="request_id" value={req.id} />
                         <input
@@ -370,7 +372,7 @@ export default async function RequestDetailPage({
                         >
                           Remove
                         </button>
-                      </form>
+                      </ConfirmForm>
                     )}
                   </div>
                 </li>
@@ -408,7 +410,7 @@ export default async function RequestDetailPage({
                       {formatDateTime(d.created_at)}
                     </span>
                     {canDelete && (
-                      <form action={removeDesign} className="ml-auto">
+                      <ConfirmForm action={removeDesign} message="Remove this design version? This cannot be undone." className="ml-auto">
                         <input type="hidden" name="design_id" value={d.id} />
                         <input type="hidden" name="request_id" value={req.id} />
                         <input
@@ -422,7 +424,7 @@ export default async function RequestDetailPage({
                         >
                           Remove
                         </button>
-                      </form>
+                      </ConfirmForm>
                     )}
                   </div>
                   {url && isImage && (
@@ -526,7 +528,7 @@ export default async function RequestDetailPage({
             {activity.map((a) => {
               const actorName =
                 (a.actor_id && activityActorById.get(a.actor_id)?.trim()) ||
-                "Someone";
+                "A team member";
               return (
                 <li key={a.id} className="relative text-xs">
                   <span className="absolute -left-[1.3rem] top-1.5 h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-600" />
@@ -536,6 +538,11 @@ export default async function RequestDetailPage({
                     </span>{" "}
                     {ACTIVITY_VERB[a.type]}
                   </p>
+                  {a.feedback && (
+                    <p className="mt-0.5 italic text-zinc-600 dark:text-zinc-400">
+                      &ldquo;{a.feedback}&rdquo;
+                    </p>
+                  )}
                   <p className="text-[10px] text-zinc-500">
                     {formatDateTime(a.created_at)}
                   </p>
@@ -578,11 +585,17 @@ export default async function RequestDetailPage({
           </form>
         )}
         {canSendBack && (
-          <form action={sendBackForChanges}>
+          <form action={sendBackForChanges} className="w-full">
             <input type="hidden" name="id" value={req.id} />
+            <textarea
+              name="feedback"
+              placeholder="What should be changed? (optional)"
+              rows={2}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+            />
             <button
               type="submit"
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="mt-2 rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               Send back for changes
             </button>
@@ -611,18 +624,24 @@ export default async function RequestDetailPage({
           </form>
         )}
         {canRequestDesignChanges && (
-          <form action={requestDesignChanges}>
+          <form action={requestDesignChanges} className="w-full">
             <input type="hidden" name="id" value={req.id} />
+            <textarea
+              name="feedback"
+              placeholder="What should the designer change? (optional)"
+              rows={2}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+            />
             <button
               type="submit"
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="mt-2 rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               Request changes
             </button>
           </form>
         )}
         {canArchive && (
-          <form action={archiveRequest} className="ml-auto">
+          <ConfirmForm action={archiveRequest} message="Archive this request? It will be moved to the archived section." className="ml-auto">
             <input type="hidden" name="id" value={req.id} />
             <button
               type="submit"
@@ -630,7 +649,7 @@ export default async function RequestDetailPage({
             >
               Archive
             </button>
-          </form>
+          </ConfirmForm>
         )}
       </section>
     </div>

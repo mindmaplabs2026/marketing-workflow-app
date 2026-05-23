@@ -41,10 +41,17 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+
+    const formData = new FormData(e.currentTarget);
+    const title = String(formData.get("title") ?? "").trim();
+    if (!title) {
+      setError("Give the request a short title.");
+      return;
+    }
+
     setBusy(true);
 
     try {
-      const formData = new FormData(e.currentTarget);
       const created = await createRequest({}, formData);
       if (created.error || !created.requestId) {
         setError(created.error ?? "Could not create request.");

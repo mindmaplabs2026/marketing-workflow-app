@@ -31,7 +31,7 @@ export default async function AdminLayout({
     .single<{ role: UserRole; full_name: string | null }>();
 
   if (profile?.role !== "super_admin") {
-    redirect("/");
+    redirect("/?denied=1");
   }
 
   return (

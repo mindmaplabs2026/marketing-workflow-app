@@ -198,6 +198,7 @@ export async function approveRequest(formData: FormData) {
 
 export async function sendBackForChanges(formData: FormData) {
   const id = String(formData.get("id") ?? "");
+  const feedback = String(formData.get("feedback") ?? "").trim();
   if (!id) throw new Error("Missing id.");
 
   const actor = await loadActor();
@@ -215,7 +216,10 @@ export async function sendBackForChanges(formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase
     .from("requests")
-    .update({ status: "draft" })
+    .update({
+      status: "draft",
+      change_feedback: feedback || null,
+    })
     .eq("id", id);
   if (error) throw new Error(error.message);
 
@@ -246,8 +250,16 @@ export async function archiveRequest(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
+  // Mark all unread notifications for this request as read
+  await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("request_id", id)
+    .is("read_at", null);
+
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
+  revalidatePath("/notifications");
   redirect("/requests");
 }
 
@@ -426,6 +438,7 @@ export async function approveDesign(formData: FormData) {
 
 export async function requestDesignChanges(formData: FormData) {
   const id = String(formData.get("id") ?? "");
+  const feedback = String(formData.get("feedback") ?? "").trim();
   if (!id) throw new Error("Missing id.");
 
   const actor = await loadActor();
@@ -443,7 +456,10 @@ export async function requestDesignChanges(formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase
     .from("requests")
-    .update({ status: "changes_requested" })
+    .update({
+      status: "changes_requested",
+      change_feedback: feedback || null,
+    })
     .eq("id", id);
   if (error) throw new Error(error.message);
 

@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteSchool, renameSchool } from "../actions";
 import { removeMember } from "./actions";
 import { AddMemberForm } from "./add-member-form";
+import { ConfirmForm } from "@/components/confirm-form";
 import type { UserRole } from "@/lib/supabase/types";
 
 type SchoolRow = { id: string; name: string };
@@ -144,7 +145,7 @@ export default async function SchoolDetailPage({
                       {email} · {ROLE_LABELS[role]}
                     </p>
                   </div>
-                  <form action={removeMember}>
+                  <ConfirmForm action={removeMember} message={`Remove ${name} from this school?`}>
                     <input type="hidden" name="member_id" value={m.id} />
                     <input type="hidden" name="school_id" value={school.id} />
                     <button
@@ -153,7 +154,7 @@ export default async function SchoolDetailPage({
                     >
                       Remove
                     </button>
-                  </form>
+                  </ConfirmForm>
                 </li>
               );
             })}
@@ -173,7 +174,7 @@ export default async function SchoolDetailPage({
         <h2 className="text-sm font-medium text-red-600 dark:text-red-400">
           Danger zone
         </h2>
-        <form action={deleteSchool}>
+        <ConfirmForm action={deleteSchool} message={`Delete "${school.name}"? This will remove all member assignments and cannot be undone.`}>
           <input type="hidden" name="id" value={school.id} />
           <button
             type="submit"
@@ -181,7 +182,7 @@ export default async function SchoolDetailPage({
           >
             Delete school
           </button>
-        </form>
+        </ConfirmForm>
         <p className="text-xs text-zinc-500">
           Deletes the school and removes all member assignments. Requests and
           calendar items linked to this school are blocked from deletion
