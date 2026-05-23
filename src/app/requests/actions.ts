@@ -545,3 +545,26 @@ export async function publishRequest(formData: FormData) {
   revalidatePath("/calendar");
   await dispatchPendingPushes();
 }
+
+export async function addComment(formData: FormData) {
+  const requestId = String(formData.get("request_id") ?? "");
+  const body = String(formData.get("body") ?? "").trim();
+  if (!requestId) throw new Error("Missing request_id.");
+  if (!body) return;
+
+  const actor = await loadActor();
+  if ("error" in actor) throw new Error(actor.error);
+  if (actor.role === "decision_maker") {
+    throw new Error("Decision makers cannot comment.");
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("comments").insert({
+    request_id: requestId,
+    author_id: actor.userId,
+    body,
+  });
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/requests/${requestId}`);
+}

@@ -9,6 +9,7 @@ import type {
 } from "@/lib/supabase/types";
 import { STATUS_BADGE_CLASS, getStatusLabel } from "../status";
 import {
+  addComment,
   approveDesign,
   approveRequest,
   archiveRequest,
@@ -22,6 +23,8 @@ import {
 import { UploadDesignForm } from "./upload-design-form";
 import { PublishForm } from "./publish-form";
 import { ConfirmForm } from "@/components/confirm-form";
+import { CommentThread } from "@/components/comment-thread";
+import { ProgressTracker } from "@/components/progress-tracker";
 
 type RequestRow = {
   id: string;
@@ -250,6 +253,40 @@ export default async function RequestDetailPage({
     }
   }
 
+  // -- Comments --
+  const { data: rawComments } = await supabase
+    .from("comments")
+    .select("id, author_id, body, created_at")
+    .eq("request_id", id)
+    .order("created_at", { ascending: true })
+    .returns<{ id: string; author_id: string; body: string; created_at: string }[]>();
+
+  const commentAuthorIds = Array.from(
+    new Set((rawComments ?? []).map((c) => c.author_id)),
+  );
+  let commentAuthors: { id: string; full_name: string | null; email: string | null; role: UserRole }[] = [];
+  if (commentAuthorIds.length > 0) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, full_name, email, role")
+      .in("id", commentAuthorIds)
+      .returns<{ id: string; full_name: string | null; email: string | null; role: UserRole }[]>();
+    commentAuthors = data ?? [];
+  }
+  const commentAuthorMap = new Map(
+    commentAuthors.map((p) => [p.id, { name: p.full_name?.trim() || p.email || "A team member", role: p.role }]),
+  );
+
+  const comments = (rawComments ?? []).map((c) => ({
+    id: c.id,
+    authorName: commentAuthorMap.get(c.author_id)?.name ?? "A team member",
+    authorRole: commentAuthorMap.get(c.author_id)?.role ?? "teacher",
+    body: c.body,
+    createdAt: c.created_at,
+  }));
+
+  const canComment = role !== "decision_maker";
+
   const isCreator = req.created_by === user.id;
   const isReviewer = role === "school_admin" || role === "super_admin";
   const isAssignedDesigner =
@@ -303,6 +340,8 @@ export default async function RequestDetailPage({
           )}
         </p>
       </div>
+
+      <ProgressTracker status={req.status} />
 
       {req.description && (
         <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
@@ -551,6 +590,14 @@ export default async function RequestDetailPage({
             })}
           </ol>
         </section>
+      )}
+
+      {canComment && (
+        <CommentThread
+          comments={comments}
+          requestId={req.id}
+          addCommentAction={addComment}
+        />
       )}
 
       <section className="flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-6 dark:border-zinc-800">

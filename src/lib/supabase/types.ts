@@ -377,6 +377,30 @@ export type Database = {
         };
         Relationships: [];
       };
+      comments: {
+        Row: {
+          id: string;
+          request_id: string;
+          author_id: string;
+          body: string;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          request_id: string;
+          author_id: string;
+          body: string;
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          request_id?: string;
+          author_id?: string;
+          body?: string;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
