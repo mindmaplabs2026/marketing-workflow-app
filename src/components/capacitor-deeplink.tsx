@@ -10,7 +10,15 @@ declare global {
   }
 }
 
+// appUrlOpen and getLaunchUrl can both deliver the same URL on a
+// cold-started intent. Running exchangeCodeForSession twice burns the
+// PKCE verifier on the first call and the second one fails noisily.
+const handledUrls = new Set<string>();
+
 function handleDeepLink(url: string) {
+  if (handledUrls.has(url)) return;
+  handledUrls.add(url);
+
   try {
     // Magic-link callback over our custom scheme. PKCE verifier lives
     // in the WebView's storage, so we exchange the code on the client
