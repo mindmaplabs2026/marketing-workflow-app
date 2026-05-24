@@ -20,6 +20,16 @@ export function CapacitorDeepLink() {
     import("@capacitor/app").then(({ App }) => {
       App.addListener("appUrlOpen", (event) => {
         try {
+          // Magic-link callback over our custom scheme. PKCE verifier
+          // lives in the WebView's storage, so we exchange the code on
+          // the client at /auth/native-callback rather than the server
+          // /auth/callback route used by web browsers.
+          if (event.url.startsWith("com.mindmaplabs.workflow://")) {
+            const incoming = new URL(event.url);
+            window.location.href = `/auth/native-callback${incoming.search}`;
+            return;
+          }
+
           const incoming = new URL(event.url);
           const path = incoming.pathname + incoming.search + incoming.hash;
           if (path && path !== "/") {

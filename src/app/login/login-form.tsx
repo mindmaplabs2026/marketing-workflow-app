@@ -3,12 +3,66 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { signInWithMagicLink, type ActionState } from "./actions";
+import { createClient } from "@/lib/supabase/client";
+
+declare global {
+  interface Window {
+    Capacitor?: {
+      isNativePlatform?: () => boolean;
+    };
+  }
+}
 
 const initialState: ActionState = {};
 
+const NATIVE_REDIRECT_URL = "com.mindmaplabs.workflow://auth/callback";
+
+function isNativePlatform(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean(window.Capacitor?.isNativePlatform?.());
+}
+
+async function signInWithMagicLinkNative(email: string): Promise<ActionState> {
+  const supabase = createClient();
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: false,
+      emailRedirectTo: NATIVE_REDIRECT_URL,
+    },
+  });
+
+  if (error) {
+    if (
+      /signups?\s+not\s+allowed/i.test(error.message) ||
+      /user\s+not\s+found/i.test(error.message)
+    ) {
+      return {
+        error:
+          "We couldn't find an account for that email. Ask a super admin to invite you.",
+      };
+    }
+    return { error: error.message };
+  }
+
+  return { success: true };
+}
+
+async function dispatchSignIn(
+  prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  if (isNativePlatform()) {
+    const email = String(formData.get("email") ?? "").trim();
+    if (!email) return { error: "Enter your email address." };
+    return signInWithMagicLinkNative(email);
+  }
+  return signInWithMagicLink(prev, formData);
+}
+
 export function LoginForm({ initialError }: { initialError?: string }) {
   const [state, formAction, pending] = useActionState(
-    signInWithMagicLink,
+    dispatchSignIn,
     initialState,
   );
 
