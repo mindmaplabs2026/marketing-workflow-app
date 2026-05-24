@@ -10,5 +10,5 @@ export default async function NativeCallbackPage({
   if (!code) {
     redirect("/login?error=missing_code");
   }
-  return <ExchangeForm code={code} />;
+  return <ExchangeForm />;
 }

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
-export function ExchangeForm({ code }: { code: string }) {
+export function ExchangeForm() {
   const router = useRouter();
   const ran = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -14,15 +14,22 @@ export function ExchangeForm({ code }: { code: string }) {
     if (ran.current) return;
     ran.current = true;
 
+    // createBrowserClient defaults detectSessionInUrl to true, so the
+    // first auth call awaits _initialize() which itself exchanges any
+    // PKCE ?code= in the URL and consumes the verifier. Calling
+    // exchangeCodeForSession ourselves would race that internal call
+    // and the loser would see "PKCE code verifier not found in
+    // storage." getSession waits for init to settle, then tells us
+    // whether a session was actually established.
     const supabase = createClient();
-    supabase.auth.exchangeCodeForSession(code).then(({ error: exchangeError }) => {
-      if (exchangeError) {
-        setError(exchangeError.message);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        router.replace("/");
         return;
       }
-      router.replace("/");
+      setError("Sign-in didn't complete. Request a new link and try again.");
     });
-  }, [code, router]);
+  }, [router]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
