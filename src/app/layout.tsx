@@ -1,7 +1,22 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import { CapacitorDeepLink } from "@/components/capacitor-deeplink";
+import { AppShell } from "@/components/app-shell";
+
+const SHELL_FREE_PREFIXES = [
+  "/login",
+  "/auth/callback",
+  "/auth/native-callback",
+  "/setup-password",
+];
+
+function isShellFree(pathname: string): boolean {
+  return SHELL_FREE_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,11 +43,15 @@ export const viewport: Viewport = {
   themeColor: "#18181b",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const headerList = await headers();
+  const pathname = headerList.get("x-pathname") ?? "/";
+  const shellFree = isShellFree(pathname);
+
   return (
     <html
       lang="en"
@@ -40,7 +59,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <CapacitorDeepLink />
-        {children}
+        {shellFree ? children : <AppShell>{children}</AppShell>}
       </body>
     </html>
   );

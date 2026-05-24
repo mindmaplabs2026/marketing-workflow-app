@@ -1,17 +1,6 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "../login/actions";
-import { NotificationsBell } from "@/components/notifications-bell";
 import type { UserRole } from "@/lib/supabase/types";
-
-const ROLE_LABELS: Record<UserRole, string> = {
-  super_admin: "Super admin",
-  designer: "Designer",
-  school_admin: "School admin",
-  teacher: "Teacher",
-  decision_maker: "Decision maker",
-};
 
 export default async function RequestsLayout({
   children,
@@ -26,68 +15,16 @@ export default async function RequestsLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, full_name")
+    .select("role")
     .eq("id", user.id)
-    .single<{ role: UserRole; full_name: string | null }>();
+    .single<{ role: UserRole }>();
 
   const role: UserRole = profile?.role ?? "teacher";
   if (role === "decision_maker") redirect("/feed");
-  const name = profile?.full_name?.trim() || user.email || "";
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
-      <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-4">
-            <Link
-              href="/requests"
-              className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
-            >
-              Requests
-            </Link>
-            <Link
-              href="/calendar"
-              className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Calendar
-            </Link>
-            <Link
-              href="/feed"
-              className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Published
-            </Link>
-          </div>
-          <div className="flex items-center gap-3 text-xs text-zinc-600 dark:text-zinc-400">
-            <span className="hidden sm:inline">
-              {name} · {ROLE_LABELS[role]}
-            </span>
-            <NotificationsBell />
-            {role === "super_admin" && (
-              <Link
-                href="/admin"
-                className="rounded-md border border-zinc-300 px-2 py-1 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                Admin
-              </Link>
-            )}
-            <form action={signOut}>
-              <button
-                type="submit"
-                className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
-          {children}
-        </div>
-      </div>
+    <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
+      {children}
     </div>
   );
 }

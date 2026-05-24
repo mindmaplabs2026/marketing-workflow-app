@@ -1,7 +1,5 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "./login/actions";
-import { NotificationsBell } from "@/components/notifications-bell";
 import type { UserRole } from "@/lib/supabase/types";
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -22,6 +20,47 @@ const ROLE_NEXT_STEP: Record<UserRole, string> = {
     "See the month's plan and every post that's gone live for your school.",
 };
 
+type Card = {
+  href: string;
+  title: string;
+  body: string;
+  emphasis?: boolean;
+};
+
+function cardsFor(role: UserRole): Card[] {
+  switch (role) {
+    case "super_admin":
+      return [
+        { href: "/requests", title: "Open requests", body: "Cross-client view of every request.", emphasis: true },
+        { href: "/calendar", title: "Monthly calendar", body: "Plan + approve across every school." },
+        { href: "/feed", title: "Published posts", body: "Everything that's live, with links." },
+        { href: "/admin", title: "Manage agency", body: "Add schools, invite users, assign designers." },
+      ];
+    case "designer":
+      return [
+        { href: "/requests", title: "Open requests", body: "See requests across your assigned schools.", emphasis: true },
+        { href: "/calendar", title: "Monthly calendar", body: "Plan the month's posts and slots." },
+        { href: "/feed", title: "Published posts", body: "Everything that's live, with links." },
+      ];
+    case "school_admin":
+      return [
+        { href: "/requests", title: "Open requests", body: "Approve drafts, see what's in flight.", emphasis: true },
+        { href: "/calendar", title: "Monthly calendar", body: "Review the month's plan; approve what should go out." },
+        { href: "/feed", title: "Published posts", body: "Every post that's gone live." },
+      ];
+    case "teacher":
+      return [
+        { href: "/requests", title: "Open requests", body: "Raise a new one or check your drafts.", emphasis: true },
+        { href: "/feed", title: "Published posts", body: "Every post that's gone live for your school." },
+      ];
+    case "decision_maker":
+      return [
+        { href: "/calendar", title: "Monthly calendar", body: "What's coming up for your school.", emphasis: true },
+        { href: "/feed", title: "Published posts", body: "Every post that's gone live, with links." },
+      ];
+  }
+}
+
 export default async function Home({
   searchParams,
 }: {
@@ -34,7 +73,6 @@ export default async function Home({
     data: { user },
   } = await supabase.auth.getUser();
 
-  // The proxy guard guarantees `user` is non-null on protected routes.
   if (!user) return null;
 
   const { data: profile } = await supabase
@@ -44,122 +82,51 @@ export default async function Home({
     .single<{ full_name: string | null; role: UserRole }>();
 
   const role: UserRole = profile?.role ?? "teacher";
+  const displayName = profile?.full_name?.trim() || user.email || "";
+  const cards = cardsFor(role);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
-      <div className="w-full max-w-xl space-y-6">
+    <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
+      <div className="space-y-6">
         {params.denied && (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
             You don&apos;t have access to that page.
           </p>
         )}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">
-              Signed in
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-              {profile?.full_name?.trim() || user.email}
-            </h1>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              {user.email} · {ROLE_LABELS[role]}
-            </p>
-          </div>
-          <NotificationsBell />
-        </div>
 
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-            What&apos;s next for you
+        <div>
+          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">
+            Welcome back
           </p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-3xl">
+            {displayName}
+          </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            {ROLE_NEXT_STEP[role]}
+            {ROLE_LABELS[role]} · {ROLE_NEXT_STEP[role]}
           </p>
         </div>
 
-        {(role === "teacher" ||
-          role === "school_admin" ||
-          role === "designer" ||
-          role === "super_admin") && (
-          <Link
-            href="/requests"
-            className="block rounded-lg border border-zinc-900 bg-zinc-900 p-4 text-white transition-colors hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-          >
-            <p className="text-sm font-medium">Open requests →</p>
-            <p className="mt-1 text-xs opacity-80">
-              {role === "school_admin"
-                ? "Approve drafts, see what's in flight."
-                : role === "teacher"
-                  ? "Raise a new one or check your drafts."
-                  : role === "designer"
-                    ? "See requests across your assigned schools."
-                    : "Cross-client view of every request."}
-            </p>
-          </Link>
-        )}
-
-        {(role === "designer" ||
-          role === "school_admin" ||
-          role === "super_admin") && (
-          <Link
-            href="/calendar"
-            className="block rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
-          >
-            <p className="text-sm font-medium">Monthly calendar →</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              {role === "designer"
-                ? "Plan the month's posts and slots."
-                : role === "school_admin"
-                  ? "Review the month's plan; approve what should go out."
-                  : "Plan + approve across every school."}
-            </p>
-          </Link>
-        )}
-
-        {role === "decision_maker" && (
-          <>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {cards.map((card) => (
             <Link
-              href="/calendar"
-              className="block rounded-lg border border-zinc-900 bg-zinc-900 p-4 text-white transition-colors hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              key={card.href}
+              href={card.href}
+              className={`block rounded-lg border p-4 transition-colors ${
+                card.emphasis
+                  ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
+              }`}
             >
-              <p className="text-sm font-medium">Monthly calendar →</p>
-              <p className="mt-1 text-xs opacity-80">
-                What's coming up for your school.
+              <p className="text-sm font-medium">{card.title} →</p>
+              <p
+                className={`mt-1 text-xs ${card.emphasis ? "opacity-80" : "text-zinc-500 dark:text-zinc-400"}`}
+              >
+                {card.body}
               </p>
             </Link>
-            <Link
-              href="/feed"
-              className="block rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
-            >
-              <p className="text-sm font-medium">Published posts →</p>
-              <p className="mt-1 text-xs text-zinc-500">
-                Every post that's gone live, with links.
-              </p>
-            </Link>
-          </>
-        )}
-
-        {role === "super_admin" && (
-          <Link
-            href="/admin"
-            className="block rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
-          >
-            <p className="text-sm font-medium">Manage agency →</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Add schools, invite users, assign designers.
-            </p>
-          </Link>
-        )}
-
-        <form action={signOut}>
-          <button
-            type="submit"
-            className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            Sign out
-          </button>
-        </form>
+          ))}
+        </div>
       </div>
-    </main>
+    </div>
   );
 }
