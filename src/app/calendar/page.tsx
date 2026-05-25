@@ -241,7 +241,7 @@ export default async function CalendarPage({
           {DAY_HEADERS.map((d) => (
             <div
               key={d}
-              className="px-2 py-1 text-center text-[10px] font-medium uppercase tracking-wider text-zinc-500"
+              className="px-2 py-2 text-center text-[11px] font-semibold text-zinc-600 dark:text-zinc-400"
             >
               {d}
             </div>
@@ -254,17 +254,19 @@ export default async function CalendarPage({
             return (
               <div
                 key={cell.ymd}
-                className={`min-h-24 border-b border-r border-zinc-100 p-1.5 last:border-r-0 dark:border-zinc-800 ${
-                  cell.isCurrentMonth
-                    ? "bg-white dark:bg-zinc-900"
-                    : "bg-zinc-50/60 text-zinc-400 dark:bg-zinc-950/40"
+                className={`min-h-24 border-b border-r border-zinc-100 p-2 last:border-r-0 dark:border-zinc-800 sm:min-h-32 ${
+                  isToday
+                    ? "bg-violet-50/40 dark:bg-violet-900/10"
+                    : cell.isCurrentMonth
+                      ? "bg-white dark:bg-zinc-900"
+                      : "bg-zinc-50/60 text-zinc-400 dark:bg-zinc-950/40"
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span
-                    className={`text-[11px] font-medium ${
+                    className={`text-xs font-semibold ${
                       isToday
-                        ? "rounded-full bg-violet-600 px-1.5 py-0.5 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                        ? "inline-flex h-6 w-6 items-center justify-center rounded-full bg-violet-600 text-white"
                         : cell.isCurrentMonth
                           ? "text-zinc-700 dark:text-zinc-300"
                           : "text-zinc-400"
@@ -275,33 +277,33 @@ export default async function CalendarPage({
                   {canPlan && cell.isCurrentMonth && (
                     <Link
                       href={`/calendar/new?school=${selectedSchool.id}&date=${cell.ymd}`}
-                      className="text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                      className="rounded text-zinc-400 transition hover:bg-zinc-100 hover:text-violet-600 dark:hover:bg-zinc-800 dark:hover:text-violet-400"
                       aria-label="Plan on this day"
                     >
-                      <span className="text-xs leading-none">+</span>
+                      <span className="inline-flex h-5 w-5 items-center justify-center text-sm leading-none">+</span>
                     </Link>
                   )}
                 </div>
-                <ul className="mt-1 space-y-0.5">
+                <ul className="mt-1.5 space-y-1">
                   {cellItems.slice(0, 3).map((it) => (
                     <li key={it.id}>
                       <Link
                         href={`/calendar/${it.id}`}
-                        className={`flex items-center gap-1 truncate rounded px-1 py-0.5 text-[10px] hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                        className={`flex items-center gap-1.5 truncate rounded px-1.5 py-1 text-[11px] leading-tight transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
                           it.status === "cancelled"
-                            ? "line-through text-zinc-400"
+                            ? "text-zinc-400 line-through"
                             : "text-zinc-700 dark:text-zinc-300"
                         }`}
                       >
                         <span
-                          className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${CAL_STATUS_DOT_CLASS[it.status]}`}
+                          className={`inline-block h-2 w-2 shrink-0 rounded-full ${CAL_STATUS_DOT_CLASS[it.status]}`}
                         />
                         <span className="truncate">{it.title}</span>
                       </Link>
                     </li>
                   ))}
                   {cellItems.length > 3 && (
-                    <li className="px-1 text-[10px] text-zinc-500">
+                    <li className="px-1.5 text-[11px] font-medium text-violet-600 dark:text-violet-400">
                       +{cellItems.length - 3} more
                     </li>
                   )}
