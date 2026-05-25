@@ -50,7 +50,7 @@ function cardsFor(role: UserRole): Card[] {
       ];
     case "teacher":
       return [
-        { href: "/requests", title: "Open requests", body: "Raise a new one or check your drafts.", emphasis: true },
+        { href: "/requests", title: "Raise requests", body: "Raise a new one or check your drafts.", emphasis: true },
         { href: "/feed", title: "Published posts", body: "Every post that's gone live for your school." },
       ];
     case "decision_maker":
