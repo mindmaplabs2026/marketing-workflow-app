@@ -75,6 +75,8 @@ export async function createRequest(
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const schoolId = String(formData.get("school_id") ?? "");
+  const requestType = String(formData.get("request_type") ?? "").trim() || null;
+  const dueDate = String(formData.get("due_date") ?? "").trim() || null;
 
   if (!title) return { error: "Give the request a short title." };
   if (!schoolId) return { error: "Pick a school." };
@@ -103,6 +105,8 @@ export async function createRequest(
       description: description || null,
       status: initialStatus,
       approved_by: initialStatus === "approved" ? actor.userId : null,
+      request_type: requestType as import("@/lib/supabase/types").RequestType | null,
+      due_date: dueDate,
     })
     .select("id")
     .single<{ id: string }>();
@@ -546,6 +550,56 @@ export async function publishRequest(formData: FormData) {
   await dispatchPendingPushes();
 }
 
+export async function bulkApproveRequests(formData: FormData) {
+  const ids = formData.getAll("ids").map(String).filter(Boolean);
+  if (ids.length === 0) return;
+
+  const actor = await loadActor();
+  if ("error" in actor) throw new Error(actor.error);
+  if (actor.role !== "school_admin" && actor.role !== "super_admin") {
+    throw new Error("Only a school admin can approve.");
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("requests")
+    .update({ status: "approved", approved_by: actor.userId })
+    .in("id", ids)
+    .eq("status", "pending_admin_approval");
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/requests");
+  await dispatchPendingPushes();
+}
+
+export async function reassignDesigner(formData: FormData) {
+  const requestId = String(formData.get("request_id") ?? "");
+  const designerId = String(formData.get("designer_id") ?? "");
+  if (!requestId || !designerId) throw new Error("Missing fields.");
+
+  const actor = await loadActor();
+  if ("error" in actor) throw new Error(actor.error);
+  if (actor.role !== "super_admin") {
+    throw new Error("Only a super admin can reassign.");
+  }
+
+  const req = await loadRequestForUpdate(requestId);
+  if ("error" in req) throw new Error(req.error);
+  if (req.status !== "in_design" && req.status !== "changes_requested" && req.status !== "design_pending_approval") {
+    throw new Error("Can only reassign requests that are in design.");
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("requests")
+    .update({ assigned_designer_id: designerId })
+    .eq("id", requestId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+}
+
 export async function addComment(formData: FormData) {
   const requestId = String(formData.get("request_id") ?? "");
   const body = String(formData.get("body") ?? "").trim();
@@ -554,8 +608,14 @@ export async function addComment(formData: FormData) {
 
   const actor = await loadActor();
   if ("error" in actor) throw new Error(actor.error);
+
+  // Decision makers can only comment on published requests (feed feedback)
   if (actor.role === "decision_maker") {
-    throw new Error("Decision makers cannot comment.");
+    const req = await loadRequestForUpdate(requestId);
+    if ("error" in req) throw new Error(req.error);
+    if (req.status !== "published") {
+      throw new Error("Decision makers can only give feedback on published posts.");
+    }
   }
 
   const supabase = await createClient();
@@ -567,4 +627,5 @@ export async function addComment(formData: FormData) {
   if (error) throw new Error(error.message);
 
   revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/feed");
 }

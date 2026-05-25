@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSessionUser } from "@/lib/supabase/auth";
+import { createClient } from "@/lib/supabase/server";
 import type { UserRole } from "@/lib/supabase/types";
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -75,6 +76,39 @@ export default async function Home({
   const cards = cardsFor(session.role);
   const role = session.role;
 
+  // Quick stats for teacher/designer home pages
+  const supabase = await createClient();
+  let homeStats: { label: string; value: number }[] | null = null;
+  if (role === "teacher" || role === "designer") {
+    const { data: myRequests } = await supabase
+      .from("requests")
+      .select("status")
+      .returns<{ status: string }[]>();
+    if (myRequests) {
+      if (role === "teacher") {
+        const drafts = myRequests.filter((r) => r.status === "draft").length;
+        const pending = myRequests.filter((r) => r.status === "pending_admin_approval").length;
+        const published = myRequests.filter((r) => r.status === "published").length;
+        homeStats = [
+          { label: "Drafts", value: drafts },
+          { label: "Awaiting approval", value: pending },
+          { label: "Published", value: published },
+        ];
+      } else {
+        const queue = myRequests.filter((r) => r.status === "approved").length;
+        const inDesign = myRequests.filter(
+          (r) => r.status === "in_design" || r.status === "changes_requested",
+        ).length;
+        const review = myRequests.filter((r) => r.status === "design_pending_approval").length;
+        homeStats = [
+          { label: "In queue", value: queue },
+          { label: "In design", value: inDesign },
+          { label: "Awaiting review", value: review },
+        ];
+      }
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
       <div className="space-y-6">
@@ -95,6 +129,22 @@ export default async function Home({
             {ROLE_LABELS[role]} · {ROLE_NEXT_STEP[role]}
           </p>
         </div>
+
+        {homeStats && (
+          <div className="grid grid-cols-3 gap-3">
+            {homeStats.map((s) => (
+              <div
+                key={s.label}
+                className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
+              >
+                <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+                  {s.value}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-500">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {cards.map((card) => (

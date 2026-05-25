@@ -143,6 +143,44 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
         />
       </div>
 
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label
+            htmlFor="request_type"
+            className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Type <span className="text-zinc-400">(optional)</span>
+          </label>
+          <select
+            id="request_type"
+            name="request_type"
+            defaultValue=""
+            className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          >
+            <option value="">Select type...</option>
+            <option value="social_post">Social post</option>
+            <option value="poster">Poster</option>
+            <option value="newsletter">Newsletter</option>
+            <option value="video">Video</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div>
+          <label
+            htmlFor="due_date"
+            className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Due date <span className="text-zinc-400">(optional)</span>
+          </label>
+          <input
+            id="due_date"
+            name="due_date"
+            type="date"
+            className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          />
+        </div>
+      </div>
+
       <div>
         <label
           htmlFor="description"

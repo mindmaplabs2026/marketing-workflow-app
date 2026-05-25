@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/auth";
 import type { SocialPlatform } from "@/lib/supabase/types";
+import { addComment } from "../requests/actions";
+import { FeedFeedback } from "@/components/feed-feedback";
 
 type PublishedRequest = {
   id: string;
@@ -24,6 +26,11 @@ type LinkRow = {
   platform: SocialPlatform;
   url: string;
   posted_at: string;
+};
+type DesignRow = {
+  request_id: string;
+  storage_path: string;
+  version: number;
 };
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
@@ -93,7 +100,7 @@ export default async function FeedPage() {
   const schoolIds = Array.from(new Set(requestList.map((r) => r.school_id)));
   const requestIds = requestList.map((r) => r.id);
 
-  const [{ data: schools }, { data: uploads }, { data: links }] =
+  const [{ data: schools }, { data: uploads }, { data: links }, { data: designs }] =
     await Promise.all([
       supabase
         .from("schools")
@@ -111,6 +118,12 @@ export default async function FeedPage() {
         .in("request_id", requestIds)
         .order("posted_at", { ascending: true })
         .returns<LinkRow[]>(),
+      supabase
+        .from("designs")
+        .select("request_id, storage_path, version")
+        .in("request_id", requestIds)
+        .order("version", { ascending: false })
+        .returns<DesignRow[]>(),
     ]);
 
   const schoolById = new Map((schools ?? []).map((s) => [s.id, s.name]));
@@ -127,6 +140,14 @@ export default async function FeedPage() {
     linksByRequest.set(l.request_id, list);
   }
 
+  // Latest design per request (for thumbnail)
+  const latestDesignByRequest = new Map<string, DesignRow>();
+  for (const d of designs ?? []) {
+    if (!latestDesignByRequest.has(d.request_id)) {
+      latestDesignByRequest.set(d.request_id, d);
+    }
+  }
+
   const allUploadPaths = (uploads ?? []).map((u) => u.storage_path);
   const signedUrlByPath = new Map<string, string>();
   if (allUploadPaths.length > 0) {
@@ -135,6 +156,18 @@ export default async function FeedPage() {
       .createSignedUrls(allUploadPaths, SIGNED_URL_TTL_SECONDS);
     for (const e of signed ?? []) {
       if (e.signedUrl && e.path) signedUrlByPath.set(e.path, e.signedUrl);
+    }
+  }
+
+  // Signed URLs for design thumbnails
+  const designPaths = Array.from(latestDesignByRequest.values()).map((d) => d.storage_path);
+  const signedDesignUrlByPath = new Map<string, string>();
+  if (designPaths.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from("designs")
+      .createSignedUrls(designPaths, SIGNED_URL_TTL_SECONDS);
+    for (const e of signed ?? []) {
+      if (e.signedUrl && e.path) signedDesignUrlByPath.set(e.path, e.signedUrl);
     }
   }
 
@@ -156,6 +189,10 @@ export default async function FeedPage() {
           const schoolName = schoolById.get(r.school_id) ?? "";
           const photos = uploadsByRequest.get(r.id) ?? [];
           const photoLinks = linksByRequest.get(r.id) ?? [];
+          const latestDesign = latestDesignByRequest.get(r.id);
+          const designUrl = latestDesign
+            ? signedDesignUrlByPath.get(latestDesign.storage_path)
+            : null;
           return (
             <li
               key={r.id}
@@ -174,6 +211,17 @@ export default async function FeedPage() {
                   </p>
                 )}
               </div>
+
+              {designUrl && (
+                <div className="border-t border-zinc-200 dark:border-zinc-800">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={designUrl}
+                    alt={`Final design for ${r.title}`}
+                    className="w-full max-h-80 object-contain bg-zinc-100 dark:bg-zinc-950"
+                  />
+                </div>
+              )}
 
               {photos.length > 0 && (
                 <ul className="flex gap-1 overflow-x-auto border-t border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-950/40">
@@ -231,16 +279,20 @@ export default async function FeedPage() {
                 </ul>
               )}
 
-              {role !== "decision_maker" && (
-                <div className="border-t border-zinc-200 px-4 py-2 dark:border-zinc-800">
+              <div className="flex items-center gap-4 border-t border-zinc-200 px-4 py-2 dark:border-zinc-800">
+                {role !== "decision_maker" && (
                   <Link
                     href={`/requests/${r.id}`}
                     className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
                   >
                     Open request →
                   </Link>
-                </div>
-              )}
+                )}
+                <FeedFeedback
+                  requestId={r.id}
+                  addFeedbackAction={addComment}
+                />
+              </div>
             </li>
           );
         })}

@@ -65,16 +65,28 @@ const TONE_HEADER: Record<"amber" | "sky" | "indigo" | "emerald", string> = {
     "border-emerald-200 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200",
 };
 
-const STALE_DAY_THRESHOLD = 5;
+/** Thresholds per status — requests stuck longer than these get a red badge. */
+const STALE_THRESHOLDS: Partial<Record<RequestStatus, number>> = {
+  pending_admin_approval: 2,
+  approved: 3,
+  in_design: 5,
+  design_pending_approval: 2,
+  changes_requested: 3,
+};
+const DEFAULT_STALE_DAYS = 5;
 
 function daysBetween(a: string, b: string): number {
   const ms = new Date(b).getTime() - new Date(a).getTime();
   return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
 }
 
-function ageLabel(updatedAt: string): { text: string; stale: boolean } {
+function ageLabel(
+  updatedAt: string,
+  status: RequestStatus,
+): { text: string; stale: boolean } {
   const days = daysBetween(updatedAt, new Date().toISOString());
-  const stale = days >= STALE_DAY_THRESHOLD;
+  const threshold = STALE_THRESHOLDS[status] ?? DEFAULT_STALE_DAYS;
+  const stale = days >= threshold;
   if (days === 0) return { text: "today", stale: false };
   if (days === 1) return { text: "1d", stale };
   return { text: `${days}d`, stale };
@@ -237,7 +249,7 @@ export default async function PipelinePage({
               </header>
               <ul className="flex-1 space-y-2 p-2">
                 {items.map((r) => {
-                  const age = ageLabel(r.updated_at);
+                  const age = ageLabel(r.updated_at, r.status);
                   const designerName =
                     (r.assigned_designer_id &&
                       nameById.get(r.assigned_designer_id)?.trim()) ||

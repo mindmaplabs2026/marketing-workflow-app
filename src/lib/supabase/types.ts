@@ -24,6 +24,13 @@ export type CalendarItemStatus =
   | "fulfilled"
   | "cancelled";
 
+export type RequestType =
+  | "social_post"
+  | "poster"
+  | "newsletter"
+  | "video"
+  | "other";
+
 export type SocialPlatform =
   | "facebook"
   | "instagram"
@@ -135,6 +142,8 @@ export type Database = {
           title: string;
           description: string | null;
           status: RequestStatus;
+          request_type: RequestType | null;
+          due_date: DateOnly | null;
           change_feedback: string | null;
           created_at: Timestamp;
           updated_at: Timestamp;
@@ -148,6 +157,8 @@ export type Database = {
           title: string;
           description?: string | null;
           status?: RequestStatus;
+          request_type?: RequestType | null;
+          due_date?: DateOnly | null;
           change_feedback?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;
@@ -161,6 +172,8 @@ export type Database = {
           title?: string;
           description?: string | null;
           status?: RequestStatus;
+          request_type?: RequestType | null;
+          due_date?: DateOnly | null;
           change_feedback?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;

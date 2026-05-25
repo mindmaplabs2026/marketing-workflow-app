@@ -197,7 +197,16 @@ export async function inviteUser(
       html,
       text,
     });
-    if (sendErr) return { error: sendErr.message };
+    if (sendErr) {
+      const isSandbox =
+        /testing.*email|sandbox|verify.*domain/i.test(sendErr.message);
+      if (isSandbox) {
+        return {
+          error: `User created but invite email was not sent — Resend is in sandbox mode. To send emails to other addresses, verify a domain at resend.com/domains and update EMAIL_FROM. The user can be added to a school manually at /admin/schools.`,
+        };
+      }
+      return { error: sendErr.message };
+    }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Email send failed." };
   }

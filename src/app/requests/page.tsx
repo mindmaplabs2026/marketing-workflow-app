@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/auth";
 import type { RequestStatus } from "@/lib/supabase/types";
 import { STATUS_SHORT, STATUS_BADGE_CLASS, STATUS_DOT_CLASS } from "./status";
+import { bulkApproveRequests } from "./actions";
+import { BulkApproveSection } from "@/components/bulk-approve";
 
 type RequestListRow = {
   id: string;
@@ -26,7 +28,37 @@ function formatDate(iso: string): string {
   });
 }
 
-export default async function RequestsListPage() {
+const PROGRESS_PERCENT: Record<RequestStatus, number> = {
+  draft: 10,
+  pending_admin_approval: 25,
+  approved: 40,
+  in_design: 55,
+  design_pending_approval: 70,
+  changes_requested: 60,
+  published: 100,
+  archived: 100,
+};
+
+const PROGRESS_COLOR: Record<RequestStatus, string> = {
+  draft: "bg-zinc-300 dark:bg-zinc-600",
+  pending_admin_approval: "bg-amber-400",
+  approved: "bg-sky-400",
+  in_design: "bg-sky-500",
+  design_pending_approval: "bg-amber-400",
+  changes_requested: "bg-orange-400",
+  published: "bg-emerald-500",
+  archived: "bg-zinc-300 dark:bg-zinc-600",
+};
+
+export default async function RequestsListPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ school?: string; q?: string }>;
+}) {
+  const params = await searchParams;
+  const schoolFilter = params.school ?? "";
+  const searchQuery = params.q?.trim().toLowerCase() ?? "";
+
   const session = await getSessionUser();
   if (!session) redirect("/login");
   const { role } = session;
@@ -51,8 +83,19 @@ export default async function RequestsListPage() {
       .returns<SchoolLite[]>(),
   ]);
 
-  const requests = requestsRes.data ?? [];
-  const schoolsById = new Map((schoolsRes.data ?? []).map((s) => [s.id, s.name]));
+  const allRequests = requestsRes.data ?? [];
+  const schoolsList = schoolsRes.data ?? [];
+  const schoolsById = new Map(schoolsList.map((s) => [s.id, s.name]));
+
+  let requests = schoolFilter
+    ? allRequests.filter((r) => r.school_id === schoolFilter)
+    : allRequests;
+  if (searchQuery) {
+    requests = requests.filter((r) =>
+      r.title.toLowerCase().includes(searchQuery),
+    );
+  }
+  const showSchoolFilter = isDesigner && schoolsList.length > 1;
 
   const creatorIds = Array.from(new Set(requests.map((r) => r.created_by)));
   let creators: ProfileLite[] = [];
@@ -67,6 +110,7 @@ export default async function RequestsListPage() {
   const creatorById = new Map(creators.map((p) => [p.id, p.full_name]));
 
   const needsYou: RequestListRow[] = [];
+  const myWork: RequestListRow[] = []; // designer's assigned in-progress work
   const myDrafts: RequestListRow[] = [];
   const inFlight: RequestListRow[] = [];
   const published: RequestListRow[] = [];
@@ -104,9 +148,11 @@ export default async function RequestsListPage() {
         queued = true;
       } else if (
         mine &&
-        (r.status === "in_design" || r.status === "changes_requested")
+        (r.status === "in_design" ||
+          r.status === "changes_requested" ||
+          r.status === "design_pending_approval")
       ) {
-        needsYou.push(r);
+        myWork.push(r);
         queued = true;
       }
     }
@@ -177,6 +223,68 @@ export default async function RequestsListPage() {
         </p>
       )}
 
+      <form className="flex items-center gap-2">
+        <input
+          name="q"
+          type="search"
+          placeholder="Search requests..."
+          defaultValue={searchQuery}
+          className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        />
+        {schoolFilter && (
+          <input type="hidden" name="school" value={schoolFilter} />
+        )}
+        <button
+          type="submit"
+          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          Search
+        </button>
+        {searchQuery && (
+          <Link
+            href={schoolFilter ? `/requests?school=${schoolFilter}` : "/requests"}
+            className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Clear
+          </Link>
+        )}
+      </form>
+
+      {showSchoolFilter && (
+        <form className="flex items-center gap-2">
+          <label htmlFor="school" className="text-xs font-medium text-zinc-500">
+            School
+          </label>
+          <select
+            id="school"
+            name="school"
+            defaultValue={schoolFilter}
+            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          >
+            <option value="">All schools</option>
+            {schoolsList.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            Filter
+          </button>
+          {schoolFilter && (
+            <Link
+              href="/requests"
+              className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            >
+              Clear
+            </Link>
+          )}
+        </form>
+      )}
+
       {snapshot && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Stat label="Published (30d)" value={snapshot.publishedLast30} />
@@ -196,7 +304,25 @@ export default async function RequestsListPage() {
         </div>
       )}
 
-      <Section title="Needs you" items={needsYou} variant="urgent" />
+      {isReviewer && needsYou.length > 0 ? (
+        <BulkApproveSection
+          title="Needs you"
+          items={needsYou.map((r) => ({
+            id: r.id,
+            title: r.title,
+            status: r.status,
+            creatorName: creatorById.get(r.created_by)?.trim() || "someone",
+            schoolName: schoolsById.get(r.school_id) ?? "",
+            date: r.created_at,
+          }))}
+          approveAction={bulkApproveRequests}
+        />
+      ) : (
+        <Section title="Needs you" items={needsYou} variant="urgent" />
+      )}
+      {myWork.length > 0 && (
+        <Section title="My work" items={myWork} variant="urgent" />
+      )}
       <Section title="My drafts" items={myDrafts} variant="muted" />
       <Section title="In flight" items={inFlight} />
       <Section title="Published" items={published} />
@@ -252,7 +378,7 @@ export default async function RequestsListPage() {
               creatorById.get(r.created_by)?.trim() || "someone";
             const schoolName = schoolsById.get(r.school_id) ?? "";
             return (
-              <li key={r.id}>
+              <li key={r.id} className="relative">
                 <Link
                   href={`/requests/${r.id}`}
                   className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
@@ -274,6 +400,12 @@ export default async function RequestsListPage() {
                     {STATUS_SHORT[r.status]}
                   </span>
                 </Link>
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-100 dark:bg-zinc-800">
+                  <div
+                    className={`h-full ${PROGRESS_COLOR[r.status]} transition-all`}
+                    style={{ width: `${PROGRESS_PERCENT[r.status]}%` }}
+                  />
+                </div>
               </li>
             );
           })}

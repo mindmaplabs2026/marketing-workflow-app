@@ -14,6 +14,7 @@ import {
   approveRequest,
   archiveRequest,
   pickUpRequest,
+  reassignDesigner,
   removeDesign,
   removeUpload,
   requestDesignChanges,
@@ -35,8 +36,18 @@ type RequestRow = {
   title: string;
   description: string | null;
   status: RequestStatus;
+  request_type: string | null;
+  due_date: string | null;
   created_at: string;
   updated_at: string;
+};
+
+const REQUEST_TYPE_LABELS: Record<string, string> = {
+  social_post: "Social post",
+  poster: "Poster",
+  newsletter: "Newsletter",
+  video: "Video",
+  other: "Other",
 };
 
 type UploadRow = {
@@ -135,7 +146,7 @@ export default async function RequestDetailPage({
   const { data: req } = await supabase
     .from("requests")
     .select(
-      "id, school_id, created_by, assigned_designer_id, approved_by, title, description, status, created_at, updated_at",
+      "id, school_id, created_by, assigned_designer_id, approved_by, title, description, status, request_type, due_date, created_at, updated_at",
     )
     .eq("id", id)
     .single<RequestRow>();
@@ -287,6 +298,22 @@ export default async function RequestDetailPage({
 
   const canComment = role !== "decision_maker";
 
+  // Designers list for reassignment (super_admin only)
+  const canReassign =
+    role === "super_admin" &&
+    (req.status === "in_design" || req.status === "changes_requested" || req.status === "design_pending_approval");
+  let designerOptions: { id: string; name: string }[] = [];
+  if (canReassign) {
+    const { data: designers } = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .eq("role", "designer")
+      .returns<{ id: string; full_name: string | null; email: string | null }[]>();
+    designerOptions = (designers ?? [])
+      .filter((d) => d.id !== req.assigned_designer_id)
+      .map((d) => ({ id: d.id, name: d.full_name?.trim() || d.email || d.id }));
+  }
+
   const isCreator = req.created_by === user.id;
   const isReviewer = role === "school_admin" || role === "super_admin";
   const isAssignedDesigner =
@@ -342,6 +369,49 @@ export default async function RequestDetailPage({
       </div>
 
       <ProgressTracker status={req.status} />
+
+      {canReassign && designerOptions.length > 0 && (
+        <form action={reassignDesigner} className="flex items-center gap-2">
+          <input type="hidden" name="request_id" value={req.id} />
+          <span className="text-xs text-zinc-500">Reassign to:</span>
+          <select
+            name="designer_id"
+            required
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          >
+            {designerOptions.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            className="rounded-md border border-zinc-300 bg-white px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+          >
+            Reassign
+          </button>
+        </form>
+      )}
+
+      {(req.request_type || req.due_date) && (
+        <div className="flex flex-wrap gap-3 text-xs text-zinc-500">
+          {req.request_type && (
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+              {REQUEST_TYPE_LABELS[req.request_type] ?? req.request_type}
+            </span>
+          )}
+          {req.due_date && (
+            <span className={`rounded-full px-2 py-0.5 font-medium ${
+              new Date(req.due_date) < new Date()
+                ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+            }`}>
+              Due: {new Date(req.due_date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+            </span>
+          )}
+        </div>
+      )}
 
       {req.description && (
         <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
