@@ -32,6 +32,42 @@ const ROLE_LABEL: Record<UserRole, string> = {
   decision_maker: "Decision maker",
 };
 
+export async function deleteUser(formData: FormData) {
+  const userId = String(formData.get("user_id") ?? "");
+  if (!userId) throw new Error("Missing user_id.");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { data: callerProfile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single<{ role: UserRole }>();
+  if (callerProfile?.role !== "super_admin") {
+    throw new Error("Only super admins can delete users.");
+  }
+  if (user.id === userId) {
+    throw new Error("You can't delete yourself.");
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.deleteUser(userId);
+  if (error) {
+    if (/violates foreign key|restrict/i.test(error.message)) {
+      throw new Error(
+        "Can't delete — this user has created requests, designs, or calendar items. Reassign or archive their work first.",
+      );
+    }
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admin/users");
+}
+
 export async function updateUserRole(formData: FormData) {
   const userId = String(formData.get("user_id") ?? "");
   const role = String(formData.get("role") ?? "") as UserRole;
@@ -130,7 +166,6 @@ export async function inviteUser(
       email,
       options: {
         data: { full_name: fullName },
-        redirectTo: `${appUrl()}/auth/callback`,
       },
     });
   if (linkErr || !linkData?.user) {
@@ -141,10 +176,12 @@ export async function inviteUser(
   }
 
   const newUserId = linkData.user.id;
-  const actionLink = linkData.properties?.action_link;
-  if (!actionLink) {
-    return { error: "Supabase returned no link to email." };
+  const hashedToken = linkData.properties?.hashed_token;
+  if (!hashedToken) {
+    return { error: "Supabase returned no token to email." };
   }
+  const nextPath = isInternal ? "/setup-password" : "/";
+  const actionLink = `${appUrl()}/auth/confirm?token_hash=${hashedToken}&type=invite&next=${encodeURIComponent(nextPath)}`;
 
   // Promote the auto-created profile to the chosen role. Internal users
   // (designer / super_admin) need a password — flag them so the proxy
