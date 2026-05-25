@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
 import type { UserRole } from "@/lib/supabase/types";
 
 type NavItem = {
@@ -77,7 +76,7 @@ const NAV: NavItem[] = [
     href: "/calendar",
     label: "Calendar",
     icon: <CalendarIcon />,
-    roles: ["super_admin", "designer", "school_admin", "decision_maker"],
+    roles: ["super_admin", "designer", "school_admin", "teacher", "decision_maker"],
   },
   {
     href: "/feed",
@@ -104,71 +103,33 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppSidebar({
-  role,
-  open,
-  onClose,
-}: {
-  role: UserRole;
-  open: boolean;
-  onClose: () => void;
-}) {
+export function AppSidebar({ role }: { role: UserRole }) {
   const pathname = usePathname();
   const items = NAV.filter((item) => item.roles.includes(role));
 
-  // Close drawer after navigation on mobile.
-  useEffect(() => {
-    onClose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
-
-  // Lock body scroll while drawer is open.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
   return (
-    <>
-      {/* Mobile backdrop */}
-      {open && (
-        <button
-          type="button"
-          aria-label="Close menu"
-          onClick={onClose}
-          className="fixed inset-0 z-30 bg-zinc-900/40 md:hidden"
-        />
-      )}
-
-      <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 transform border-r border-zinc-200 bg-white transition-transform duration-200 dark:border-zinc-800 dark:bg-zinc-900 md:sticky md:top-14 md:z-auto md:h-[calc(100vh-3.5rem)] md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
-      >
-        <nav className="flex h-full flex-col overflow-y-auto px-3 py-4">
-          {items.map((item) => {
-            const active = isActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition ${
-                  active
-                    ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
-                    : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                }`}
-              >
-                <span className={active ? "" : "text-zinc-500 dark:text-zinc-400"}>
-                  {item.icon}
-                </span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-      </aside>
-    </>
+    <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 md:block">
+      <nav className="flex h-full flex-col overflow-y-auto px-3 py-4">
+        {items.map((item) => {
+          const active = isActive(pathname, item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition ${
+                active
+                  ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              }`}
+            >
+              <span className={active ? "" : "text-zinc-500 dark:text-zinc-400"}>
+                {item.icon}
+              </span>
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+    </aside>
   );
 }

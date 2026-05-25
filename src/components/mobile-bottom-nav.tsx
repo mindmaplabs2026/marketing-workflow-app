@@ -42,6 +42,14 @@ function FeedIcon() {
     </svg>
   );
 }
+function AdminIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5">
+      <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.6"/>
+      <path d="M5 20c1-3.5 3.7-5.5 7-5.5s6 2 7 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    </svg>
+  );
+}
 
 const TABS: NavItem[] = [
   {
@@ -60,13 +68,19 @@ const TABS: NavItem[] = [
     href: "/calendar",
     label: "Calendar",
     icon: <CalendarIcon />,
-    roles: ["super_admin", "designer", "school_admin", "decision_maker"],
+    roles: ["super_admin", "designer", "school_admin", "teacher", "decision_maker"],
   },
   {
     href: "/feed",
     label: "Published",
     icon: <FeedIcon />,
     roles: ["super_admin", "designer", "school_admin", "teacher", "decision_maker"],
+  },
+  {
+    href: "/admin",
+    label: "Admin",
+    icon: <AdminIcon />,
+    roles: ["super_admin"],
   },
 ];
 
