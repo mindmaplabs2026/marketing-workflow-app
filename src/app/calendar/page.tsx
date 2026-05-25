@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/auth";
 import type {
   CalendarItemStatus,
-  UserRole,
 } from "@/lib/supabase/types";
 import { CAL_STATUS_DOT_CLASS } from "./status";
 
@@ -88,19 +88,10 @@ export default async function CalendarPage({
   searchParams: Promise<{ school?: string; month?: string }>;
 }) {
   const { school: schoolParam, month: monthParam } = await searchParams;
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+  const { id: userId, role } = session;
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single<{ role: UserRole }>();
-  const role: UserRole = profile?.role ?? "teacher";
 
   let schools: SchoolLite[] = [];
   if (role === "super_admin") {
@@ -114,7 +105,7 @@ export default async function CalendarPage({
     const { data } = await supabase
       .from("school_members")
       .select("school_id, schools ( id, name )")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .returns<MembershipRow[]>();
     schools = (data ?? [])
       .map((m) => m.schools)

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/auth";
 import type { UserRole } from "@/lib/supabase/types";
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -67,23 +67,13 @@ export default async function Home({
   searchParams: Promise<{ denied?: string }>;
 }) {
   const params = await searchParams;
-  const supabase = await createClient();
+  const session = await getSessionUser();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  if (!session) return null;
 
-  if (!user) return null;
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, role")
-    .eq("id", user.id)
-    .single<{ full_name: string | null; role: UserRole }>();
-
-  const role: UserRole = profile?.role ?? "teacher";
-  const displayName = profile?.full_name?.trim() || user.email || "";
-  const cards = cardsFor(role);
+  const displayName = session.full_name?.trim() || session.email;
+  const cards = cardsFor(session.role);
+  const role = session.role;
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-10">

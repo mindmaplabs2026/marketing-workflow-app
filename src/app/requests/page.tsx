@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { RequestStatus, UserRole } from "@/lib/supabase/types";
+import { getSessionUser } from "@/lib/supabase/auth";
+import type { RequestStatus } from "@/lib/supabase/types";
 import { STATUS_SHORT, STATUS_BADGE_CLASS } from "./status";
 
 type RequestListRow = {
@@ -26,20 +27,11 @@ function formatDate(iso: string): string {
 }
 
 export default async function RequestsListPage() {
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+  const { role } = session;
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single<{ role: UserRole }>();
-
-  const role: UserRole = profile?.role ?? "teacher";
   const canRaise = role === "teacher" || role === "school_admin";
   const isReviewer = role === "school_admin" || role === "super_admin";
   const isDesigner = role === "designer" || role === "super_admin";
@@ -90,7 +82,7 @@ export default async function RequestsListPage() {
       continue;
     }
     if (r.status === "draft") {
-      if (r.created_by === user.id) myDrafts.push(r);
+      if (r.created_by === session.id) myDrafts.push(r);
       else if (isReviewer) inFlight.push(r);
       continue;
     }
@@ -106,7 +98,7 @@ export default async function RequestsListPage() {
       }
     }
     if (!queued && isDesigner) {
-      const mine = r.assigned_designer_id === user.id;
+      const mine = r.assigned_designer_id === session.id;
       if (r.status === "approved") {
         needsYou.push(r);
         queued = true;

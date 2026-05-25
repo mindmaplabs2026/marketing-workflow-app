@@ -1,17 +1,16 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/auth";
 
 export async function NotificationsBell() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  const session = await getSessionUser();
+  if (!session) return null;
 
+  const supabase = await createClient();
   const { count } = await supabase
     .from("notifications")
     .select("id", { count: "exact", head: true })
-    .eq("recipient_id", user.id)
+    .eq("recipient_id", session.id)
     .is("read_at", null);
 
   const unread = count ?? 0;

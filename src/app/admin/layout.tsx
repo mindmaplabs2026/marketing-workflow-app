@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
-import type { UserRole } from "@/lib/supabase/types";
+import { getSessionUser } from "@/lib/supabase/auth";
 
 const NAV = [
   { href: "/admin/pipeline", label: "Pipeline" },
@@ -14,21 +13,9 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single<{ role: UserRole }>();
-
-  if (profile?.role !== "super_admin") {
-    redirect("/?denied=1");
-  }
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+  if (session.role !== "super_admin") redirect("/?denied=1");
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">

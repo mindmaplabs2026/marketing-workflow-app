@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/auth";
 import type {
   NotificationEmailPref,
   NotificationType,
   RequestStatus,
-  UserRole,
 } from "@/lib/supabase/types";
 import {
   batchAct,
@@ -67,31 +67,28 @@ function formatRelative(iso: string): string {
 }
 
 export default async function NotificationsPage() {
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+  const { id: userId, role } = session;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
 
-  const [{ data: rows, error }, profileRes] = await Promise.all([
+  const [{ data: rows, error }, prefRes] = await Promise.all([
     supabase
       .from("notifications")
       .select(
         "id, type, body, read_at, created_at, request_id, calendar_item_id, actor_id",
       )
-      .eq("recipient_id", user.id)
+      .eq("recipient_id", userId)
       .order("created_at", { ascending: false })
       .limit(100)
       .returns<NotificationRow[]>(),
     supabase
       .from("profiles")
-      .select("email_pref, role")
-      .eq("id", user.id)
-      .single<{ email_pref: NotificationEmailPref; role: UserRole }>(),
+      .select("email_pref")
+      .eq("id", userId)
+      .single<{ email_pref: NotificationEmailPref }>(),
   ]);
-  const emailPref: NotificationEmailPref =
-    profileRes.data?.email_pref ?? "daily";
-  const role: UserRole = profileRes.data?.role ?? "teacher";
+  const emailPref: NotificationEmailPref = prefRes.data?.email_pref ?? "daily";
   const isReviewer = role === "school_admin" || role === "super_admin";
 
   const notifications = rows ?? [];

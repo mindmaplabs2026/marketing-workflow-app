@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { SocialPlatform, UserRole } from "@/lib/supabase/types";
+import { getSessionUser } from "@/lib/supabase/auth";
+import type { SocialPlatform } from "@/lib/supabase/types";
 
 type PublishedRequest = {
   id: string;
@@ -46,19 +47,10 @@ function formatDate(iso: string): string {
 }
 
 export default async function FeedPage() {
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+  const { role } = session;
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single<{ role: UserRole }>();
-  const role: UserRole = profile?.role ?? "teacher";
 
   const { data: requests } = await supabase
     .from("requests")
