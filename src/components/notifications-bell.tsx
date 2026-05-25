@@ -22,7 +22,7 @@ export async function NotificationsBell() {
       aria-label={
         unread > 0 ? `Notifications (${unread} unread)` : "Notifications"
       }
-      className="relative inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-violet-700 dark:hover:text-zinc-100"
+      className="relative inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
     >
       <svg
         viewBox="0 0 24 24"

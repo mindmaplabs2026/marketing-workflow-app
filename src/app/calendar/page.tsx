@@ -174,7 +174,7 @@ export default async function CalendarPage({
           </h1>
           <Link
             href={`${monthBase}&month=${toMonthParam(prev.year, prev.month)}`}
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-violet-700"
+            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             ←
           </Link>
@@ -186,13 +186,13 @@ export default async function CalendarPage({
           </Link>
           <Link
             href={monthBase}
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-violet-700"
+            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Today
           </Link>
           <Link
             href={`${monthBase}&month=${toMonthParam(next.year, next.month)}`}
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-violet-700"
+            className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             →
           </Link>
@@ -219,7 +219,7 @@ export default async function CalendarPage({
               </select>
               <button
                 type="submit"
-                className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-violet-700"
+                className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
                 Go
               </button>
@@ -287,7 +287,7 @@ export default async function CalendarPage({
                     <li key={it.id}>
                       <Link
                         href={`/calendar/${it.id}`}
-                        className={`flex items-center gap-1 truncate rounded px-1 py-0.5 text-[10px] hover:bg-zinc-100 dark:hover:bg-violet-700 ${
+                        className={`flex items-center gap-1 truncate rounded px-1 py-0.5 text-[10px] hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
                           it.status === "cancelled"
                             ? "line-through text-zinc-400"
                             : "text-zinc-700 dark:text-zinc-300"

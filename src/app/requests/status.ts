@@ -57,13 +57,24 @@ export const STATUS_BADGE_CLASS: Record<RequestStatus, string> = {
   approved:
     "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-200",
   in_design:
-    "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-200",
+    "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-200",
   design_pending_approval:
     "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200",
   changes_requested:
-    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200",
+    "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-200",
   published:
     "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200",
   archived:
     "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500",
+};
+
+export const STATUS_DOT_CLASS: Record<RequestStatus, string> = {
+  draft: "bg-zinc-400 dark:bg-zinc-500",
+  pending_admin_approval: "bg-amber-500",
+  approved: "bg-sky-500",
+  in_design: "bg-violet-500",
+  design_pending_approval: "bg-amber-500",
+  changes_requested: "bg-rose-500",
+  published: "bg-emerald-500",
+  archived: "bg-zinc-300 dark:bg-zinc-700",
 };

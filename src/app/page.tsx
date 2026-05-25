@@ -104,7 +104,7 @@ export default async function Home({
               className={`block rounded-lg border p-4 transition-all ${
                 card.emphasis
                   ? "border-violet-600 bg-gradient-to-br from-violet-600 to-violet-700 text-white shadow-sm hover:shadow-md hover:from-violet-700 hover:to-violet-800 dark:border-violet-500"
-                  : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-violet-700"
+                  : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
               }`}
             >
               <p className="text-sm font-medium">{card.title} →</p>

@@ -47,7 +47,7 @@ export default async function SchoolsPage() {
             <li key={school.id}>
               <Link
                 href={`/admin/schools/${school.id}`}
-                className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-violet-700"
+                className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800"
               >
                 <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
                   {school.name}

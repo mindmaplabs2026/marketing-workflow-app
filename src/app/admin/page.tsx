@@ -32,7 +32,7 @@ export default async function AdminHome() {
       <div className="grid grid-cols-2 gap-4">
         <Link
           href="/admin/schools"
-          className="rounded-lg border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700 dark:hover:bg-violet-700"
+          className="rounded-lg border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
         >
           <p className="text-3xl font-semibold text-zinc-900 dark:text-zinc-50">
             {schoolCount ?? 0}
@@ -43,7 +43,7 @@ export default async function AdminHome() {
         </Link>
         <Link
           href="/admin/users"
-          className="rounded-lg border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700 dark:hover:bg-violet-700"
+          className="rounded-lg border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
         >
           <p className="text-3xl font-semibold text-zinc-900 dark:text-zinc-50">
             {userCount ?? 0}
