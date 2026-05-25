@@ -204,12 +204,18 @@ export default async function RequestsListPage() {
 
       {requests.length === 0 && (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
+              <path d="M9 4h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" stroke="currentColor" strokeWidth="1.6"/>
+              <path d="M10 9h4M10 13h4M10 17h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+          </div>
           <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-            Nothing here yet.
+            {canRaise ? "Raise your first request." : "Nothing here yet."}
           </p>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
             {canRaise
-              ? "Raise your first request to get the loop started."
+              ? "Tap \"New request\" to send it over to the design team."
               : "Once your team raises requests, you'll see them here."}
           </p>
         </div>

@@ -74,11 +74,16 @@ export default async function FeedPage() {
           </p>
         </div>
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
+              <path d="M3 11l18-7-7 18-2.5-7.5L3 11z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
+            </svg>
+          </div>
           <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-            Nothing published yet.
+            Your first post lands here.
           </p>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Once the design team publishes a post, it'll show up here.
+            Once the design team publishes, you'll see it with the live link.
           </p>
         </div>
       </div>

@@ -191,11 +191,17 @@ export default async function NotificationsPage() {
 
       {notifications.length === 0 && !error && (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
+              <path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
+              <path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+          </div>
           <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-            Nothing yet.
+            All quiet.
           </p>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            When something needs your attention you will see it here.
+            When something needs you, it'll pop up here.
           </p>
         </div>
       )}

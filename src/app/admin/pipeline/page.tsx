@@ -277,8 +277,8 @@ export default async function PipelinePage({
                   );
                 })}
                 {items.length === 0 && (
-                  <li className="rounded-md border border-dashed border-zinc-300 bg-transparent p-3 text-center text-[10px] text-zinc-500 dark:border-zinc-700">
-                    Empty
+                  <li className="rounded-md border border-dashed border-zinc-300 bg-transparent p-3 text-center text-[10px] text-zinc-400 dark:border-zinc-700 dark:text-zinc-500">
+                    All clear
                   </li>
                 )}
               </ul>
