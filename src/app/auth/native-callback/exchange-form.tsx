@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 export function ExchangeForm() {
-  const router = useRouter();
   const ran = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,14 +20,40 @@ export function ExchangeForm() {
     // storage." getSession waits for init to settle, then tells us
     // whether a session was actually established.
     const supabase = createClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        router.replace("/");
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
+        setError("Sign-in didn't complete. Request a new link and try again.");
         return;
       }
-      setError("Sign-in didn't complete. Request a new link and try again.");
+
+      // Hand the tokens to the server so it can write the auth cookies
+      // via Set-Cookie. Without this the WebView's document.cookie has
+      // the session but the very next SSR navigation doesn't see it and
+      // the AppShell renders without chrome.
+      try {
+        const res = await fetch("/api/auth/native-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+          }),
+        });
+        if (!res.ok) {
+          setError("Sign-in didn't complete. Request a new link and try again.");
+          return;
+        }
+      } catch {
+        setError("Sign-in didn't complete. Request a new link and try again.");
+        return;
+      }
+
+      // Full reload so the new server-side cookies are used for the
+      // first SSR render of "/". router.replace would reuse the cached
+      // RSC payload that was fetched without the cookie.
+      window.location.replace("/");
     });
-  }, [router]);
+  }, []);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 dark:bg-zinc-950">

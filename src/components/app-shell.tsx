@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { AppShellChrome } from "./app-shell-chrome";
 import { NotificationsBell } from "./notifications-bell";
@@ -17,10 +19,15 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // No session — render the page directly. The proxy will redirect
-  // anywhere protected before we get here; pages that need a user do
-  // their own check.
-  if (!user) return <>{children}</>;
+  // No session — bounce to /login. The proxy already redirects most
+  // protected paths, but the native (Capacitor) PKCE flow can land us
+  // here once with no cookies yet; rendering bare children would show
+  // a chrome-less home page with no way to navigate.
+  if (!user) {
+    const pathname = (await headers()).get("x-pathname") ?? "/";
+    const next = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname)}`;
+    redirect(`/login${next}`);
+  }
 
   const { data: profile } = await supabase
     .from("profiles")

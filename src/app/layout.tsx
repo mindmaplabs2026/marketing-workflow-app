@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 import { CapacitorDeepLink } from "@/components/capacitor-deeplink";
+import { CapacitorNative } from "@/components/capacitor-native";
 import { AppShell } from "@/components/app-shell";
 
 const SHELL_FREE_PREFIXES = [
@@ -41,6 +42,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#18181b",
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({
@@ -59,6 +61,7 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <CapacitorDeepLink />
+        <CapacitorNative />
         {shellFree ? children : <AppShell>{children}</AppShell>}
       </body>
     </html>

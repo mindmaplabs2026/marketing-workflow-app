@@ -8,6 +8,19 @@ const config: CapacitorConfig = {
     url: 'https://marketing-workflow-app-ht3l.vercel.app',
     androidScheme: 'https',
   },
+  plugins: {
+    StatusBar: {
+      style: 'LIGHT',
+      backgroundColor: '#18181b',
+      overlaysWebView: false,
+    },
+    SplashScreen: {
+      launchShowDuration: 1000,
+      backgroundColor: '#18181b',
+      androidSplashResourceName: 'splash',
+      showSpinner: false,
+    },
+  },
 };
 
 export default config;
