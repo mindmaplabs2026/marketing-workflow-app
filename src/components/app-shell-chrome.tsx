@@ -31,7 +31,7 @@ export function AppShellChrome({
           href="/"
           className="flex items-center gap-2 text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
         >
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-zinc-900 text-xs font-bold text-white dark:bg-zinc-50 dark:text-zinc-900">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-violet-600 to-violet-700 text-xs font-bold text-white shadow-sm">
             M
           </span>
           <span>Mindmap Workflow</span>

@@ -118,8 +118,8 @@ export function AppSidebar({ role }: { role: UserRole }) {
               href={item.href}
               className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition ${
                 active
-                  ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
-                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  ? "bg-violet-600 text-white shadow-sm dark:bg-violet-500"
+                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-violet-700"
               }`}
             >
               <span className={active ? "" : "text-zinc-500 dark:text-zinc-400"}>

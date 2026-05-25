@@ -165,7 +165,7 @@ export default async function NotificationsPage() {
           <form action={markAllRead}>
             <button
               type="submit"
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-violet-700"
             >
               Mark all read
             </button>
@@ -239,7 +239,7 @@ function PendingApprovalsForm({
               n.type === "request_submitted_for_approval" ? "Request" : "Design";
             return (
               <li key={n.id}>
-                <label className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                <label className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-violet-700">
                   <input
                     type="checkbox"
                     name="notification_id"
@@ -273,7 +273,7 @@ function PendingApprovalsForm({
             type="submit"
             name="action"
             value="send_back"
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-violet-700"
           >
             Send back selected
           </button>
@@ -308,7 +308,7 @@ function EmailPrefCard({ current }: { current: NotificationEmailPref }) {
             className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm transition-colors ${
               current === opt.value
                 ? "border-zinc-900 bg-zinc-50 dark:border-zinc-50 dark:bg-zinc-800"
-                : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+                : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-violet-700"
             }`}
           >
             <input
@@ -328,7 +328,7 @@ function EmailPrefCard({ current }: { current: NotificationEmailPref }) {
         ))}
         <button
           type="submit"
-          className="mt-1 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="mt-1 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
         >
           Save
         </button>
@@ -370,7 +370,7 @@ function NotificationList({
                 <input type="hidden" name="id" value={n.id} />
                 <button
                   type="submit"
-                  className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
+                  className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-violet-700 ${
                     n.read_at ? "" : "bg-amber-50/40 dark:bg-amber-900/10"
                   }`}
                 >

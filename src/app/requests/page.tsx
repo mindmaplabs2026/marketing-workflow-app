@@ -164,7 +164,7 @@ export default async function RequestsListPage() {
         {canRaise && (
           <Link
             href="/requests/new"
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
           >
             + Raise
           </Link>
@@ -249,7 +249,7 @@ export default async function RequestsListPage() {
               <li key={r.id}>
                 <Link
                   href={`/requests/${r.id}`}
-                  className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-violet-700"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">

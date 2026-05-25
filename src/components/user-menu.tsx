@@ -81,7 +81,7 @@ export function UserMenu({
           <form action={signOut} className="p-2">
             <button
               type="submit"
-              className="block w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="block w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-violet-700"
             >
               Sign out
             </button>

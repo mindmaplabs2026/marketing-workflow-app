@@ -163,7 +163,7 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
               type="button"
               onClick={enable}
               disabled={pending}
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-zinc-800 disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-60 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
             >
               {pending ? "Enabling…" : "Enable"}
             </button>
@@ -173,7 +173,7 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
               type="button"
               onClick={disable}
               disabled={pending}
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-violet-700"
             >
               {pending ? "…" : "Disable"}
             </button>

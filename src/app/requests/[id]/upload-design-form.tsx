@@ -88,7 +88,7 @@ export function UploadDesignForm({ requestId }: { requestId: string }) {
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={busy}
-        className="inline-flex items-center gap-2 rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        className="inline-flex items-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
       >
         {busy ? (progress ?? "Uploading…") : "Upload design"}
       </button>
