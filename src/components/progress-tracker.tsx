@@ -14,8 +14,21 @@ function stepIndex(status: RequestStatus): number {
   return STEPS.findIndex((s) => s.status.includes(status));
 }
 
-export function ProgressTracker({ status }: { status: RequestStatus }) {
-  const current = stepIndex(status);
+export function ProgressTracker({
+  status,
+  awaitingPublish = false,
+}: {
+  status: RequestStatus;
+  awaitingPublish?: boolean;
+}) {
+  // When a design has been approved but the designer hasn't published yet,
+  // the schema keeps status="in_design" but the workflow is past Review.
+  // Show the tracker as if Review is complete and Published is the active step.
+  const PUBLISHED_INDEX = STEPS.findIndex((s) => s.status.includes("published"));
+  const current =
+    awaitingPublish && status === "in_design"
+      ? PUBLISHED_INDEX
+      : stepIndex(status);
 
   if (current < 0) return null; // archived — don't show tracker
 

@@ -27,6 +27,7 @@ import { ConfirmForm } from "@/components/confirm-form";
 import { CommentThread } from "@/components/comment-thread";
 import { ProgressTracker } from "@/components/progress-tracker";
 import { BackLink } from "@/components/back-link";
+import { SubmitButton } from "@/components/submit-button";
 
 type RequestRow = {
   id: string;
@@ -116,7 +117,7 @@ function formatBytes(bytes: number | null): string {
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+  return new Date(iso).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -333,8 +334,9 @@ export default async function RequestDetailPage({
   const canApproveDesign = isReviewer && req.status === "design_pending_approval";
   const canRequestDesignChanges =
     isReviewer && req.status === "design_pending_approval";
-  const canPublish =
-    isAssignedDesigner && req.status === "in_design" && designsList.length > 0;
+  const awaitingPublish =
+    req.status === "in_design" && designsList.length > 0;
+  const canPublish = isAssignedDesigner && awaitingPublish;
   const canArchive =
     (isCreator || isReviewer) &&
     req.status !== "archived" &&
@@ -349,9 +351,13 @@ export default async function RequestDetailPage({
             {req.title}
           </h1>
           <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_BADGE_CLASS[req.status]}`}
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${
+              awaitingPublish
+                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200"
+                : STATUS_BADGE_CLASS[req.status]
+            }`}
           >
-            {getStatusLabel(req.status, role, req)}
+            {getStatusLabel(req.status, role, req, awaitingPublish)}
           </span>
         </div>
         <p className="mt-1 text-xs text-zinc-500">
@@ -364,7 +370,7 @@ export default async function RequestDetailPage({
         </p>
       </div>
 
-      <ProgressTracker status={req.status} />
+      <ProgressTracker status={req.status} awaitingPublish={awaitingPublish} />
 
       {canReassign && designerOptions.length > 0 && (
         <form action={reassignDesigner} className="flex items-center gap-2">
@@ -403,7 +409,7 @@ export default async function RequestDetailPage({
                 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
                 : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
             }`}>
-              Due: {new Date(req.due_date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+              Due: {new Date(req.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
           )}
         </div>
@@ -678,23 +684,23 @@ export default async function RequestDetailPage({
         {canSubmit && (
           <form action={submitDraft}>
             <input type="hidden" name="id" value={req.id} />
-            <button
-              type="submit"
+            <SubmitButton
               className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
+              pendingLabel="Submitting..."
             >
               Submit for approval
-            </button>
+            </SubmitButton>
           </form>
         )}
         {canApprove && (
           <form action={approveRequest}>
             <input type="hidden" name="id" value={req.id} />
-            <button
-              type="submit"
+            <SubmitButton
               className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+              pendingLabel="Approving..."
             >
               Approve
-            </button>
+            </SubmitButton>
           </form>
         )}
         {canSendBack && (
@@ -706,34 +712,34 @@ export default async function RequestDetailPage({
               rows={2}
               className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
             />
-            <button
-              type="submit"
+            <SubmitButton
               className="mt-2 rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              pendingLabel="Sending back..."
             >
               Send back for changes
-            </button>
+            </SubmitButton>
           </form>
         )}
         {canPickUp && (
           <form action={pickUpRequest}>
             <input type="hidden" name="id" value={req.id} />
-            <button
-              type="submit"
+            <SubmitButton
               className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
+              pendingLabel="Picking up..."
             >
               Pick this up
-            </button>
+            </SubmitButton>
           </form>
         )}
         {canApproveDesign && (
           <form action={approveDesign}>
             <input type="hidden" name="id" value={req.id} />
-            <button
-              type="submit"
+            <SubmitButton
               className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+              pendingLabel="Approving..."
             >
               Approve design
-            </button>
+            </SubmitButton>
           </form>
         )}
         {canRequestDesignChanges && (
@@ -745,12 +751,12 @@ export default async function RequestDetailPage({
               rows={2}
               className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
             />
-            <button
-              type="submit"
+            <SubmitButton
               className="mt-2 rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              pendingLabel="Sending..."
             >
               Request changes
-            </button>
+            </SubmitButton>
           </form>
         )}
         {canArchive && (

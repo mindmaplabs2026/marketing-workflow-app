@@ -19,12 +19,17 @@ export function getStatusLabel(
   status: RequestStatus,
   role: UserRole,
   req?: { created_by: string; approved_by: string | null },
+  awaitingPublish?: boolean,
 ): string {
   if (status === "pending_admin_approval") {
     if (role === "school_admin" || role === "super_admin") {
       return "Awaiting your approval";
     }
     return "Submitted — awaiting admin approval";
+  }
+
+  if (status === "in_design" && awaitingPublish) {
+    return "Approved — ready to publish";
   }
 
   if (

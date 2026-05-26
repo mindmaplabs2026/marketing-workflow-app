@@ -42,7 +42,7 @@ type LinkedRequest = {
 
 function formatDateLong(ymd: string): string {
   const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
     month: "long",

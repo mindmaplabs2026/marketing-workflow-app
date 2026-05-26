@@ -22,7 +22,7 @@ type SchoolLite = { id: string; name: string };
 type ProfileLite = { id: string; full_name: string | null };
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+  return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
   });
