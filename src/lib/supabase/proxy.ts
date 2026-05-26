@@ -6,6 +6,10 @@ const PUBLIC_PATHS = [
   "/login/team",
   "/auth/callback",
   "/auth/native-callback",
+  // verifyOtp runs inside this route handler and creates the session from
+  // the token in the URL — invitees hitting it have no session yet, so the
+  // proxy must let them through.
+  "/auth/confirm",
 ];
 const SETUP_PASSWORD_PATH = "/setup-password";
 
