@@ -15,6 +15,10 @@ export function CapacitorNative() {
     if (typeof window === "undefined") return;
     if (!window.Capacitor?.isNativePlatform?.()) return;
 
+    // Tag <html> so CSS can hide UI that's redundant inside the native shell
+    // (e.g. in-page back links — the phone has its own back gesture).
+    document.documentElement.classList.add("capacitor-native");
+
     let backHandle: { remove: () => void } | undefined;
 
     (async () => {
