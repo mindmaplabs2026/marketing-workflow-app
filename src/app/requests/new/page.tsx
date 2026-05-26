@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { UserRole } from "@/lib/supabase/types";
 import { NewRequestForm } from "./new-request-form";
+import { BackLink } from "@/components/back-link";
 
 type MembershipRow = {
   school_id: string;
@@ -50,12 +50,7 @@ export default async function NewRequestPage() {
   if (schools.length === 0) {
     return (
       <div className="space-y-6">
-        <Link
-          href="/requests"
-          className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← All requests
-        </Link>
+        <BackLink href="/requests">All requests</BackLink>
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
             <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
@@ -79,12 +74,7 @@ export default async function NewRequestPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Link
-          href="/requests"
-          className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← All requests
-        </Link>
+        <BackLink href="/requests">All requests</BackLink>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Raise a request
         </h1>

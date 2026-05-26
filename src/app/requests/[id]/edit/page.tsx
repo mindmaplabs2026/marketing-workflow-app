@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { RequestStatus, UserRole } from "@/lib/supabase/types";
 import { removeUpload, updateRequestDraft } from "../../actions";
 import { AddAttachmentsForm } from "./add-attachments-form";
+import { BackLink } from "@/components/back-link";
 
 type RequestRow = {
   id: string;
@@ -88,12 +88,7 @@ export default async function EditRequestPage({
   return (
     <div className="space-y-8">
       <div>
-        <Link
-          href={`/requests/${req.id}`}
-          className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← Back to request
-        </Link>
+        <BackLink href={`/requests/${req.id}`}>Back to request</BackLink>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Edit draft
         </h1>

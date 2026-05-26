@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteSchool, renameSchool } from "../actions";
 import { removeMember } from "./actions";
 import { AddMemberForm } from "./add-member-form";
 import { ConfirmForm } from "@/components/confirm-form";
+import { BackLink } from "@/components/back-link";
 import type { UserRole } from "@/lib/supabase/types";
 
 type SchoolRow = { id: string; name: string };
@@ -84,12 +84,7 @@ export default async function SchoolDetailPage({
     <div className="space-y-8">
       <div className="flex items-start justify-between">
         <div>
-          <Link
-            href="/admin/schools"
-            className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-          >
-            ← All schools
-          </Link>
+          <BackLink href="/admin/schools">All schools</BackLink>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             {school.name}
           </h1>

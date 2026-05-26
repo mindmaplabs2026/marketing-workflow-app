@@ -19,6 +19,7 @@ import {
   cancelCalendarItem,
   updateCalendarItem,
 } from "../actions";
+import { BackLink } from "@/components/back-link";
 
 type CalendarItemDetail = {
   id: string;
@@ -122,12 +123,7 @@ export default async function CalendarItemDetailPage({
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <Link
-          href={`/calendar?school=${item.school_id}`}
-          className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← Back to calendar
-        </Link>
+        <BackLink href={`/calendar?school=${item.school_id}`}>Back to calendar</BackLink>
         <div className="mt-2 flex items-start justify-between gap-4">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             {item.title}

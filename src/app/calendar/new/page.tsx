@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { UserRole } from "@/lib/supabase/types";
 import { NewCalendarItemForm } from "./new-calendar-item-form";
+import { BackLink } from "@/components/back-link";
 
 type SchoolLite = { id: string; name: string };
 type MembershipRow = {
@@ -65,12 +65,7 @@ export default async function NewCalendarItemPage({
   if (schools.length === 0) {
     return (
       <div className="space-y-6">
-        <Link
-          href="/calendar"
-          className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← Back to calendar
-        </Link>
+        <BackLink href="/calendar">Back to calendar</BackLink>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           You're not assigned to any schools yet.
         </p>
@@ -87,12 +82,7 @@ export default async function NewCalendarItemPage({
   return (
     <div className="mx-auto max-w-xl space-y-6">
       <div>
-        <Link
-          href={`/calendar?school=${defaultSchool.id}`}
-          className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← Back to calendar
-        </Link>
+        <BackLink href={`/calendar?school=${defaultSchool.id}`}>Back to calendar</BackLink>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Plan a calendar item
         </h1>

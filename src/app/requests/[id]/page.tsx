@@ -26,6 +26,7 @@ import { PublishForm } from "./publish-form";
 import { ConfirmForm } from "@/components/confirm-form";
 import { CommentThread } from "@/components/comment-thread";
 import { ProgressTracker } from "@/components/progress-tracker";
+import { BackLink } from "@/components/back-link";
 
 type RequestRow = {
   id: string;
@@ -342,12 +343,7 @@ export default async function RequestDetailPage({
   return (
     <div className="space-y-6">
       <div>
-        <Link
-          href="/requests"
-          className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← All requests
-        </Link>
+        <BackLink href="/requests">All requests</BackLink>
         <div className="mt-2 flex items-start justify-between gap-4">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             {req.title}
