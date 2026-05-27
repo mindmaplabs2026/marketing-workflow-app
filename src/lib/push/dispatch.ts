@@ -60,6 +60,8 @@ function titleFor(type: NotificationType): string {
       return "Published";
     case "calendar_item_approved":
       return "Calendar item approved";
+    case "user_added_to_school":
+      return "Added to a school";
   }
 }
 

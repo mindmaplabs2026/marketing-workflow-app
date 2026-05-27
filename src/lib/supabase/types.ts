@@ -47,7 +47,8 @@ export type NotificationType =
   | "design_approved"
   | "design_changes_requested"
   | "request_published"
-  | "calendar_item_approved";
+  | "calendar_item_approved"
+  | "user_added_to_school";
 
 export type NotificationEmailPref = "off" | "daily" | "immediate";
 

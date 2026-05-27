@@ -96,6 +96,10 @@ const ACTIVITY_VERB: Record<NotificationType, string> = {
   design_changes_requested: "requested design changes",
   request_published: "published",
   calendar_item_approved: "approved a calendar item",
+  // Membership notifications have no request_id, so this verb never
+  // actually renders in the per-request timeline — but the Record type
+  // needs every NotificationType key present.
+  user_added_to_school: "added someone to a school",
 };
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
