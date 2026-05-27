@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 declare global {
   interface Window {
@@ -77,20 +77,47 @@ function handleDeepLink(url: string): boolean {
   return false;
 }
 
-export function CapacitorDeepLink() {
-  const [splash, setSplash] = useState(false);
+function removeInlineSplash() {
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("__cap_splash");
+  if (el) el.remove();
+}
 
+function ensureInlineSplash() {
+  if (typeof document === "undefined") return;
+  if (document.getElementById("__cap_splash")) return;
+  const dark =
+    window.matchMedia &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const s = document.createElement("div");
+  s.id = "__cap_splash";
+  s.setAttribute("aria-hidden", "true");
+  s.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${
+    dark ? "#09090b" : "#fafafa"
+  };`;
+  document.body.appendChild(s);
+}
+
+export function CapacitorDeepLink() {
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (!window.Capacitor?.isNativePlatform?.()) return;
+    if (!window.Capacitor?.isNativePlatform?.()) {
+      // Inline script only injects on native, but if anything snuck
+      // through (e.g. a dev override) make sure web users don't sit
+      // behind a phantom splash.
+      removeInlineSplash();
+      return;
+    }
 
     loadHandled();
 
-    // If the previous page kicked off a deep-link nav, hide content here
-    // until we settle. Prevents a flash of /login (the proxy's no-session
-    // redirect) on cold start before the real destination loads.
-    if (window.sessionStorage.getItem(PENDING_KEY)) {
-      setSplash(true);
+    // If we are mid-flight between pages because a deep-link navigation
+    // is in progress, the destination page's inline splash should stay
+    // up until we settle here.
+    const pending =
+      window.sessionStorage.getItem(PENDING_KEY) === "1";
+    if (pending) {
+      ensureInlineSplash();
     }
 
     let cleanup: (() => void) | undefined;
@@ -102,7 +129,7 @@ export function CapacitorDeepLink() {
       } catch {
         // ignore
       }
-      setSplash(false);
+      removeInlineSplash();
     }
 
     import("@capacitor/app").then(({ App }) => {
@@ -114,7 +141,7 @@ export function CapacitorDeepLink() {
           } catch {
             // ignore
           }
-          setSplash(true);
+          ensureInlineSplash();
         }
         handleDeepLink(event.url);
       }).then((handle) => {
@@ -131,12 +158,11 @@ export function CapacitorDeepLink() {
             } catch {
               // ignore
             }
-            setSplash(true);
+            ensureInlineSplash();
             handleDeepLink(result.url);
             // Navigation will tear down this React tree; the destination
-            // page will manage its own splash via PENDING_KEY.
+            // page's inline splash carries the visual until settle().
           } else {
-            // We're already at the destination — drop the splash.
             settle();
           }
         } else {
@@ -154,13 +180,5 @@ export function CapacitorDeepLink() {
     };
   }, []);
 
-  if (splash) {
-    return (
-      <div
-        aria-hidden
-        className="fixed inset-0 z-[9999] bg-zinc-50 dark:bg-zinc-950"
-      />
-    );
-  }
   return null;
 }
