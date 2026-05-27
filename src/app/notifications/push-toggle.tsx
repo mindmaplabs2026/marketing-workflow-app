@@ -33,6 +33,31 @@ function isNativePlatform(): boolean {
   );
 }
 
+// Wraps PushNotifications.register() in a promise that resolves with the
+// FCM token (via the registration listener) or rejects on registrationError
+// / timeout. Caller is responsible for OS permission already being granted.
+async function registerWithFcm(
+  PushNotifications: typeof import("@capacitor/push-notifications").PushNotifications,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const ok = PushNotifications.addListener("registration", (t) => {
+      ok.then((h) => h.remove()).catch(() => {});
+      err.then((h) => h.remove()).catch(() => {});
+      resolve(t.value);
+    });
+    const err = PushNotifications.addListener("registrationError", (e) => {
+      ok.then((h) => h.remove()).catch(() => {});
+      err.then((h) => h.remove()).catch(() => {});
+      reject(new Error(e.error ?? "FCM registration failed."));
+    });
+    setTimeout(
+      () => reject(new Error("FCM registration timed out.")),
+      10_000,
+    );
+    PushNotifications.register().catch(reject);
+  });
+}
+
 export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [pending, startTransition] = useTransition();
@@ -95,11 +120,29 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
           setState({ kind: "denied" });
           return;
         }
-        // We can't query the OS for "is already registered"; if push was
-        // already enabled, the FCM token is in our DB. Start as "off" and
-        // let the user tap Enable to (re-)register — register() is
-        // idempotent and just refreshes the token.
-        setState({ kind: "off" });
+        if (perm.receive !== "granted") {
+          // Permission never asked yet — user needs to tap Enable.
+          setState({ kind: "off" });
+          return;
+        }
+        // Permission already granted from a previous session. Silently
+        // re-register (cheap; FCM caches the token) and upsert to the
+        // DB so the toggle reflects the true "subscribed" state instead
+        // of pretending the user never enabled.
+        try {
+          const token = await registerWithFcm(PushNotifications);
+          if (cancelled) return;
+          await registerFcmToken({
+            token,
+            platform: "android",
+            userAgent: navigator.userAgent,
+          });
+          if (cancelled) return;
+          setState({ kind: "on", endpoint: token, channel: "fcm" });
+        } catch (e) {
+          console.warn("silent FCM re-register failed", e);
+          setState({ kind: "off" });
+        }
       } catch (e) {
         setState({
           kind: "unsupported",
@@ -170,31 +213,7 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
       return;
     }
 
-    // Wire up the registration listener BEFORE calling register() so we
-    // don't miss the event on a fast device.
-    const tokenPromise = new Promise<string>((resolve, reject) => {
-      const ok = PushNotifications.addListener("registration", (t) => {
-        ok.then((h) => h.remove()).catch(() => {});
-        err.then((h) => h.remove()).catch(() => {});
-        resolve(t.value);
-      });
-      const err = PushNotifications.addListener(
-        "registrationError",
-        (e) => {
-          ok.then((h) => h.remove()).catch(() => {});
-          err.then((h) => h.remove()).catch(() => {});
-          reject(new Error(e.error ?? "FCM registration failed."));
-        },
-      );
-      // Safety timeout — if neither event fires in 10s, give up.
-      setTimeout(
-        () => reject(new Error("FCM registration timed out.")),
-        10_000,
-      );
-    });
-
-    await PushNotifications.register();
-    const token = await tokenPromise;
+    const token = await registerWithFcm(PushNotifications);
 
     startTransition(async () => {
       try {
