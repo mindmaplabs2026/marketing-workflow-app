@@ -1,6 +1,9 @@
-import Link from "next/link";
-
 export function AlreadySetNotice({ email }: { email: string }) {
+  // Plain <a> tags (not next/link) so navigation forces a full page load.
+  // /setup-password is shell-free; the root layout decides shell vs. no-shell
+  // from x-pathname, but layouts are shared across both routes and don't
+  // re-run on a soft client transition — so a <Link> back to / leaves the
+  // page chrome-less. A hard nav re-renders the layout with the new path.
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
       <div className="w-full max-w-sm">
@@ -19,18 +22,18 @@ export function AlreadySetNotice({ email }: { email: string }) {
         </div>
 
         <div className="space-y-3">
-          <Link
+          <a
             href="/"
             className="block w-full rounded-md bg-violet-600 px-4 py-2 text-center text-sm font-medium text-white shadow-sm transition-colors hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
           >
             Go to workspace
-          </Link>
-          <Link
+          </a>
+          <a
             href="/login"
             className="block w-full rounded-md border border-zinc-300 bg-white px-4 py-2 text-center text-sm font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
             Sign in as someone else
-          </Link>
+          </a>
         </div>
       </div>
     </main>
