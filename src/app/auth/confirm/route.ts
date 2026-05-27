@@ -26,18 +26,21 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.verifyOtp({ type, token_hash });
 
+  // Check for an existing session first. The OTP is single-use, and calling
+  // verifyOtp on a spent token may invalidate or fail to refresh the session
+  // cookie — which would defeat the "second click" fallback. If the caller
+  // already has a valid session (i.e. they clicked the link before and we
+  // already redeemed the token), just route them. No verifyOtp needed.
+  const {
+    data: { user: existingUser },
+  } = await supabase.auth.getUser();
+  if (existingUser) {
+    return NextResponse.redirect(`${origin}${next}`);
+  }
+
+  const { error } = await supabase.auth.verifyOtp({ type, token_hash });
   if (error) {
-    // The token is single-use. If verifyOtp fails but the caller already has
-    // a session from a prior successful click on the same link, let them
-    // through instead of bouncing them to /login with a scary error.
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (user) {
-      return NextResponse.redirect(`${origin}${next}`);
-    }
     return NextResponse.redirect(
       `${origin}/login?error=${encodeURIComponent(error.message)}`,
     );
