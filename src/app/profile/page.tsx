@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOut } from "@/app/login/actions";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/auth";
 import type { UserRole } from "@/lib/supabase/types";
-import { ChangePasswordForm } from "./change-password-form";
+import { PasswordSection } from "./password-section";
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super admin",
@@ -157,30 +156,7 @@ export default async function ProfilePage() {
           <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
             Password
           </h2>
-          {session.password_set ? (
-            <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-              <p className="mb-4 text-xs text-zinc-500 dark:text-zinc-400">
-                Use a password to sign in without waiting for a magic link.
-              </p>
-              <ChangePasswordForm />
-            </div>
-          ) : (
-            <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-              <p className="text-sm text-zinc-700 dark:text-zinc-200">
-                You sign in with magic links.
-              </p>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                Set up a password and you'll be able to sign in directly without
-                waiting for the email each time.
-              </p>
-              <Link
-                href="/setup-password"
-                className="mt-4 inline-block rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
-              >
-                Set up a password
-              </Link>
-            </div>
-          )}
+          <PasswordSection passwordSet={session.password_set} />
         </section>
 
         <section>
