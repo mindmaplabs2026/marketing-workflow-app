@@ -1,8 +1,9 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-export type SetupState = { error?: string; success?: boolean };
+export type SetupState = { error?: string };
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -56,9 +57,9 @@ export async function setPassword(
     return { error: dbErr.message };
   }
 
-  // Don't redirect() here — that's a soft transition and the root layout
-  // (cached from /setup-password being shell-free) wouldn't re-render to
-  // wrap the home page in AppShell. The form does a hard window.location
-  // navigation when it sees success: true.
-  return { success: true };
+  // Bounce through /setup-password/done — that page does the hard
+  // window.location.replace("/") that the root layout needs in order to
+  // re-render with AppShell. Redirecting straight to / would soft-nav
+  // and the cached shell-free layout would stick around.
+  redirect("/setup-password/done");
 }

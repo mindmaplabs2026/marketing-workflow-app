@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { setPassword, type SetupState } from "./actions";
 
 const initialState: SetupState = {};
@@ -10,15 +10,6 @@ export function SetupPasswordForm({ email }: { email: string }) {
     setPassword,
     initialState,
   );
-
-  // Hard nav so the root layout re-runs and wraps the home page in
-  // AppShell — a soft router.push from inside the action would leave
-  // the cached shell-free layout in place and home would render bare.
-  useEffect(() => {
-    if (state.success) {
-      window.location.href = "/";
-    }
-  }, [state.success]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
