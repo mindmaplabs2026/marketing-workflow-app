@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { signOut } from "@/app/login/actions";
 
 function initialsFor(name: string, email: string): string {
@@ -77,6 +78,16 @@ export function UserMenu({
                 {roleLabel}
               </p>
             </div>
+          </div>
+          <div className="border-b border-zinc-200 p-2 dark:border-zinc-800">
+            <Link
+              href="/profile"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="block w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              Profile
+            </Link>
           </div>
           <form action={signOut} className="p-2">
             <button
