@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 import { CapacitorDeepLink } from "@/components/capacitor-deeplink";
 import { CapacitorNative } from "@/components/capacitor-native";
+import { RefreshOnFocus } from "@/components/refresh-on-focus";
 import { AppShell } from "@/components/app-shell";
 
 const SHELL_FREE_PREFIXES = [
@@ -79,6 +80,7 @@ export default async function RootLayout({
       <body className="min-h-full flex flex-col">
         <CapacitorDeepLink />
         <CapacitorNative />
+        <RefreshOnFocus />
         {shellFree ? children : <AppShell>{children}</AppShell>}
       </body>
     </html>
