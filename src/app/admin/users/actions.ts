@@ -181,10 +181,7 @@ export async function inviteUser(
     return { error: "Supabase returned no token to email." };
   }
   const nextPath = isInternal ? "/setup-password" : "/";
-  // Land on /auth/confirm-invite (not /auth/confirm) so that email-scanner
-  // prefetches don't burn the single-use token before the human ever taps
-  // the link — that interstitial only calls verifyOtp on POST.
-  const actionLink = `${appUrl()}/auth/confirm-invite?token_hash=${hashedToken}&type=invite&next=${encodeURIComponent(nextPath)}`;
+  const actionLink = `${appUrl()}/auth/confirm?token_hash=${hashedToken}&type=invite&next=${encodeURIComponent(nextPath)}`;
 
   // Promote the auto-created profile to the chosen role. Internal users
   // (designer / super_admin) need a password — flag them so the proxy
