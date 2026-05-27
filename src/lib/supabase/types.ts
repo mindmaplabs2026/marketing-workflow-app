@@ -391,6 +391,36 @@ export type Database = {
         };
         Relationships: [];
       };
+      fcm_tokens: {
+        Row: {
+          id: string;
+          user_id: string;
+          token: string;
+          platform: string;
+          user_agent: string | null;
+          created_at: Timestamp;
+          last_seen_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          token: string;
+          platform?: string;
+          user_agent?: string | null;
+          created_at?: Timestamp;
+          last_seen_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          token?: string;
+          platform?: string;
+          user_agent?: string | null;
+          created_at?: Timestamp;
+          last_seen_at?: Timestamp;
+        };
+        Relationships: [];
+      };
       comments: {
         Row: {
           id: string;

@@ -270,3 +270,56 @@ export async function unsubscribePush(endpoint: string) {
 
   revalidatePath("/notifications");
 }
+
+// Native FCM equivalents — same shape, different table. Capacitor's
+// @capacitor/push-notifications gives us an FCM token instead of a
+// web-push subscription, and the server sends through firebase-admin.
+
+export async function registerFcmToken(payload: {
+  token: string;
+  platform?: string;
+  userAgent?: string;
+}) {
+  if (!payload?.token) throw new Error("Missing FCM token.");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { error } = await supabase
+    .from("fcm_tokens")
+    .upsert(
+      {
+        user_id: user.id,
+        token: payload.token,
+        platform: payload.platform ?? "android",
+        user_agent: payload.userAgent ?? null,
+        last_seen_at: new Date().toISOString(),
+      },
+      { onConflict: "token" },
+    );
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/notifications");
+}
+
+export async function unregisterFcmToken(token: string) {
+  if (!token) throw new Error("Missing FCM token.");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { error } = await supabase
+    .from("fcm_tokens")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("token", token);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/notifications");
+}

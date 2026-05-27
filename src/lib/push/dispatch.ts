@@ -2,6 +2,7 @@ import "server-only";
 import webpush from "web-push";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchImmediateEmails } from "@/lib/email/dispatch";
+import { sendFcm } from "@/lib/push/fcm";
 import type { NotificationType } from "@/lib/supabase/types";
 
 // Configure web-push once per process. Throws at call-time if env is missing.
@@ -34,6 +35,11 @@ type SubRow = {
   endpoint: string;
   p256dh: string;
   auth: string;
+};
+
+type FcmTokenRow = {
+  id: string;
+  token: string;
 };
 
 function deepLinkFor(row: PendingRow): string {
@@ -95,18 +101,25 @@ export async function dispatchPendingPushes(): Promise<void> {
   // are best-effort and either can fail without blocking the other.
   const emailWork = dispatchImmediateEmails();
 
-  const skip = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ? false : true;
-  if (skip) {
+  const webPushEnabled = Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
+  const fcmEnabled = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+
+  // Nothing configured — leave notifications un-dispatched so they'll go
+  // out once env vars land. Email handles the safety net.
+  if (!webPushEnabled && !fcmEnabled) {
     await emailWork;
     return;
   }
 
-  try {
-    configure();
-  } catch (e) {
-    console.warn("push dispatch skipped:", e instanceof Error ? e.message : e);
-    await emailWork;
-    return;
+  if (webPushEnabled) {
+    try {
+      configure();
+    } catch (e) {
+      console.warn(
+        "web-push dispatch skipped:",
+        e instanceof Error ? e.message : e,
+      );
+    }
   }
   const admin = createAdminClient();
 
@@ -132,59 +145,104 @@ export async function dispatchPendingPushes(): Promise<void> {
   }
 
   const goneSubscriptionIds: string[] = [];
+  const goneFcmTokens: string[] = [];
   const dispatchedIds: string[] = [];
 
   await Promise.all(
     Array.from(byRecipient.entries()).map(async ([userId, rows]) => {
-      const { data: subs } = await admin
-        .from("push_subscriptions")
-        .select("id, endpoint, p256dh, auth")
-        .eq("user_id", userId)
-        .returns<SubRow[]>();
+      // Fetch both channels in parallel — a user may have web push
+      // (browser) and FCM (.apk) registered simultaneously, e.g. signed
+      // in on both laptop and phone. We send to all.
+      const [subsRes, fcmRes] = await Promise.all([
+        webPushEnabled
+          ? admin
+              .from("push_subscriptions")
+              .select("id, endpoint, p256dh, auth")
+              .eq("user_id", userId)
+              .returns<SubRow[]>()
+          : Promise.resolve({ data: null as SubRow[] | null }),
+        fcmEnabled
+          ? admin
+              .from("fcm_tokens")
+              .select("id, token")
+              .eq("user_id", userId)
+              .returns<FcmTokenRow[]>()
+          : Promise.resolve({ data: null as FcmTokenRow[] | null }),
+      ]);
+      const subs = subsRes.data ?? [];
+      const fcmTokens = fcmRes.data ?? [];
 
-      // No active devices — still mark as dispatched so we don't retry forever.
-      if (!subs || subs.length === 0) {
+      // No active devices on either channel — still mark as dispatched
+      // so we don't retry forever.
+      if (subs.length === 0 && fcmTokens.length === 0) {
         for (const r of rows) dispatchedIds.push(r.id);
         return;
       }
 
       for (const row of rows) {
-        const payload = JSON.stringify({
-          title: titleFor(row.type),
-          body: row.body,
-          url: deepLinkFor(row),
-          tag: row.request_id ?? row.calendar_item_id ?? row.id,
-          actions: actionsFor(row.type),
-          request_id: row.request_id,
-        });
+        const title = titleFor(row.type);
+        const deepLink = deepLinkFor(row);
+        const tag = row.request_id ?? row.calendar_item_id ?? row.id;
 
-        await Promise.all(
-          subs.map(async (sub) => {
-            try {
-              await webpush.sendNotification(
-                {
-                  endpoint: sub.endpoint,
-                  keys: { p256dh: sub.p256dh, auth: sub.auth },
-                },
-                payload,
-              );
-            } catch (err: unknown) {
-              const status =
-                typeof err === "object" &&
-                err !== null &&
-                "statusCode" in err &&
-                typeof (err as { statusCode?: number }).statusCode === "number"
-                  ? (err as { statusCode: number }).statusCode
-                  : 0;
-              if (status === 404 || status === 410) {
-                goneSubscriptionIds.push(sub.id);
-              } else {
-                console.error("push send failed", status, err);
-              }
-            }
-          }),
-        );
+        // Web Push channel
+        const webPushWork =
+          subs.length > 0
+            ? Promise.all(
+                subs.map(async (sub) => {
+                  const payload = JSON.stringify({
+                    title,
+                    body: row.body,
+                    url: deepLink,
+                    tag,
+                    actions: actionsFor(row.type),
+                    request_id: row.request_id,
+                  });
+                  try {
+                    await webpush.sendNotification(
+                      {
+                        endpoint: sub.endpoint,
+                        keys: { p256dh: sub.p256dh, auth: sub.auth },
+                      },
+                      payload,
+                    );
+                  } catch (err: unknown) {
+                    const status =
+                      typeof err === "object" &&
+                      err !== null &&
+                      "statusCode" in err &&
+                      typeof (err as { statusCode?: number }).statusCode ===
+                        "number"
+                        ? (err as { statusCode: number }).statusCode
+                        : 0;
+                    if (status === 404 || status === 410) {
+                      goneSubscriptionIds.push(sub.id);
+                    } else {
+                      console.error("push send failed", status, err);
+                    }
+                  }
+                }),
+              )
+            : Promise.resolve();
 
+        // FCM channel (native .apk)
+        const fcmWork =
+          fcmTokens.length > 0
+            ? sendFcm({
+                tokens: fcmTokens.map((t) => t.token),
+                title,
+                body: row.body,
+                deepLink,
+              }).then((res) => {
+                if (res.invalidTokens.length > 0) {
+                  for (const dead of res.invalidTokens) {
+                    const match = fcmTokens.find((t) => t.token === dead);
+                    if (match) goneFcmTokens.push(match.id);
+                  }
+                }
+              })
+            : Promise.resolve();
+
+        await Promise.all([webPushWork, fcmWork]);
         dispatchedIds.push(row.id);
       }
     }),
@@ -201,6 +259,9 @@ export async function dispatchPendingPushes(): Promise<void> {
       .from("push_subscriptions")
       .delete()
       .in("id", goneSubscriptionIds);
+  }
+  if (goneFcmTokens.length > 0) {
+    await admin.from("fcm_tokens").delete().in("id", goneFcmTokens);
   }
 
   await emailWork;

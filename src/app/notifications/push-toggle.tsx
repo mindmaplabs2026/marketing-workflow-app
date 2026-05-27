@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { subscribePush, unsubscribePush } from "./actions";
+import {
+  registerFcmToken,
+  subscribePush,
+  unregisterFcmToken,
+  unsubscribePush,
+} from "./actions";
 
 type State =
   | { kind: "loading" }
   | { kind: "unsupported"; reason: string }
   | { kind: "denied" }
   | { kind: "off" }
-  | { kind: "on"; endpoint: string };
+  | { kind: "on"; endpoint: string; channel: "web" | "fcm" };
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
@@ -20,6 +25,14 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+function isNativePlatform(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean(
+    (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } })
+      .Capacitor?.isNativePlatform?.(),
+  );
+}
+
 export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [pending, startTransition] = useTransition();
@@ -28,8 +41,7 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
   useEffect(() => {
     let cancelled = false;
 
-    async function init() {
-      if (typeof window === "undefined") return;
+    async function initWeb() {
       if (!vapidPublicKey) {
         setState({
           kind: "unsupported",
@@ -56,7 +68,11 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
         const existing = await reg.pushManager.getSubscription();
         if (cancelled) return;
         if (existing) {
-          setState({ kind: "on", endpoint: existing.endpoint });
+          setState({
+            kind: "on",
+            endpoint: existing.endpoint,
+            channel: "web",
+          });
         } else {
           setState({ kind: "off" });
         }
@@ -68,65 +84,197 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
       }
     }
 
-    init();
+    async function initNative() {
+      try {
+        const { PushNotifications } = await import(
+          "@capacitor/push-notifications"
+        );
+        const perm = await PushNotifications.checkPermissions();
+        if (cancelled) return;
+        if (perm.receive === "denied") {
+          setState({ kind: "denied" });
+          return;
+        }
+        // We can't query the OS for "is already registered"; if push was
+        // already enabled, the FCM token is in our DB. Start as "off" and
+        // let the user tap Enable to (re-)register — register() is
+        // idempotent and just refreshes the token.
+        setState({ kind: "off" });
+      } catch (e) {
+        setState({
+          kind: "unsupported",
+          reason:
+            e instanceof Error
+              ? e.message
+              : "Native push plugin unavailable.",
+        });
+      }
+    }
+
+    if (typeof window === "undefined") return;
+    if (isNativePlatform()) {
+      void initNative();
+    } else {
+      void initWeb();
+    }
+
     return () => {
       cancelled = true;
     };
   }, [vapidPublicKey]);
 
+  async function enableWeb() {
+    const reg = await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      setState(perm === "denied" ? { kind: "denied" } : { kind: "off" });
+      return;
+    }
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+    const json = sub.toJSON();
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      throw new Error("Browser returned an incomplete subscription.");
+    }
+    startTransition(async () => {
+      try {
+        await subscribePush({
+          endpoint: json.endpoint!,
+          keys: { p256dh: json.keys!.p256dh, auth: json.keys!.auth },
+          userAgent: navigator.userAgent,
+        });
+        setState({
+          kind: "on",
+          endpoint: json.endpoint!,
+          channel: "web",
+        });
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Could not save subscription.",
+        );
+      }
+    });
+  }
+
+  async function enableNative() {
+    const { PushNotifications } = await import(
+      "@capacitor/push-notifications"
+    );
+    const perm = await PushNotifications.requestPermissions();
+    if (perm.receive !== "granted") {
+      setState(
+        perm.receive === "denied" ? { kind: "denied" } : { kind: "off" },
+      );
+      return;
+    }
+
+    // Wire up the registration listener BEFORE calling register() so we
+    // don't miss the event on a fast device.
+    const tokenPromise = new Promise<string>((resolve, reject) => {
+      const ok = PushNotifications.addListener("registration", (t) => {
+        ok.then((h) => h.remove()).catch(() => {});
+        err.then((h) => h.remove()).catch(() => {});
+        resolve(t.value);
+      });
+      const err = PushNotifications.addListener(
+        "registrationError",
+        (e) => {
+          ok.then((h) => h.remove()).catch(() => {});
+          err.then((h) => h.remove()).catch(() => {});
+          reject(new Error(e.error ?? "FCM registration failed."));
+        },
+      );
+      // Safety timeout — if neither event fires in 10s, give up.
+      setTimeout(
+        () => reject(new Error("FCM registration timed out.")),
+        10_000,
+      );
+    });
+
+    await PushNotifications.register();
+    const token = await tokenPromise;
+
+    startTransition(async () => {
+      try {
+        await registerFcmToken({
+          token,
+          platform: "android",
+          userAgent: navigator.userAgent,
+        });
+        setState({ kind: "on", endpoint: token, channel: "fcm" });
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Could not save FCM token.",
+        );
+      }
+    });
+  }
+
   async function enable() {
     setError(null);
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") {
-        setState(perm === "denied" ? { kind: "denied" } : { kind: "off" });
-        return;
-      }
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-      });
-      const json = sub.toJSON();
-      if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
-        throw new Error("Browser returned an incomplete subscription.");
-      }
-      startTransition(async () => {
-        try {
-          await subscribePush({
-            endpoint: json.endpoint!,
-            keys: { p256dh: json.keys!.p256dh, auth: json.keys!.auth },
-            userAgent: navigator.userAgent,
-          });
-          setState({ kind: "on", endpoint: json.endpoint! });
-        } catch (e) {
-          setError(e instanceof Error ? e.message : "Could not save subscription.");
-        }
-      });
+      if (isNativePlatform()) await enableNative();
+      else await enableWeb();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not enable push.");
     }
   }
 
+  async function disableWeb() {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    const endpoint = sub?.endpoint;
+    if (sub) await sub.unsubscribe();
+    if (endpoint) {
+      startTransition(async () => {
+        try {
+          await unsubscribePush(endpoint);
+          setState({ kind: "off" });
+        } catch (e) {
+          setError(
+            e instanceof Error ? e.message : "Could not unsubscribe.",
+          );
+        }
+      });
+    } else {
+      setState({ kind: "off" });
+    }
+  }
+
+  async function disableNative() {
+    if (state.kind !== "on") return;
+    const token = state.endpoint;
+    try {
+      const { PushNotifications } = await import(
+        "@capacitor/push-notifications"
+      );
+      // removeAllListeners isn't an unregister, but it stops the OS from
+      // delivering further pushes to the WebView. The token itself stays
+      // valid on the OS side; deleting our DB row is what stops *us*
+      // from targeting this device.
+      await PushNotifications.removeAllListeners();
+    } catch {
+      // ignore — even if the plugin call fails, we still want to drop our DB row
+    }
+    startTransition(async () => {
+      try {
+        await unregisterFcmToken(token);
+        setState({ kind: "off" });
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Could not unregister.",
+        );
+      }
+    });
+  }
+
   async function disable() {
     setError(null);
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      const endpoint = sub?.endpoint;
-      if (sub) await sub.unsubscribe();
-      if (endpoint) {
-        startTransition(async () => {
-          try {
-            await unsubscribePush(endpoint);
-            setState({ kind: "off" });
-          } catch (e) {
-            setError(e instanceof Error ? e.message : "Could not unsubscribe.");
-          }
-        });
-      } else {
-        setState({ kind: "off" });
-      }
+      if (state.kind === "on" && state.channel === "fcm") await disableNative();
+      else await disableWeb();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not disable push.");
     }
@@ -143,7 +291,7 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string }) {
             {state.kind === "on"
               ? "You will get a push when something needs your attention — even when the app is closed."
               : state.kind === "denied"
-                ? "Your browser blocked notifications. Update site settings to re-enable."
+                ? "Your device blocked notifications. Update app settings to re-enable."
                 : state.kind === "unsupported"
                   ? state.reason
                   : "Get pinged when a request, design, or post needs you."}

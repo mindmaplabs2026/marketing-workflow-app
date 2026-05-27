@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1049408002180",
+    "project_id": "marketing-workflow-39c12",
+    "storage_bucket": "marketing-workflow-39c12.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1049408002180:android:4a2b39cd3b39cf2c47cad1",
+        "android_client_info": {
+          "package_name": "com.mindmaplabs.workflow"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBuXwQZ33u3B-AsHuvfmYzu4TD_47Af8Ig"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
