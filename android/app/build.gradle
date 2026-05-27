@@ -18,6 +18,11 @@ android {
     }
     buildTypes {
         release {
+            // Sideloaded release builds are signed with the debug
+            // keystore so they install without needing a dedicated
+            // release keystore. Swap in a real signingConfig (loaded
+            // from keystore.properties) before publishing to Play Store.
+            signingConfig signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
