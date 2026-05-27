@@ -31,6 +31,19 @@ export async function setPassword(
     return { error: "You must be signed in to set a password." };
   }
 
+  // Defense in depth against re-running this flow with a replayed form post:
+  // the UI already swaps to AlreadySetNotice when password_set is true.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("password_set")
+    .eq("id", user.id)
+    .single();
+  if (profile?.password_set) {
+    return {
+      error: "You've already set your password. Sign in from /login instead.",
+    };
+  }
+
   const { error: authErr } = await supabase.auth.updateUser({ password });
   if (authErr) {
     return { error: authErr.message };

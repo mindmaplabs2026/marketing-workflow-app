@@ -13,11 +13,41 @@ declare global {
 // appUrlOpen and getLaunchUrl can both deliver the same URL on a
 // cold-started intent. Running exchangeCodeForSession twice burns the
 // PKCE verifier on the first call and the second one fails noisily.
+// In-memory dedup handles repeat fires within one JS lifetime; the
+// sessionStorage mirror survives the navigation we trigger below, so
+// the post-nav page load doesn't re-handle the launch URL a third time.
+const SESSION_KEY = "mw_handled_deeplinks";
 const handledUrls = new Set<string>();
 
+function loadHandled() {
+  if (typeof window === "undefined") return;
+  if (handledUrls.size > 0) return;
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    for (const u of JSON.parse(raw) as string[]) handledUrls.add(u);
+  } catch {
+    // sessionStorage may be unavailable; in-memory dedup still works.
+  }
+}
+
+function persistHandled() {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify(Array.from(handledUrls)),
+    );
+  } catch {
+    // sessionStorage may be unavailable; in-memory dedup still works.
+  }
+}
+
 function handleDeepLink(url: string) {
+  loadHandled();
   if (handledUrls.has(url)) return;
   handledUrls.add(url);
+  persistHandled();
 
   try {
     // Magic-link callback over our custom scheme. PKCE verifier lives

@@ -29,6 +29,15 @@ export async function GET(request: NextRequest) {
   const { error } = await supabase.auth.verifyOtp({ type, token_hash });
 
   if (error) {
+    // The token is single-use. If verifyOtp fails but the caller already has
+    // a session from a prior successful click on the same link, let them
+    // through instead of bouncing them to /login with a scary error.
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      return NextResponse.redirect(`${origin}${next}`);
+    }
     return NextResponse.redirect(
       `${origin}/login?error=${encodeURIComponent(error.message)}`,
     );

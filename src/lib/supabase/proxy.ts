@@ -10,6 +10,9 @@ const PUBLIC_PATHS = [
   // the token in the URL — invitees hitting it have no session yet, so the
   // proxy must let them through.
   "/auth/confirm",
+  // Anti-prefetch interstitial: renders a "Continue" button on GET and
+  // only calls verifyOtp on POST. Invitees hit it without a session.
+  "/auth/confirm-invite",
 ];
 const SETUP_PASSWORD_PATH = "/setup-password";
 
