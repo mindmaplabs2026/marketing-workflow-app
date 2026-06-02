@@ -80,7 +80,7 @@ const TABS: NavItem[] = [
     href: "/admin",
     label: "Admin",
     icon: <AdminIcon />,
-    roles: ["super_admin"],
+    roles: ["super_admin", "school_admin"],
   },
 ];
 
