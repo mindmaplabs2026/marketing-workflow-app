@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import type { RequestStatus } from "@/lib/supabase/types";
 import { STATUS_SHORT, STATUS_BADGE_CLASS } from "@/app/requests/status";
+import { ConfirmForm } from "@/components/confirm-form";
 
 type Item = {
   id: string;
@@ -12,6 +13,7 @@ type Item = {
   creatorName: string;
   schoolName: string;
   date: string;
+  canDelete?: boolean;
 };
 
 function formatDate(iso: string): string {
@@ -26,10 +28,12 @@ export function BulkApproveSection({
   title,
   items,
   approveAction,
+  deleteAction,
 }: {
   title: string;
   items: Item[];
   approveAction: (formData: FormData) => void;
+  deleteAction?: (formData: FormData) => void;
 }) {
   const approvable = items.filter(
     (r) => r.status === "pending_admin_approval",
@@ -101,13 +105,30 @@ export function BulkApproveSection({
                 {STATUS_SHORT[r.status]}
               </span>
             </Link>
+            {r.canDelete && deleteAction && (
+              <ConfirmForm
+                action={deleteAction}
+                title="Delete request?"
+                message={`Permanently delete "${r.title}"? Attachments are removed too. Use Archive to keep a record.`}
+                confirmLabel="Delete"
+              >
+                <input type="hidden" name="id" value={r.id} />
+                <button
+                  type="submit"
+                  aria-label={`Delete ${r.title}`}
+                  className="rounded-md border border-rose-300 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950"
+                >
+                  Delete
+                </button>
+              </ConfirmForm>
+            )}
           </li>
         ))}
         {others.map((r) => (
-          <li key={r.id}>
+          <li key={r.id} className="flex items-stretch">
             <Link
               href={`/requests/${r.id}`}
-              className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              className="flex flex-1 items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
@@ -125,6 +146,24 @@ export function BulkApproveSection({
                 {STATUS_SHORT[r.status]}
               </span>
             </Link>
+            {r.canDelete && deleteAction && (
+              <ConfirmForm
+                action={deleteAction}
+                title="Delete request?"
+                message={`Permanently delete "${r.title}"? Attachments are removed too. Use Archive to keep a record.`}
+                confirmLabel="Delete"
+                className="flex items-center pr-3"
+              >
+                <input type="hidden" name="id" value={r.id} />
+                <button
+                  type="submit"
+                  aria-label={`Delete ${r.title}`}
+                  className="rounded-md border border-rose-300 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950"
+                >
+                  Delete
+                </button>
+              </ConfirmForm>
+            )}
           </li>
         ))}
       </ul>

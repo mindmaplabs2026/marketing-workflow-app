@@ -4,8 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/auth";
 import type { RequestStatus } from "@/lib/supabase/types";
 import { STATUS_SHORT, STATUS_BADGE_CLASS, STATUS_DOT_CLASS } from "./status";
-import { bulkApproveRequests } from "./actions";
+import { bulkApproveRequests, deleteRequest } from "./actions";
 import { BulkApproveSection } from "@/components/bulk-approve";
+import { ConfirmForm } from "@/components/confirm-form";
 
 type RequestListRow = {
   id: string;
@@ -68,6 +69,14 @@ export default async function RequestsListPage({
   const canRaise = role === "teacher" || role === "school_admin";
   const isReviewer = role === "school_admin" || role === "super_admin";
   const isDesigner = role === "designer" || role === "super_admin";
+  // Same gate as the server action: super_admin and school_admin (RLS has
+  // already scoped their visible rows to their own schools) can hard-delete
+  // requests, but only while still in draft or pending approval.
+  const isManagingAdmin =
+    role === "super_admin" || role === "school_admin";
+  function canDeleteStatus(s: RequestStatus): boolean {
+    return s === "draft" || s === "pending_admin_approval";
+  }
 
   const [requestsRes, schoolsRes] = await Promise.all([
     supabase
@@ -315,8 +324,10 @@ export default async function RequestsListPage({
             creatorName: creatorById.get(r.created_by)?.trim() || "someone",
             schoolName: schoolsById.get(r.school_id) ?? "",
             date: r.created_at,
+            canDelete: isManagingAdmin && canDeleteStatus(r.status),
           }))}
           approveAction={bulkApproveRequests}
+          deleteAction={isManagingAdmin ? deleteRequest : undefined}
         />
       ) : (
         <Section title="Needs you" items={needsYou} variant="urgent" />
@@ -378,29 +389,50 @@ export default async function RequestsListPage({
             const creatorName =
               creatorById.get(r.created_by)?.trim() || "someone";
             const schoolName = schoolsById.get(r.school_id) ?? "";
+            const showDelete = isManagingAdmin && canDeleteStatus(r.status);
             return (
               <li key={r.id} className="relative">
-                <Link
-                  href={`/requests/${r.id}`}
-                  className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                      {r.title}
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-zinc-500">
-                      {creatorName}
-                      {schoolName ? ` · ${schoolName}` : ""} ·{" "}
-                      {formatDate(r.created_at)}
-                    </p>
-                  </div>
-                  <span
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_BADGE_CLASS[r.status]}`}
+                <div className="flex items-stretch">
+                  <Link
+                    href={`/requests/${r.id}`}
+                    className="flex flex-1 items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                   >
-                    <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT_CLASS[r.status]}`} />
-                    {STATUS_SHORT[r.status]}
-                  </span>
-                </Link>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                        {r.title}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-zinc-500">
+                        {creatorName}
+                        {schoolName ? ` · ${schoolName}` : ""} ·{" "}
+                        {formatDate(r.created_at)}
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_BADGE_CLASS[r.status]}`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT_CLASS[r.status]}`} />
+                      {STATUS_SHORT[r.status]}
+                    </span>
+                  </Link>
+                  {showDelete && (
+                    <ConfirmForm
+                      action={deleteRequest}
+                      title="Delete request?"
+                      message={`Permanently delete "${r.title}"? Attachments are removed too. Use Archive to keep a record.`}
+                      confirmLabel="Delete"
+                      className="flex items-center pr-3"
+                    >
+                      <input type="hidden" name="id" value={r.id} />
+                      <button
+                        type="submit"
+                        aria-label={`Delete ${r.title}`}
+                        className="rounded-md border border-rose-300 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950"
+                      >
+                        Delete
+                      </button>
+                    </ConfirmForm>
+                  )}
+                </div>
                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-100 dark:bg-zinc-800">
                   <div
                     className={`h-full ${PROGRESS_COLOR[r.status]} transition-all`}

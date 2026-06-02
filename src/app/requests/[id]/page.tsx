@@ -13,6 +13,7 @@ import {
   approveDesign,
   approveRequest,
   archiveRequest,
+  deleteRequest,
   pickUpRequest,
   reassignDesigner,
   removeDesign,
@@ -327,7 +328,32 @@ export default async function RequestDetailPage({
     (role === "designer" || role === "super_admin") &&
     req.assigned_designer_id === user.id;
 
-  const canEdit = isCreator && req.status === "draft";
+  // A school_admin is "in scope" for this request only when its school is
+  // one of theirs. Super_admin is always in scope. Used to gate Edit + the
+  // new hard-Delete to admins with authority over this request.
+  let isSchoolAdminInScope = false;
+  if (role === "school_admin") {
+    const { data: membership } = await supabase
+      .from("school_members")
+      .select("school_id")
+      .eq("user_id", user.id)
+      .eq("school_id", req.school_id)
+      .maybeSingle<{ school_id: string }>();
+    isSchoolAdminInScope = !!membership;
+  }
+  const isManagingAdmin =
+    role === "super_admin" || (role === "school_admin" && isSchoolAdminInScope);
+
+  // Teachers can edit only their own draft. Managing admins can also edit
+  // after the teacher has submitted, until the request is approved — so
+  // they can fix typos without forcing the teacher to recreate it.
+  const canEdit =
+    (isCreator && req.status === "draft") ||
+    (isManagingAdmin &&
+      (req.status === "draft" || req.status === "pending_admin_approval"));
+  const canDelete =
+    isManagingAdmin &&
+    (req.status === "draft" || req.status === "pending_admin_approval");
   const canSubmit = isCreator && req.status === "draft";
   const canApprove = isReviewer && req.status === "pending_admin_approval";
   const canSendBack = isReviewer && req.status === "pending_admin_approval";
@@ -765,13 +791,34 @@ export default async function RequestDetailPage({
           </form>
         )}
         {canArchive && (
-          <ConfirmForm action={archiveRequest} message="Archive this request? It will be moved to the archived section." className="ml-auto">
+          <ConfirmForm
+            action={archiveRequest}
+            message="Archive this request? It will be moved to the archived section."
+            className={canDelete ? "" : "ml-auto"}
+          >
             <input type="hidden" name="id" value={req.id} />
             <button
               type="submit"
               className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
             >
               Archive
+            </button>
+          </ConfirmForm>
+        )}
+        {canDelete && (
+          <ConfirmForm
+            action={deleteRequest}
+            title="Delete request?"
+            message="This permanently removes the request and any attachments. Use Archive instead to keep a record."
+            confirmLabel="Delete"
+            className="ml-auto"
+          >
+            <input type="hidden" name="id" value={req.id} />
+            <button
+              type="submit"
+              className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950"
+            >
+              Delete
             </button>
           </ConfirmForm>
         )}

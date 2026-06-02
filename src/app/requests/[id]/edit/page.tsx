@@ -7,6 +7,7 @@ import { BackLink } from "@/components/back-link";
 
 type RequestRow = {
   id: string;
+  school_id: string;
   created_by: string;
   title: string;
   description: string | null;
@@ -52,14 +53,33 @@ export default async function EditRequestPage({
 
   const { data: req } = await supabase
     .from("requests")
-    .select("id, created_by, title, description, status")
+    .select("id, school_id, created_by, title, description, status")
     .eq("id", id)
     .single<RequestRow>();
   if (!req) notFound();
 
+  // School admins may edit requests in their own school. Super admins may
+  // edit any. Creators may always edit their own draft.
+  let isSchoolAdminInScope = false;
+  if (role === "school_admin") {
+    const { data: membership } = await supabase
+      .from("school_members")
+      .select("school_id")
+      .eq("user_id", user.id)
+      .eq("school_id", req.school_id)
+      .maybeSingle<{ school_id: string }>();
+    isSchoolAdminInScope = !!membership;
+  }
+
+  // Teachers (creators) can only edit drafts; super_admin and school_admin
+  // in scope can also edit pending_admin_approval requests so they can fix
+  // typos before approving.
+  const isManagingAdmin = role === "super_admin" || isSchoolAdminInScope;
+  const isCreator = req.created_by === user.id;
   const canEdit =
-    req.status === "draft" &&
-    (req.created_by === user.id || role === "super_admin");
+    (isCreator && req.status === "draft") ||
+    (isManagingAdmin &&
+      (req.status === "draft" || req.status === "pending_admin_approval"));
   if (!canEdit) redirect(`/requests/${id}`);
 
   const { data: uploads } = await supabase

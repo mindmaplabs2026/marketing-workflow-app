@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import type {
   UserRole,
@@ -68,6 +69,25 @@ async function loadRequestForUpdate(
   return data;
 }
 
+// True for super_admin always, and for school_admin only when the request's
+// school is one of their own. Used to gate Edit/Delete actions to admins
+// who have authority over the request.
+async function callerCanManageRequest(
+  actor: Actor,
+  req: RequestRow,
+): Promise<boolean> {
+  if (actor.role === "super_admin") return true;
+  if (actor.role !== "school_admin") return false;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("school_members")
+    .select("school_id")
+    .eq("user_id", actor.userId)
+    .eq("school_id", req.school_id)
+    .maybeSingle<{ school_id: string }>();
+  return !!data;
+}
+
 export async function createRequest(
   _prev: CreateRequestState,
   formData: FormData,
@@ -129,9 +149,23 @@ export async function updateRequestDraft(formData: FormData) {
 
   const req = await loadRequestForUpdate(id);
   if ("error" in req) throw new Error(req.error);
-  if (req.status !== "draft") throw new Error("Only drafts can be edited.");
-  if (req.created_by !== actor.userId && actor.role !== "super_admin") {
-    throw new Error("Only the creator can edit this draft.");
+
+  const isCreator = req.created_by === actor.userId;
+  const canManage = await callerCanManageRequest(actor, req);
+  if (!isCreator && !canManage) {
+    throw new Error("You can't edit this request.");
+  }
+
+  // Status rules: the creator can only edit while it's still a draft.
+  // Managing admins can also edit after submission, up until approval.
+  const isAdminEditable =
+    canManage &&
+    (req.status === "draft" || req.status === "pending_admin_approval");
+  const isCreatorEditable = isCreator && req.status === "draft";
+  if (!isCreatorEditable && !isAdminEditable) {
+    throw new Error(
+      "This request can no longer be edited. Archive it instead if needed.",
+    );
   }
 
   const supabase = await createClient();
@@ -262,6 +296,65 @@ export async function archiveRequest(formData: FormData) {
     .is("read_at", null);
 
   revalidatePath(`/requests/${id}`);
+  revalidatePath("/requests");
+  revalidatePath("/notifications");
+  redirect("/requests");
+}
+
+// Hard delete. Restricted to super_admin and school_admin (in their own
+// school). Only allowed while the request is still early (draft or pending
+// approval) — once design work has started, use Archive instead so design
+// history isn't destroyed. Storage objects are removed best-effort; DB
+// cascades clean up request_uploads, designs, published_links, comments
+// and notifications.
+export async function deleteRequest(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing id.");
+
+  const actor = await loadActor();
+  if ("error" in actor) throw new Error(actor.error);
+
+  const req = await loadRequestForUpdate(id);
+  if ("error" in req) throw new Error(req.error);
+
+  const canManage = await callerCanManageRequest(actor, req);
+  if (!canManage) throw new Error("You can't delete this request.");
+  if (req.status !== "draft" && req.status !== "pending_admin_approval") {
+    throw new Error(
+      "Only draft or pending requests can be deleted. Archive later ones instead.",
+    );
+  }
+
+  // The RLS policy on public.requests gates DELETE to super_admin only,
+  // and storage buckets follow similar admin-only delete rules. We've
+  // already enforced the school_admin scope check above, so run the actual
+  // teardown via the service-role client.
+  const admin = createAdminClient();
+
+  const [uploadsRes, designsRes] = await Promise.all([
+    admin
+      .from("request_uploads")
+      .select("storage_path")
+      .eq("request_id", id)
+      .returns<{ storage_path: string }[]>(),
+    admin
+      .from("designs")
+      .select("storage_path")
+      .eq("request_id", id)
+      .returns<{ storage_path: string }[]>(),
+  ]);
+  const uploadPaths = (uploadsRes.data ?? []).map((u) => u.storage_path);
+  const designPaths = (designsRes.data ?? []).map((d) => d.storage_path);
+  if (uploadPaths.length > 0) {
+    await admin.storage.from("request-uploads").remove(uploadPaths);
+  }
+  if (designPaths.length > 0) {
+    await admin.storage.from("designs").remove(designPaths);
+  }
+
+  const { error } = await admin.from("requests").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+
   revalidatePath("/requests");
   revalidatePath("/notifications");
   redirect("/requests");
