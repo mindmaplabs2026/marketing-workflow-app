@@ -126,6 +126,7 @@ function formatDateTime(iso: string): string {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "Asia/Kolkata",
   });
 }
 
@@ -413,7 +414,7 @@ export default async function RequestDetailPage({
                 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
                 : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
             }`}>
-              Due: {new Date(req.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              Due: {new Date(req.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Kolkata" })}
             </span>
           )}
         </div>
