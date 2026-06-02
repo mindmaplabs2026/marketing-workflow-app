@@ -36,15 +36,19 @@ const ROLE_LABEL: Record<UserRole, string> = {
 
 const MIN_PASSWORD_LENGTH = 8;
 
-export async function deleteUser(formData: FormData) {
+export type DeleteUserResult = { error?: string };
+
+export async function deleteUser(
+  formData: FormData,
+): Promise<DeleteUserResult> {
   const userId = String(formData.get("user_id") ?? "");
-  if (!userId) throw new Error("Missing user_id.");
+  if (!userId) return { error: "Missing user_id." };
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in.");
+  if (!user) return { error: "Not signed in." };
 
   const { data: callerProfile } = await supabase
     .from("profiles")
@@ -52,24 +56,78 @@ export async function deleteUser(formData: FormData) {
     .eq("id", user.id)
     .single<{ role: UserRole }>();
   if (callerProfile?.role !== "super_admin") {
-    throw new Error("Only super admins can delete users.");
+    return { error: "Only super admins can delete users." };
   }
   if (user.id === userId) {
-    throw new Error("You can't delete yourself.");
+    return { error: "You can't delete yourself." };
   }
 
   const admin = createAdminClient();
+
+  // Preflight the ON DELETE RESTRICT foreign keys on public.profiles.
+  // GoTrue wraps the underlying Postgres FK error as the opaque string
+  // "Database error deleting user", which the user-facing message can't
+  // explain — so detect the real blockers ourselves first. Table names
+  // mirror migrations 0001 lines 154/183/201/219/246.
+  const [
+    requestsRes,
+    requestUploadsRes,
+    designsRes,
+    calendarItemsRes,
+    publishedLinksRes,
+  ] = await Promise.all([
+    admin
+      .from("requests")
+      .select("id", { head: true, count: "exact" })
+      .eq("created_by", userId),
+    admin
+      .from("request_uploads")
+      .select("id", { head: true, count: "exact" })
+      .eq("uploaded_by", userId),
+    admin
+      .from("designs")
+      .select("id", { head: true, count: "exact" })
+      .eq("uploaded_by", userId),
+    admin
+      .from("calendar_items")
+      .select("id", { head: true, count: "exact" })
+      .eq("created_by", userId),
+    admin
+      .from("published_links")
+      .select("id", { head: true, count: "exact" })
+      .eq("posted_by", userId),
+  ]);
+
+  const blockers: string[] = [];
+  const noun = (n: number, s: string) => `${n} ${s}${n === 1 ? "" : "s"}`;
+  if (requestsRes.count) blockers.push(noun(requestsRes.count, "request"));
+  if (requestUploadsRes.count)
+    blockers.push(noun(requestUploadsRes.count, "request upload"));
+  if (designsRes.count) blockers.push(noun(designsRes.count, "design"));
+  if (calendarItemsRes.count)
+    blockers.push(noun(calendarItemsRes.count, "calendar item"));
+  if (publishedLinksRes.count)
+    blockers.push(noun(publishedLinksRes.count, "published link"));
+
+  if (blockers.length > 0) {
+    return {
+      error: `This account still owns ${blockers.join(", ")}. Reassign or delete that work first, then try again.`,
+    };
+  }
+
   const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) {
     if (/violates foreign key|restrict/i.test(error.message)) {
-      throw new Error(
-        "Can't delete — this user has created requests, designs, or calendar items. Reassign or archive their work first.",
-      );
+      return {
+        error:
+          "This user has created requests, designs, or calendar items. Reassign or archive their work first.",
+      };
     }
-    throw new Error(error.message);
+    return { error: error.message };
   }
 
   revalidatePath("/admin/users");
+  return {};
 }
 
 export async function updateUserRole(formData: FormData) {
