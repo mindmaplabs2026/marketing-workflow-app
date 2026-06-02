@@ -14,13 +14,15 @@ const VALID_ROLES: UserRole[] = [
   "decision_maker",
 ];
 
-const CREATABLE_ROLES: UserRole[] = [
+const SUPER_ADMIN_CAN_CREATE: UserRole[] = [
   "super_admin",
   "designer",
   "school_admin",
   "teacher",
   "decision_maker",
 ];
+
+const SCHOOL_ADMIN_CAN_CREATE: UserRole[] = ["teacher", "decision_maker"];
 
 const SCHOOL_ROLES: UserRole[] = ["school_admin", "teacher", "decision_maker"];
 
@@ -83,17 +85,27 @@ export async function updateUserRole(formData: FormData) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (user?.id === userId) {
+  if (!user) throw new Error("Not signed in.");
+
+  const { data: callerProfile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single<{ role: UserRole }>();
+  if (callerProfile?.role !== "super_admin") {
+    throw new Error("Only super admins can change user roles.");
+  }
+  if (user.id === userId) {
     throw new Error(
       "You can't change your own role here. Use SQL if you really mean to.",
     );
   }
 
-  const { error } = await supabase
+  const admin = createAdminClient();
+  const { error } = await admin
     .from("profiles")
     .update({ role })
     .eq("id", userId);
-
   if (error) throw new Error(error.message);
 
   revalidatePath("/admin/users");
@@ -120,8 +132,9 @@ export async function createUser(
     .select("role")
     .eq("id", user.id)
     .single<{ role: UserRole }>();
-  if (callerProfile?.role !== "super_admin") {
-    return { error: "Only super admins can add teammates." };
+  const callerRole = callerProfile?.role;
+  if (callerRole !== "super_admin" && callerRole !== "school_admin") {
+    return { error: "You don't have permission to add teammates." };
   }
 
   const email = String(formData.get("email") ?? "")
@@ -130,6 +143,7 @@ export async function createUser(
   const fullName = String(formData.get("full_name") ?? "").trim();
   const role = String(formData.get("role") ?? "") as UserRole;
   const password = String(formData.get("password") ?? "");
+  const schoolId = String(formData.get("school_id") ?? "").trim();
 
   if (!email || !email.includes("@")) {
     return { error: "Enter a valid email." };
@@ -137,26 +151,43 @@ export async function createUser(
   if (!fullName) {
     return { error: "Enter their full name." };
   }
-  if (!CREATABLE_ROLES.includes(role)) {
-    return { error: "Pick a role." };
-  }
   if (password.length < MIN_PASSWORD_LENGTH) {
     return {
       error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
     };
   }
 
+  const allowedRoles =
+    callerRole === "super_admin" ? SUPER_ADMIN_CAN_CREATE : SCHOOL_ADMIN_CAN_CREATE;
+  if (!allowedRoles.includes(role)) {
+    return { error: "You can't assign that role." };
+  }
+
   const needsSchool = SCHOOL_ROLES.includes(role);
-  const schoolId = String(formData.get("school_id") ?? "").trim();
+
+  // Resolve and validate the school. School-side roles must be attached
+  // to a school at create time; school_admin callers can only attach to
+  // schools they're a member of.
   if (needsSchool) {
     if (!schoolId) return { error: "Pick a school for this user." };
-    const { data: schoolRow, error: schoolErr } = await supabase
+    const { data: schoolRow } = await supabase
       .from("schools")
       .select("id")
       .eq("id", schoolId)
       .maybeSingle<{ id: string }>();
-    if (schoolErr) return { error: schoolErr.message };
     if (!schoolRow) return { error: "That school doesn't exist." };
+
+    if (callerRole === "school_admin") {
+      const { data: membership } = await supabase
+        .from("school_members")
+        .select("school_id")
+        .eq("user_id", user.id)
+        .eq("school_id", schoolId)
+        .maybeSingle<{ school_id: string }>();
+      if (!membership) {
+        return { error: "You can only add users to your own school." };
+      }
+    }
   }
 
   const admin = createAdminClient();
@@ -179,11 +210,10 @@ export async function createUser(
 
   const newUserId = created.user.id;
 
-  // Promote the auto-created profile to the chosen role and flag the
-  // account so the proxy forces a password change on first login. Done
-  // with the super admin's own session so prevent_role_self_change
-  // (which allows role changes when the caller is super_admin) is happy.
-  const { error: profileErr } = await supabase
+  // Update via the admin client. School_admin callers can't satisfy the
+  // profiles_update_any_as_super_admin RLS, and prevent_role_self_change
+  // was extended in migration 0017 to allow service-role through.
+  const { error: profileErr } = await admin
     .from("profiles")
     .update({ role, password_set: false })
     .eq("id", newUserId);
@@ -192,12 +222,12 @@ export async function createUser(
   }
 
   if (needsSchool) {
-    const { error: memberErr } = await supabase
+    const { error: memberErr } = await admin
       .from("school_members")
       .insert({ school_id: schoolId, user_id: newUserId });
     if (memberErr) {
       return {
-        error: `User created, but couldn't attach to that school: ${memberErr.message}. Add them at /admin/schools/${schoolId}.`,
+        error: `User created, but couldn't attach to that school: ${memberErr.message}.`,
       };
     }
   }

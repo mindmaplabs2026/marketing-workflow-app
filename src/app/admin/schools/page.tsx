@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/auth";
 import { CreateSchoolForm } from "./create-school-form";
 
 type SchoolRow = {
@@ -9,6 +11,9 @@ type SchoolRow = {
 };
 
 export default async function SchoolsPage() {
+  const session = await getSessionUser();
+  if (session?.role !== "super_admin") redirect("/admin/users");
+
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("schools")

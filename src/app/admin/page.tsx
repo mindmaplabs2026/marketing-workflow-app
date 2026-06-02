@@ -1,7 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/auth";
 
 export default async function AdminHome() {
+  const session = await getSessionUser();
+  if (session?.role === "school_admin") redirect("/admin/users");
+
   const supabase = await createClient();
   const [{ count: schoolCount }, { count: userCount }] = await Promise.all([
     supabase.from("schools").select("*", { count: "exact", head: true }),

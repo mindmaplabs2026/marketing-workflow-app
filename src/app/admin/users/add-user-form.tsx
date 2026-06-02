@@ -6,13 +6,13 @@ import type { UserRole } from "@/lib/supabase/types";
 
 const initialState: CreateUserState = {};
 
-const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
-  { value: "designer", label: "Designer" },
-  { value: "super_admin", label: "Super admin" },
-  { value: "school_admin", label: "School admin" },
-  { value: "teacher", label: "Teacher" },
-  { value: "decision_maker", label: "Decision maker" },
-];
+const ROLE_LABEL: Record<UserRole, string> = {
+  super_admin: "Super admin",
+  designer: "Designer",
+  school_admin: "School admin",
+  teacher: "Teacher",
+  decision_maker: "Decision maker",
+};
 
 const SCHOOL_ROLES: UserRole[] = ["school_admin", "teacher", "decision_maker"];
 
@@ -35,10 +35,18 @@ function generatePassword(): string {
 
 type SchoolLite = { id: string; name: string };
 
-export function AddUserForm({ schools }: { schools: SchoolLite[] }) {
+export function AddUserForm({
+  schools,
+  availableRoles,
+}: {
+  schools: SchoolLite[];
+  availableRoles: UserRole[];
+}) {
   const formRef = useRef<HTMLFormElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const [needsSchool, setNeedsSchool] = useState(false);
+  const [needsSchool, setNeedsSchool] = useState(
+    SCHOOL_ROLES.includes(availableRoles[0]),
+  );
 
   const [state, formAction, pending] = useActionState(
     async (prev: CreateUserState, fd: FormData): Promise<CreateUserState> => {
@@ -145,21 +153,19 @@ export function AddUserForm({ schools }: { schools: SchoolLite[] }) {
             Role
           </legend>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2 text-sm">
-            {ROLE_OPTIONS.map((opt, idx) => (
+            {availableRoles.map((value, idx) => (
               <label
-                key={opt.value}
+                key={value}
                 className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300"
               >
                 <input
                   type="radio"
                   name="role"
-                  value={opt.value}
+                  value={value}
                   defaultChecked={idx === 0}
-                  onChange={() =>
-                    setNeedsSchool(SCHOOL_ROLES.includes(opt.value))
-                  }
+                  onChange={() => setNeedsSchool(SCHOOL_ROLES.includes(value))}
                 />
-                {opt.label}
+                {ROLE_LABEL[value]}
               </label>
             ))}
           </div>

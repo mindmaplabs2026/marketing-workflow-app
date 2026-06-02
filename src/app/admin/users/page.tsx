@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSessionUser } from "@/lib/supabase/auth";
 import { AddUserForm } from "./add-user-form";
 import { RoleSelect } from "./role-select";
 import { DeleteUserButton } from "./delete-user-button";
@@ -15,11 +17,33 @@ type ProfileRow = {
 
 const PAGE_SIZE = 10;
 
+const ROLE_LABEL: Record<UserRole, string> = {
+  super_admin: "Super admin",
+  designer: "Designer",
+  school_admin: "School admin",
+  teacher: "Teacher",
+  decision_maker: "Decision maker",
+};
+
+const SUPER_ADMIN_ROLES: UserRole[] = [
+  "designer",
+  "super_admin",
+  "school_admin",
+  "teacher",
+  "decision_maker",
+];
+const SCHOOL_ADMIN_ROLES: UserRole[] = ["teacher", "decision_maker"];
+
 export default async function UsersPage({
   searchParams,
 }: {
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
+  const session = await getSessionUser();
+  if (!session) redirect("/login");
+  const callerRole = session.role;
+  const isSuperAdmin = callerRole === "super_admin";
+
   const { q = "", page = "1" } = await searchParams;
   const query = q.trim();
   const queryLower = query.toLowerCase();
@@ -28,9 +52,18 @@ export default async function UsersPage({
   const supabase = await createClient();
   const adminClient = createAdminClient();
 
-  const {
-    data: { user: currentUser },
-  } = await supabase.auth.getUser();
+  // For school_admin: resolve the schools they belong to. The Add form
+  // can only attach to these, and the users list is filtered to people
+  // who share at least one school with them.
+  let scopedSchoolIds: string[] = [];
+  if (!isSuperAdmin) {
+    const { data: my } = await supabase
+      .from("school_members")
+      .select("school_id")
+      .eq("user_id", session.id)
+      .returns<{ school_id: string }[]>();
+    scopedSchoolIds = (my ?? []).map((r) => r.school_id);
+  }
 
   const [profilesRes, authListRes, schoolsRes] = await Promise.all([
     supabase
@@ -39,11 +72,18 @@ export default async function UsersPage({
       .order("created_at", { ascending: true })
       .returns<ProfileRow[]>(),
     adminClient.auth.admin.listUsers({ perPage: 200 }),
-    supabase
-      .from("schools")
-      .select("id, name")
-      .order("name", { ascending: true })
-      .returns<{ id: string; name: string }[]>(),
+    isSuperAdmin
+      ? supabase
+          .from("schools")
+          .select("id, name")
+          .order("name", { ascending: true })
+          .returns<{ id: string; name: string }[]>()
+      : supabase
+          .from("schools")
+          .select("id, name")
+          .in("id", scopedSchoolIds.length ? scopedSchoolIds : ["__none__"])
+          .order("name", { ascending: true })
+          .returns<{ id: string; name: string }[]>(),
   ]);
 
   const profiles = profilesRes.data ?? [];
@@ -52,15 +92,31 @@ export default async function UsersPage({
   );
   const schools = schoolsRes.data ?? [];
 
+  // School_admin view: keep only profiles that share a school with the
+  // caller (or are the caller themselves). Done after the profiles fetch
+  // so we can also include any super_admin/designer who happens to be in
+  // one of the same school_members rows.
+  let scopedProfiles = profiles;
+  if (!isSuperAdmin) {
+    const { data: members } = await supabase
+      .from("school_members")
+      .select("user_id")
+      .in("school_id", scopedSchoolIds.length ? scopedSchoolIds : ["__none__"])
+      .returns<{ user_id: string }[]>();
+    const allowedIds = new Set((members ?? []).map((r) => r.user_id));
+    allowedIds.add(session.id);
+    scopedProfiles = profiles.filter((p) => allowedIds.has(p.id));
+  }
+
   const filtered = queryLower
-    ? profiles.filter((p) => {
+    ? scopedProfiles.filter((p) => {
         const email = emailById.get(p.id) ?? "";
         return (
           (p.full_name ?? "").toLowerCase().includes(queryLower) ||
           email.toLowerCase().includes(queryLower)
         );
       })
-    : profiles;
+    : scopedProfiles;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(requestedPage, totalPages);
@@ -82,12 +138,16 @@ export default async function UsersPage({
           Users
         </h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          {profiles.length} signed up. New signups default to{" "}
-          <span className="font-medium">Teacher</span>; change roles here.
+          {isSuperAdmin
+            ? `${scopedProfiles.length} signed up.`
+            : `${scopedProfiles.length} in your school.`}
         </p>
       </div>
 
-      <AddUserForm schools={schools} />
+      <AddUserForm
+        schools={schools}
+        availableRoles={isSuperAdmin ? SUPER_ADMIN_ROLES : SCHOOL_ADMIN_ROLES}
+      />
 
       <form
         method="get"
@@ -130,14 +190,14 @@ export default async function UsersPage({
             <tr>
               <th className="px-4 py-3">Name / email</th>
               <th className="px-4 py-3">Role</th>
-              <th className="px-4 py-3 text-right">Actions</th>
+              {isSuperAdmin && <th className="px-4 py-3 text-right">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
             {pageRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3}
+                  colSpan={isSuperAdmin ? 3 : 2}
                   className="px-4 py-8 text-center text-sm text-zinc-500"
                 >
                   No users match that search.
@@ -146,7 +206,7 @@ export default async function UsersPage({
             )}
             {pageRows.map((p) => {
               const email = emailById.get(p.id) || "(unknown email)";
-              const isSelf = p.id === currentUser?.id;
+              const isSelf = p.id === session.id;
               const label = p.full_name?.trim() || email;
               return (
                 <tr key={p.id}>
@@ -162,17 +222,25 @@ export default async function UsersPage({
                     <p className="text-xs text-zinc-500">{email}</p>
                   </td>
                   <td className="px-4 py-3">
-                    <RoleSelect
-                      userId={p.id}
-                      currentRole={p.role}
-                      disabled={isSelf}
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {!isSelf && (
-                      <DeleteUserButton userId={p.id} label={label} />
+                    {isSuperAdmin ? (
+                      <RoleSelect
+                        userId={p.id}
+                        currentRole={p.role}
+                        disabled={isSelf}
+                      />
+                    ) : (
+                      <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                        {ROLE_LABEL[p.role]}
+                      </span>
                     )}
                   </td>
+                  {isSuperAdmin && (
+                    <td className="px-4 py-3 text-right">
+                      {!isSelf && (
+                        <DeleteUserButton userId={p.id} label={label} />
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}

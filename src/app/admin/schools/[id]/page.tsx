@@ -1,6 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSessionUser } from "@/lib/supabase/auth";
 import { deleteSchool, renameSchool } from "../actions";
 import { removeMember } from "./actions";
 import { AddMemberForm } from "./add-member-form";
@@ -40,6 +41,9 @@ export default async function SchoolDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const session = await getSessionUser();
+  if (session?.role !== "super_admin") redirect("/admin/users");
+
   const { id: schoolId } = await params;
 
   const supabase = await createClient();

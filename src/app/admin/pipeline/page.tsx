@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/auth";
 import type { RequestStatus } from "@/lib/supabase/types";
 import { STATUS_BADGE_CLASS } from "@/app/requests/status";
 
@@ -97,6 +99,9 @@ export default async function PipelinePage({
 }: {
   searchParams: Promise<{ school?: string }>;
 }) {
+  const session = await getSessionUser();
+  if (session?.role !== "super_admin") redirect("/admin/users");
+
   const params = await searchParams;
   const schoolFilter = params.school?.trim() || "";
 

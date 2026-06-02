@@ -9,12 +9,14 @@ export default async function AdminLayout({
 }) {
   const session = await getSessionUser();
   if (!session) redirect("/login");
-  if (session.role !== "super_admin") redirect("/?denied=1");
+  if (session.role !== "super_admin" && session.role !== "school_admin") {
+    redirect("/?denied=1");
+  }
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-6 border-b border-zinc-200 dark:border-zinc-800">
-        <AdminTabs />
+        <AdminTabs role={session.role} />
       </div>
       {children}
     </div>

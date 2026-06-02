@@ -2,19 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { UserRole } from "@/lib/supabase/types";
 
-const NAV = [
+const SUPER_NAV = [
   { href: "/admin/pipeline", label: "Pipeline" },
   { href: "/admin/schools", label: "Schools" },
   { href: "/admin/users", label: "Users" },
 ];
 
-export function AdminTabs() {
+const SCHOOL_NAV = [{ href: "/admin/users", label: "Users" }];
+
+export function AdminTabs({ role }: { role: UserRole }) {
   const pathname = usePathname();
+  const nav = role === "super_admin" ? SUPER_NAV : SCHOOL_NAV;
 
   return (
     <nav className="-mb-px flex flex-wrap gap-1 text-sm">
-      {NAV.map((item) => {
+      {nav.map((item) => {
         const isActive =
           pathname === item.href || pathname.startsWith(item.href + "/");
         return (
