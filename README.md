@@ -14,24 +14,24 @@ The app ships as a **Progressive Web App (PWA)**. Users on Android or iOS open t
 
 ### Asymmetric UX design (load-bearing decision)
 
-- **School side** (school admins, teachers, decision makers) is intentionally light — magic-link sign-in, minimal taps, mobile-first. Every interaction must feel lighter than the WhatsApp it replaces.
+- **School side** (school admins, teachers, decision makers) is intentionally light — minimal taps, mobile-first. Every interaction must feel lighter than the WhatsApp it replaces.
 - **Designer side** (internal team) is structured — dashboards, queues, filters. Designers can tolerate process because it saves them hours per week.
 
 ---
 
 ## User roles
 
-| Role | What they do | Sign-in method |
+All roles sign in the same way: email + password at `/login`.
+
+| Role | What they do | Who creates them |
 |---|---|---|
-| `super_admin` | Mindmap Labs leadership. Manages schools, designers, and all users. Full app access. | Password |
-| `designer` | Internal designer. Sees the request queue, claims work, uploads designs. | Password |
-| `school_admin` | School-side lead. Approves outgoing requests on behalf of the school. | Magic link |
-| `teacher` | School-side contributor. Creates requests, uploads briefs and photos. | Magic link |
-| `decision_maker` | School-side approver (e.g. principal). Approves final designs. | Magic link |
+| `super_admin` | Mindmap Labs leadership. Manages schools, designers, and all users. Full app access. | Another super admin |
+| `designer` | Internal designer. Sees the request queue, claims work, uploads designs. | Super admin |
+| `school_admin` | School-side lead. Approves outgoing requests on behalf of the school. Can also add `teacher` and `decision_maker` users in their own school. | Super admin |
+| `teacher` | School-side contributor. Creates requests, uploads briefs and photos. | Super admin or that school's school_admin |
+| `decision_maker` | School-side approver (e.g. principal). Approves final designs. | Super admin or that school's school_admin |
 
-Internal users (`super_admin`, `designer`) set a password on first sign-in via `/setup-password`. School-side users skip this step — they receive a magic link and go straight in.
-
-Login is invite-only: `/login` uses `shouldCreateUser:false`, so unknown emails are rejected with a clear message asking the user to contact a super admin. Super admins invite users at `/admin/users`.
+Accounts are admin-created only — there is no public signup. The creating admin (super_admin or school_admin) sets an initial password right in the Add User form (or clicks Generate to roll a strong one) and the credentials get emailed to the user. On first sign-in the proxy forces them through `/change-password`, where they enter the temp password as "Current password" (pre-filled from the just-typed value), pick a new one, confirm, and land on the home page with a "Password changed successfully" toast.
 
 ---
 
@@ -74,9 +74,9 @@ A one-tap quick-approve link in emails routes to `/api/quick-approve` for approv
 ## Tech stack
 
 - **Framework:** Next.js 16.2.6 (App Router, Turbopack, Server Actions)
-- **Database & Auth:** Supabase (Postgres, Row-Level Security, magic-link + password auth)
+- **Database & Auth:** Supabase (Postgres, Row-Level Security, email + password auth)
 - **Hosting:** Vercel
-- **Email:** Resend (transactional, magic-link delivery, digests)
+- **Email:** Resend (transactional credentials delivery, digests, quick-approve)
 - **Push notifications:** `web-push` (VAPID)
 - **Styling:** Tailwind CSS v4
 - **Language:** TypeScript 5
@@ -93,11 +93,9 @@ marketing-workflow-app/
 ├── src/
 │   ├── app/
 │   │   ├── page.tsx                  Home (role-based landing)
-│   │   ├── login/                    Magic-link sign-in (school)
-│   │   ├── login/team/               Password sign-in (internal)
-│   │   ├── setup-password/           First-time password setup (internal)
-│   │   ├── auth/callback/            Magic-link callback handler
-│   │   ├── admin/                    Super admin area
+│   │   ├── login/                    Email + password sign-in
+│   │   ├── change-password/          Forced first-login password change
+│   │   ├── admin/                    Super admin + school admin area
 │   │   │   ├── pipeline/             All requests across all schools
 │   │   │   ├── schools/              School list + detail + members
 │   │   │   └── users/                User list + invite form
@@ -117,7 +115,7 @@ marketing-workflow-app/
 │   │   └── push/                     Web push dispatchers
 │   ├── components/                   Shared UI components
 │   └── proxy.ts                      Next.js proxy (replaces middleware)
-├── supabase/migrations/              SQL migrations (0001 → 0007)
+├── supabase/migrations/              SQL migrations (0001 → 0017)
 ├── scripts/                          Seed + utility scripts
 ├── public/                           Static assets, manifest, service worker
 └── vercel.json                       Vercel config + cron schedules
@@ -127,17 +125,14 @@ marketing-workflow-app/
 
 ## Database schema
 
-Defined across 7 SQL migrations in `supabase/migrations/`:
+Defined across the SQL migrations in `supabase/migrations/`. Key ones for understanding auth + access:
 
 | Migration | Purpose |
 |---|---|
 | `0001_initial_schema.sql` | Core tables: `schools`, `profiles`, `school_members`, `requests`, `request_uploads`, `designs`, `published_links` |
 | `0002_rls_and_storage.sql` | Row-Level Security policies + Supabase Storage buckets |
-| `0003_notifications.sql` | `notifications` table + triggers |
-| `0004_push_subscriptions.sql` | Web push subscription storage |
-| `0005_email_digest.sql` | Daily email digest support + prefs |
-| `0006_calendar_feedback.sql` | `calendar_items` table + feedback flow |
-| `0007_password_set.sql` | `profiles.password_set` flag for internal user setup |
+| `0007_password_set.sql` | `profiles.password_set` flag. `false` = admin-created, must change on first login. `true` after the user runs through `/change-password`. |
+| `0017_school_admin_role_bypass.sql` | Lets `auth.role() = 'service_role'` bypass the `prevent_role_self_change` trigger so admin-client role assignments after `createUser` go through. |
 
 Apply via the Supabase CLI:
 
@@ -207,7 +202,7 @@ All variables live in `.env.local` (locally) and in Vercel project settings (pro
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_APP_URL` | Full URL of the running app. `http://localhost:3000` locally; `https://your-app.vercel.app` in production. Used in magic-link redirects and email contents — **must match the actual host** or auth links break. |
+| `NEXT_PUBLIC_APP_URL` | Full URL of the running app. `http://localhost:3000` locally; `https://your-app.vercel.app` in production. Used in the credentials-email "Sign in" link — **must match the actual host**. |
 
 ### Required — Email (Resend)
 
@@ -263,9 +258,15 @@ npm run lint     # Run ESLint
 ### Utility scripts
 
 ```bash
-node scripts/generate-vapid.mjs              # Generate VAPID keys for web push
-node scripts/seed.mjs                        # Seed Test School + 4 test users
-node scripts/change-school-admin-email.mjs   # Change a school admin's email
+node scripts/generate-vapid.mjs                          # Generate VAPID keys for web push
+node scripts/seed.mjs                                    # Seed Test School + 4 test users
+node scripts/change-school-admin-email.mjs               # Change a school admin's email
+node --env-file=.env.local scripts/seed-existing-passwords.mjs
+                                                         # One-time: give every existing
+                                                         # password_set=false user a temp
+                                                         # password (ChangeMe@2026) and
+                                                         # email them. Forces /change-password
+                                                         # on their next sign-in.
 ```
 
 ---
@@ -293,13 +294,12 @@ vercel --prod --yes
 
 ### Required post-deploy configuration
 
-After the first deploy, configure Supabase to allow the Vercel URL:
+After the first deploy, set the **Site URL** in Supabase so password-reset emails (if you ever turn that flow on) and any future email link points at production:
 
 1. **Supabase Dashboard → Authentication → URL Configuration**
 2. **Site URL:** `https://your-vercel-url.vercel.app`
-3. **Redirect URLs:** add `https://your-vercel-url.vercel.app/auth/callback` and `https://your-vercel-url.vercel.app/**`
 
-Without this, magic links fail silently — Supabase rejects redirects to unconfigured URLs.
+No Redirect URLs need to be allow-listed — the app does not use Supabase's hosted OAuth/OTP callback. Sign-in is plain `signInWithPassword`, which returns a session directly without redirects.
 
 ### Cron jobs
 
@@ -321,11 +321,11 @@ Runs at **02:30 UTC daily**. The endpoint requires the `CRON_SECRET` header to e
 | Area | Status |
 |---|---|
 | Database schema + RLS | Complete |
-| Auth flows (magic link + password + invite + setup-password) | Complete |
+| Auth flows (email + password sign-in, admin-created accounts, forced first-login password change) | Complete |
 | Request lifecycle (draft → published) | Complete |
 | Calendar planning + feedback | Complete |
 | Notifications (in-app + web push + email digest) | Complete |
-| Super admin area (schools, users, pipeline) | Complete |
+| Super admin area (schools, users, pipeline) + scoped school admin user management | Complete |
 | PWA (manifest, service worker, Add to Home Screen) | Complete |
 | Production deploy on Vercel | **Live** |
 | Resend domain verification | **Pending** — invite emails only deliver to the verified Resend address until a Mindmap Labs domain is added |
@@ -334,7 +334,7 @@ Runs at **02:30 UTC daily**. The endpoint requires the `CRON_SECRET` header to e
 
 ### Known limitations
 
-- **Resend sandbox mode is active.** Until a domain is verified at resend.com/domains and `EMAIL_FROM` is updated, the app can only send emails to the verified Resend account address. Invites to any other address are blocked by Resend — the user still gets created in Supabase, but receives no email and cannot complete first-time sign-in until the domain is verified.
+- **Resend sandbox mode is active.** Until a domain is verified at resend.com/domains and `EMAIL_FROM` is updated, the app can only send emails to the verified Resend account address. Add-user calls to any other address are blocked by Resend — the user still gets created in Supabase, but receives no credentials email. Workaround: the admin who created them shares the password manually until the domain is verified.
 - **No custom domain yet.** Production is served from `marketing-workflow-app-ht3l.vercel.app` pending a Mindmap Labs decision on the production domain (e.g. `app.mindmaplabs.in`).
 
 ---

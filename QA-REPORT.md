@@ -5,6 +5,8 @@
 **Tester:** Automated (Playwright MCP)
 **Branch:** `main` (commit `63a566e`)
 
+> **Stale — auth flow changed on 2026-06-02.** Sections 1 (Login Page — Magic Link) and 2 (Team Login Page — Password) describe the pre-`a833090` magic-link + dual-login-route world. Production now has a single `/login` password form; the magic-link flow and all `/auth/*` callbacks were deleted. Re-run QA before relying on those sections. Sections 3+ are unaffected by the auth change.
+
 ---
 
 ## Test Environment

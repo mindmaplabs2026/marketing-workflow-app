@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSessionUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import { SuccessToast } from "@/components/success-toast";
 import type { UserRole } from "@/lib/supabase/types";
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -65,7 +66,7 @@ function cardsFor(role: UserRole): Card[] {
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ denied?: string }>;
+  searchParams: Promise<{ denied?: string; changed?: string }>;
 }) {
   const params = await searchParams;
   const session = await getSessionUser();
@@ -111,6 +112,12 @@ export default async function Home({
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
+      {params.changed === "password" && (
+        <SuccessToast
+          message="Password changed successfully"
+          paramName="changed"
+        />
+      )}
       <div className="space-y-6">
         {params.denied && (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
