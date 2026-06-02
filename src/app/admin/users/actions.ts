@@ -24,6 +24,11 @@ const SUPER_ADMIN_CAN_CREATE: UserRole[] = [
 
 const SCHOOL_ADMIN_CAN_CREATE: UserRole[] = ["teacher", "decision_maker"];
 
+// Roles a school_admin is allowed to manage (assign, change, delete).
+// Mirrors SCHOOL_ADMIN_CAN_CREATE today but kept separate so the create vs
+// manage rules can drift later without confusion.
+const SCHOOL_ADMIN_CAN_MANAGE: UserRole[] = ["teacher", "decision_maker"];
+
 const SCHOOL_ROLES: UserRole[] = ["school_admin", "teacher", "decision_maker"];
 
 const ROLE_LABEL: Record<UserRole, string> = {
@@ -55,14 +60,38 @@ export async function deleteUser(
     .select("role")
     .eq("id", user.id)
     .single<{ role: UserRole }>();
-  if (callerProfile?.role !== "super_admin") {
-    return { error: "Only super admins can delete users." };
+  const callerRole = callerProfile?.role;
+  if (callerRole !== "super_admin" && callerRole !== "school_admin") {
+    return { error: "You don't have permission to delete users." };
   }
   if (user.id === userId) {
     return { error: "You can't delete yourself." };
   }
 
   const admin = createAdminClient();
+
+  // School admins can only delete teachers or decision-makers who share
+  // one of their schools. Super admins skip this scope check.
+  if (callerRole === "school_admin") {
+    const { data: target } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .single<{ role: UserRole }>();
+    if (!target || !SCHOOL_ADMIN_CAN_MANAGE.includes(target.role)) {
+      return {
+        error: "You can only delete teachers or decision-makers in your school.",
+      };
+    }
+    const sharesSchool = await callerSharesSchoolWithTarget(
+      admin,
+      user.id,
+      userId,
+    );
+    if (!sharesSchool) {
+      return { error: "That user isn't in your school." };
+    }
+  }
 
   // Preflight the ON DELETE RESTRICT foreign keys on public.profiles.
   // GoTrue wraps the underlying Postgres FK error as the opaque string
@@ -130,12 +159,16 @@ export async function deleteUser(
   return {};
 }
 
-export async function updateUserRole(formData: FormData) {
+export type UpdateUserRoleResult = { error?: string };
+
+export async function updateUserRole(
+  formData: FormData,
+): Promise<UpdateUserRoleResult> {
   const userId = String(formData.get("user_id") ?? "");
   const role = String(formData.get("role") ?? "") as UserRole;
 
   if (!userId || !VALID_ROLES.includes(role)) {
-    throw new Error("Invalid input.");
+    return { error: "Invalid input." };
   }
 
   const supabase = await createClient();
@@ -143,30 +176,60 @@ export async function updateUserRole(formData: FormData) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in.");
+  if (!user) return { error: "Not signed in." };
 
   const { data: callerProfile } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", user.id)
     .single<{ role: UserRole }>();
-  if (callerProfile?.role !== "super_admin") {
-    throw new Error("Only super admins can change user roles.");
+  const callerRole = callerProfile?.role;
+  if (callerRole !== "super_admin" && callerRole !== "school_admin") {
+    return { error: "You don't have permission to change roles." };
   }
   if (user.id === userId) {
-    throw new Error(
-      "You can't change your own role here. Use SQL if you really mean to.",
-    );
+    return {
+      error: "You can't change your own role here.",
+    };
   }
 
   const admin = createAdminClient();
+
+  // School admins can only swap a user between teacher and decision-maker,
+  // and only for someone already in one of those roles within their school.
+  if (callerRole === "school_admin") {
+    if (!SCHOOL_ADMIN_CAN_MANAGE.includes(role)) {
+      return { error: "You can only assign Teacher or Decision-maker." };
+    }
+    const { data: target } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .single<{ role: UserRole }>();
+    if (!target || !SCHOOL_ADMIN_CAN_MANAGE.includes(target.role)) {
+      return {
+        error:
+          "You can only change the role of teachers or decision-makers in your school.",
+      };
+    }
+    const sharesSchool = await callerSharesSchoolWithTarget(
+      admin,
+      user.id,
+      userId,
+    );
+    if (!sharesSchool) {
+      return { error: "That user isn't in your school." };
+    }
+  }
+
   const { error } = await admin
     .from("profiles")
     .update({ role })
     .eq("id", userId);
-  if (error) throw new Error(error.message);
+  if (error) return { error: error.message };
 
   revalidatePath("/admin/users");
+  return {};
 }
 
 export type CreateUserState = {
@@ -391,4 +454,29 @@ Sign in: ${loginUrl}
 Please change your password after first login. You'll be prompted to do it as soon as you sign in.`;
 
   return { subject, html, text };
+}
+
+// Returns true if the caller and the target appear together in any
+// school_members row. Used to scope school_admin actions to their own
+// school. Runs on the service-role client so it sees both sides even
+// when RLS would hide rows from a school_admin's view.
+async function callerSharesSchoolWithTarget(
+  admin: ReturnType<typeof createAdminClient>,
+  callerId: string,
+  targetId: string,
+): Promise<boolean> {
+  const [mineRes, theirsRes] = await Promise.all([
+    admin
+      .from("school_members")
+      .select("school_id")
+      .eq("user_id", callerId)
+      .returns<{ school_id: string }[]>(),
+    admin
+      .from("school_members")
+      .select("school_id")
+      .eq("user_id", targetId)
+      .returns<{ school_id: string }[]>(),
+  ]);
+  const mine = new Set((mineRes.data ?? []).map((r) => r.school_id));
+  return (theirsRes.data ?? []).some((r) => mine.has(r.school_id));
 }

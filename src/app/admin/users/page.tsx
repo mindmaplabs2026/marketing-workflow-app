@@ -34,6 +34,10 @@ const SUPER_ADMIN_ROLES: UserRole[] = [
 ];
 const SCHOOL_ADMIN_ROLES: UserRole[] = ["teacher", "decision_maker"];
 
+// Roles a school_admin is allowed to manage in the user list (role edit +
+// delete). Mirrors SCHOOL_ADMIN_CAN_MANAGE on the server.
+const SCHOOL_ADMIN_MANAGEABLE: UserRole[] = ["teacher", "decision_maker"];
+
 export default async function UsersPage({
   searchParams,
 }: {
@@ -190,14 +194,14 @@ export default async function UsersPage({
             <tr>
               <th className="px-4 py-3">Name / email</th>
               <th className="px-4 py-3">Role</th>
-              {isSuperAdmin && <th className="px-4 py-3 text-right">Actions</th>}
+              <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
             {pageRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={isSuperAdmin ? 3 : 2}
+                  colSpan={3}
                   className="px-4 py-8 text-center text-sm text-zinc-500"
                 >
                   No users match that search.
@@ -208,6 +212,16 @@ export default async function UsersPage({
               const email = emailById.get(p.id) || "(unknown email)";
               const isSelf = p.id === session.id;
               const label = p.full_name?.trim() || email;
+              // A row is manageable (role-edit + delete) when the caller
+              // has authority over the target. Super admins manage anyone
+              // but themselves; school admins manage only teachers /
+              // decision-makers in their own school (list is already
+              // scoped to their school above).
+              const canManage = isSelf
+                ? false
+                : isSuperAdmin
+                  ? true
+                  : SCHOOL_ADMIN_MANAGEABLE.includes(p.role);
               return (
                 <tr key={p.id}>
                   <td className="px-4 py-3">
@@ -222,11 +236,13 @@ export default async function UsersPage({
                     <p className="text-xs text-zinc-500">{email}</p>
                   </td>
                   <td className="px-4 py-3">
-                    {isSuperAdmin ? (
+                    {canManage ? (
                       <RoleSelect
                         userId={p.id}
                         currentRole={p.role}
-                        disabled={isSelf}
+                        availableRoles={
+                          isSuperAdmin ? undefined : SCHOOL_ADMIN_MANAGEABLE
+                        }
                       />
                     ) : (
                       <span className="text-sm text-zinc-700 dark:text-zinc-300">
@@ -234,13 +250,11 @@ export default async function UsersPage({
                       </span>
                     )}
                   </td>
-                  {isSuperAdmin && (
-                    <td className="px-4 py-3 text-right">
-                      {!isSelf && (
-                        <DeleteUserButton userId={p.id} label={label} />
-                      )}
-                    </td>
-                  )}
+                  <td className="px-4 py-3 text-right">
+                    {canManage && (
+                      <DeleteUserButton userId={p.id} label={label} />
+                    )}
+                  </td>
                 </tr>
               );
             })}
