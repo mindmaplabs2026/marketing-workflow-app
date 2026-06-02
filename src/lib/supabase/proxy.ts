@@ -1,16 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = [
-  "/login",
-  "/login/team",
-  "/auth/callback",
-  "/auth/native-callback",
-  // verifyOtp runs inside this route handler and creates the session from
-  // the token in the URL — invitees hitting it have no session yet, so the
-  // proxy must let them through.
-  "/auth/confirm",
-];
+const PUBLIC_PATHS = ["/login"];
 const SETUP_PASSWORD_PATH = "/setup-password";
 
 function isPublicPath(pathname: string): boolean {
@@ -78,7 +69,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (pathname === "/login" || pathname === "/login/team") {
+  if (pathname === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.search = "";
