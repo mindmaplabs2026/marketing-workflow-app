@@ -6,7 +6,7 @@ import { CapacitorNative } from "@/components/capacitor-native";
 import { RefreshOnFocus } from "@/components/refresh-on-focus";
 import { AppShell } from "@/components/app-shell";
 
-const SHELL_FREE_PREFIXES = ["/login", "/setup-password"];
+const SHELL_FREE_PREFIXES = ["/login", "/change-password"];
 
 function isShellFree(pathname: string): boolean {
   return SHELL_FREE_PREFIXES.some(

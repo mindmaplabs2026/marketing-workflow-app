@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login"];
-const SETUP_PASSWORD_PATH = "/setup-password";
+const CHANGE_PASSWORD_PATH = "/change-password";
 
 function isPublicPath(pathname: string): boolean {
   // API routes do their own auth (Bearer secret, or via createClient() inside
@@ -52,7 +52,7 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const publicPath = isPublicPath(pathname);
-  const onSetupPath = pathname === SETUP_PASSWORD_PATH;
+  const onChangePasswordPath = pathname.startsWith(CHANGE_PASSWORD_PATH);
 
   // Public paths never need auth — skip the Supabase round-trip
   // entirely. Cuts ~200ms off every /login, /auth/* and /api/* nav.
@@ -76,10 +76,11 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Invited internal users land here right after redeeming their invite
-  // link. Force them through /setup-password before they can do anything
-  // else; the setPassword action flips password_set=true and lets them out.
-  if (!onSetupPath) {
+  // First sign-in after admin-created account: admin gave the user an
+  // initial password and password_set is false. Force them to
+  // /change-password to pick their own; the changePassword action flips
+  // password_set=true and bounces them to / with a success toast.
+  if (!onChangePasswordPath) {
     const { data: profile } = await supabase
       .from("profiles")
       .select("password_set")
@@ -87,7 +88,7 @@ export async function updateSession(request: NextRequest) {
       .single();
     if (profile && profile.password_set === false) {
       const url = request.nextUrl.clone();
-      url.pathname = SETUP_PASSWORD_PATH;
+      url.pathname = CHANGE_PASSWORD_PATH;
       url.search = "";
       return NextResponse.redirect(url);
     }
