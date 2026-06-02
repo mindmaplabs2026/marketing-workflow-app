@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { InviteForm } from "./invite-form";
+import { AddUserForm } from "./add-user-form";
 import { RoleSelect } from "./role-select";
 import { DeleteUserButton } from "./delete-user-button";
 import type { UserRole } from "@/lib/supabase/types";
@@ -87,7 +87,7 @@ export default async function UsersPage({
         </p>
       </div>
 
-      <InviteForm schools={schools} />
+      <AddUserForm schools={schools} />
 
       <form
         method="get"

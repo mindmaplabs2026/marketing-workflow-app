@@ -14,7 +14,7 @@ const VALID_ROLES: UserRole[] = [
   "decision_maker",
 ];
 
-const INVITABLE_ROLES: UserRole[] = [
+const CREATABLE_ROLES: UserRole[] = [
   "super_admin",
   "designer",
   "school_admin",
@@ -22,7 +22,7 @@ const INVITABLE_ROLES: UserRole[] = [
   "decision_maker",
 ];
 
-const INTERNAL_ROLES: UserRole[] = ["super_admin", "designer"];
+const SCHOOL_ROLES: UserRole[] = ["school_admin", "teacher", "decision_maker"];
 
 const ROLE_LABEL: Record<UserRole, string> = {
   super_admin: "Super admin",
@@ -31,6 +31,8 @@ const ROLE_LABEL: Record<UserRole, string> = {
   teacher: "Teacher",
   decision_maker: "Decision maker",
 };
+
+const MIN_PASSWORD_LENGTH = 8;
 
 export async function deleteUser(formData: FormData) {
   const userId = String(formData.get("user_id") ?? "");
@@ -97,16 +99,16 @@ export async function updateUserRole(formData: FormData) {
   revalidatePath("/admin/users");
 }
 
-export type InviteState = {
+export type CreateUserState = {
   error?: string;
   success?: boolean;
   email?: string;
 };
 
-export async function inviteUser(
-  _prev: InviteState,
+export async function createUser(
+  _prev: CreateUserState,
   formData: FormData,
-): Promise<InviteState> {
+): Promise<CreateUserState> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -119,7 +121,7 @@ export async function inviteUser(
     .eq("id", user.id)
     .single<{ role: UserRole }>();
   if (callerProfile?.role !== "super_admin") {
-    return { error: "Only super admins can invite teammates." };
+    return { error: "Only super admins can add teammates." };
   }
 
   const email = String(formData.get("email") ?? "")
@@ -127,6 +129,7 @@ export async function inviteUser(
     .toLowerCase();
   const fullName = String(formData.get("full_name") ?? "").trim();
   const role = String(formData.get("role") ?? "") as UserRole;
+  const password = String(formData.get("password") ?? "");
 
   if (!email || !email.includes("@")) {
     return { error: "Enter a valid email." };
@@ -134,17 +137,18 @@ export async function inviteUser(
   if (!fullName) {
     return { error: "Enter their full name." };
   }
-  if (!INVITABLE_ROLES.includes(role)) {
+  if (!CREATABLE_ROLES.includes(role)) {
     return { error: "Pick a role." };
   }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return {
+      error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+    };
+  }
 
-  const isInternal = INTERNAL_ROLES.includes(role);
-
-  // School-side roles (school_admin / teacher / decision_maker) must be
-  // attached to a school at invite time. Validate before we create the
-  // auth user so we don't strand a user without a school assignment.
+  const needsSchool = SCHOOL_ROLES.includes(role);
   const schoolId = String(formData.get("school_id") ?? "").trim();
-  if (!isInternal) {
+  if (needsSchool) {
     if (!schoolId) return { error: "Pick a school for this user." };
     const { data: schoolRow, error: schoolErr } = await supabase
       .from("schools")
@@ -157,53 +161,37 @@ export async function inviteUser(
 
   const admin = createAdminClient();
 
-  // Create the auth user + grab the signed action link. Supabase fires our
-  // handle_new_user trigger here, which inserts a profile row with the
-  // default 'teacher' role and full_name pulled from raw_user_meta_data.
-  const { data: linkData, error: linkErr } =
-    await admin.auth.admin.generateLink({
-      type: "invite",
-      email,
-      options: {
-        data: { full_name: fullName },
-      },
-    });
-  if (linkErr || !linkData?.user) {
-    if (linkErr && /already.*(registered|exist)/i.test(linkErr.message)) {
+  // email_confirm: true skips Supabase's verification email. The
+  // handle_new_user trigger fires on insert into auth.users and creates
+  // a profile row with default role=teacher + password_set=true.
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: fullName },
+  });
+  if (createErr || !created?.user) {
+    if (createErr && /already.*(registered|exist)/i.test(createErr.message)) {
       return { error: "That email already has an account." };
     }
-    return { error: linkErr?.message ?? "Could not create the invite." };
+    return { error: createErr?.message ?? "Could not create the user." };
   }
 
-  const newUserId = linkData.user.id;
-  const hashedToken = linkData.properties?.hashed_token;
-  if (!hashedToken) {
-    return { error: "Supabase returned no token to email." };
-  }
-  const nextPath = isInternal ? "/setup-password" : "/";
-  const actionLink = `${appUrl()}/auth/confirm?token_hash=${hashedToken}&type=invite&next=${encodeURIComponent(nextPath)}`;
+  const newUserId = created.user.id;
 
-  // Promote the auto-created profile to the chosen role. Internal users
-  // (designer / super_admin) need a password — flag them so the proxy
-  // forces them through /setup-password on first sign-in. School users
-  // (teacher / school_admin / decision_maker) stay on magic-link only, so
-  // password_set keeps its default (true) and they skip the setup step.
-  // Done with the super admin's own session so the prevent_role_self_change
-  // trigger is happy (it allows role changes when the caller is super_admin).
-  const profilePatch: { role: UserRole; password_set?: boolean } = { role };
-  if (isInternal) profilePatch.password_set = false;
+  // Promote the auto-created profile to the chosen role and flag the
+  // account so the proxy forces a password change on first login. Done
+  // with the super admin's own session so prevent_role_self_change
+  // (which allows role changes when the caller is super_admin) is happy.
   const { error: profileErr } = await supabase
     .from("profiles")
-    .update(profilePatch)
+    .update({ role, password_set: false })
     .eq("id", newUserId);
   if (profileErr) {
     return { error: profileErr.message };
   }
 
-  // Attach school-side users to the chosen school. The auth user + profile
-  // already exist; if this insert errors we surface the message so the
-  // super admin can finish it manually at /admin/schools/[id].
-  if (!isInternal) {
+  if (needsSchool) {
     const { error: memberErr } = await supabase
       .from("school_members")
       .insert({ school_id: schoolId, user_id: newUserId });
@@ -219,11 +207,11 @@ export async function inviteUser(
     return { error: "Email isn't configured. Set RESEND_API_KEY first." };
   }
 
-  const { subject, html, text } = renderInviteEmail(
+  const { subject, html, text } = renderCredentialsEmail(
     fullName,
-    actionLink,
+    email,
+    password,
     role,
-    isInternal,
   );
 
   try {
@@ -235,11 +223,12 @@ export async function inviteUser(
       text,
     });
     if (sendErr) {
-      const isSandbox =
-        /testing.*email|sandbox|verify.*domain/i.test(sendErr.message);
+      const isSandbox = /testing.*email|sandbox|verify.*domain/i.test(
+        sendErr.message,
+      );
       if (isSandbox) {
         return {
-          error: `User created but invite email was not sent — Resend is in sandbox mode. To send emails to other addresses, verify a domain at resend.com/domains and update EMAIL_FROM. The user can be added to a school manually at /admin/schools.`,
+          error: `User created but the credentials email was not sent — Resend is in sandbox mode. Verify a domain at resend.com/domains and update EMAIL_FROM. Share the password with the user manually for now.`,
         };
       }
       return { error: sendErr.message };
@@ -261,19 +250,15 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function renderInviteEmail(
+function renderCredentialsEmail(
   fullName: string,
-  link: string,
+  email: string,
+  password: string,
   role: UserRole,
-  isInternal: boolean,
 ): { subject: string; html: string; text: string } {
   const roleLabel = ROLE_LABEL[role];
-  const subject = "You've been added to the Marketing Workflow";
-
-  const action = isInternal ? "Set your password" : "Open your workspace";
-  const intro = isInternal
-    ? "Click below to set a password and sign in."
-    : "Click below to open your workspace. After this, you can sign back in any time by requesting a one-tap link at the sign-in page.";
+  const loginUrl = `${appUrl()}/login`;
+  const subject = "Your Marketing Workflow account is ready";
 
   const html = `<!doctype html>
 <html><body style="font-family:-apple-system,Segoe UI,sans-serif;background:#fafafa;margin:0;padding:24px">
@@ -282,15 +267,25 @@ function renderInviteEmail(
       <p style="margin:0;color:#52525b;font-size:13px">Marketing Workflow</p>
       <h1 style="margin:8px 0 4px;font-size:20px;color:#18181b">Hi ${escapeHtml(fullName)},</h1>
       <p style="margin:0 0 16px;color:#52525b;font-size:14px">
-        You&rsquo;ve been added to the workspace as a <strong>${escapeHtml(roleLabel)}</strong>. ${escapeHtml(intro)}
+        You&rsquo;ve been added to the workspace as a <strong>${escapeHtml(roleLabel)}</strong>. Use the email and password below to sign in.
       </p>
+      <table cellpadding="0" cellspacing="0" style="width:100%;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;padding:16px;margin:0 0 16px">
+        <tr>
+          <td style="padding:4px 0;color:#71717a;font-size:12px;width:100px">Email</td>
+          <td style="padding:4px 0;color:#18181b;font-size:14px;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(email)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;color:#71717a;font-size:12px">Password</td>
+          <td style="padding:4px 0;color:#18181b;font-size:14px;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(password)}</td>
+        </tr>
+      </table>
       <p style="margin:0 0 24px">
-        <a href="${escapeHtml(link)}" style="display:inline-block;background:#18181b;color:#fafafa;padding:10px 16px;border-radius:6px;text-decoration:none">
-          ${escapeHtml(action)} &rarr;
+        <a href="${escapeHtml(loginUrl)}" style="display:inline-block;background:#7c3aed;color:#fafafa;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:500;font-size:14px">
+          Sign in &rarr;
         </a>
       </p>
-      <p style="margin:0;color:#a1a1aa;font-size:12px">
-        This link expires after one use. If you weren&rsquo;t expecting this email, ignore it.
+      <p style="margin:0;color:#52525b;font-size:13px">
+        <strong>Please change your password after first login.</strong> You&rsquo;ll be prompted to do it as soon as you sign in.
       </p>
     </td></tr>
   </table>
@@ -298,11 +293,14 @@ function renderInviteEmail(
 
   const text = `Hi ${fullName},
 
-You've been added to the Marketing Workflow as a ${roleLabel}. ${intro}
+You've been added to the Marketing Workflow as a ${roleLabel}.
 
-${link}
+Email: ${email}
+Password: ${password}
 
-This link expires after one use.`;
+Sign in: ${loginUrl}
+
+Please change your password after first login. You'll be prompted to do it as soon as you sign in.`;
 
   return { subject, html, text };
 }
