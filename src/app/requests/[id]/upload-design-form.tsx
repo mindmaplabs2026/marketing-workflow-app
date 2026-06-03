@@ -17,7 +17,13 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function UploadDesignForm({ requestId }: { requestId: string }) {
+export function UploadDesignForm({
+  requestId,
+  schoolId,
+}: {
+  requestId: string;
+  schoolId: string;
+}) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -70,7 +76,7 @@ export function UploadDesignForm({ requestId }: { requestId: string }) {
     const supabase = createClient();
     for (let i = 0; i < stagedFiles.length; i++) {
       const file = stagedFiles[i];
-      const path = `${requestId}/${Date.now()}-${sanitizeName(file.name)}`;
+      const path = `${schoolId}/${requestId}/${Date.now()}-${sanitizeName(file.name)}`;
       const { error: upErr } = await supabase.storage
         .from("designs")
         .upload(path, file, {

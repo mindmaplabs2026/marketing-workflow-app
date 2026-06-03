@@ -645,7 +645,7 @@ export default async function RequestDetailPage({
                 ? "Upload another revision"
                 : "Upload your design"}
           </p>
-          <UploadDesignForm requestId={req.id} />
+          <UploadDesignForm requestId={req.id} schoolId={req.school_id} />
         </section>
       )}
 

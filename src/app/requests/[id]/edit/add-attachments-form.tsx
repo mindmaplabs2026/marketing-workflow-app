@@ -11,7 +11,13 @@ function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
 }
 
-export function AddAttachmentsForm({ requestId }: { requestId: string }) {
+export function AddAttachmentsForm({
+  requestId,
+  schoolId,
+}: {
+  requestId: string;
+  schoolId: string;
+}) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -36,7 +42,7 @@ export function AddAttachmentsForm({ requestId }: { requestId: string }) {
     const supabase = createClient();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const path = `${requestId}/${Date.now()}-${sanitizeName(file.name)}`;
+      const path = `${schoolId}/${requestId}/${Date.now()}-${sanitizeName(file.name)}`;
       const { error: upErr } = await supabase.storage
         .from("request-uploads")
         .upload(path, file, {

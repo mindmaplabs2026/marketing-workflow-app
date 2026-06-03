@@ -59,13 +59,14 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
         return;
       }
       const requestId = created.requestId;
+      const schoolId = String(formData.get("school_id") ?? "");
 
       if (files.length > 0) {
         setProgress(`Uploading 0 / ${files.length}…`);
         const supabase = createClient();
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          const path = `${requestId}/${Date.now()}-${sanitizeName(file.name)}`;
+          const path = `${schoolId}/${requestId}/${Date.now()}-${sanitizeName(file.name)}`;
           const { error: upErr } = await supabase.storage
             .from("request-uploads")
             .upload(path, file, {

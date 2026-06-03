@@ -225,7 +225,7 @@ export default async function EditRequestPage({
             })}
           </ul>
         )}
-        <AddAttachmentsForm requestId={req.id} />
+        <AddAttachmentsForm requestId={req.id} schoolId={req.school_id} />
       </section>
     </div>
   );
