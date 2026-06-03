@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { RequestStatus } from "@/lib/supabase/types";
 import { STATUS_SHORT, STATUS_BADGE_CLASS } from "@/app/requests/status";
@@ -27,11 +27,19 @@ function formatDate(iso: string): string {
 export function BulkApproveSection({
   title,
   items,
+  totalCount,
+  totalApprovable,
+  totalOthers,
+  pagination,
   approveAction,
   deleteAction,
 }: {
   title: string;
   items: Item[];
+  totalCount?: number;
+  totalApprovable?: number;
+  totalOthers?: number;
+  pagination?: ReactNode;
   approveAction: (formData: FormData) => void;
   deleteAction?: (formData: FormData) => void;
 }) {
@@ -41,6 +49,9 @@ export function BulkApproveSection({
   const others = items.filter(
     (r) => r.status !== "pending_admin_approval",
   );
+  const displayedTotal = totalCount ?? items.length;
+  const displayedApprovable = totalApprovable ?? approvable.length;
+  const displayedOthers = totalOthers ?? others.length;
 
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(approvable.map((r) => r.id)),
@@ -68,10 +79,11 @@ export function BulkApproveSection({
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-medium text-amber-700 dark:text-amber-300">
-        {title} ({items.length})
-        {approvable.length > 0 && others.length > 0 && (
+        {title} ({displayedTotal})
+        {displayedApprovable > 0 && displayedOthers > 0 && (
           <span className="ml-2 text-xs font-normal text-zinc-500">
-            {approvable.length} pending approval · {others.length} design review
+            {displayedApprovable} pending approval · {displayedOthers} design
+            review
           </span>
         )}
       </h2>
@@ -193,6 +205,8 @@ export function BulkApproveSection({
           </form>
         </div>
       )}
+
+      {pagination}
     </section>
   );
 }

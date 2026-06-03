@@ -7,6 +7,41 @@ import { STATUS_SHORT, STATUS_BADGE_CLASS, STATUS_DOT_CLASS } from "./status";
 import { bulkApproveRequests, deleteRequest } from "./actions";
 import { BulkApproveSection } from "@/components/bulk-approve";
 import { ConfirmForm } from "@/components/confirm-form";
+import { SearchInput } from "@/components/search-input";
+import { SelectFilter } from "@/components/select-filter";
+import { Pagination } from "@/components/pagination";
+
+const SECTION_PAGE_SIZE = 10;
+
+const SECTION_PAGE_KEYS = {
+  needsYou: "needs-you-page",
+  myWork: "my-work-page",
+  myDrafts: "my-drafts-page",
+  inFlight: "in-flight-page",
+  published: "published-page",
+  archived: "archived-page",
+} as const;
+
+type SectionKey = keyof typeof SECTION_PAGE_KEYS;
+
+function readPage(raw: string | undefined): number {
+  const n = parseInt(raw ?? "1", 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function paginate<T>(
+  items: T[],
+  page: number,
+): { slice: T[]; safePage: number; totalPages: number } {
+  const totalPages = Math.max(1, Math.ceil(items.length / SECTION_PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * SECTION_PAGE_SIZE;
+  return {
+    slice: items.slice(start, start + SECTION_PAGE_SIZE),
+    safePage,
+    totalPages,
+  };
+}
 
 type RequestListRow = {
   id: string;
@@ -55,11 +90,37 @@ const PROGRESS_COLOR: Record<RequestStatus, string> = {
 export default async function RequestsListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ school?: string; q?: string }>;
+  searchParams: Promise<
+    { school?: string; q?: string } & Partial<
+      Record<(typeof SECTION_PAGE_KEYS)[SectionKey], string>
+    >
+  >;
 }) {
   const params = await searchParams;
   const schoolFilter = params.school ?? "";
-  const searchQuery = params.q?.trim().toLowerCase() ?? "";
+  const rawQuery = params.q ?? "";
+  const searchQuery = rawQuery.trim().toLowerCase();
+
+  const sectionPages: Record<SectionKey, number> = {
+    needsYou: readPage(params[SECTION_PAGE_KEYS.needsYou]),
+    myWork: readPage(params[SECTION_PAGE_KEYS.myWork]),
+    myDrafts: readPage(params[SECTION_PAGE_KEYS.myDrafts]),
+    inFlight: readPage(params[SECTION_PAGE_KEYS.inFlight]),
+    published: readPage(params[SECTION_PAGE_KEYS.published]),
+    archived: readPage(params[SECTION_PAGE_KEYS.archived]),
+  };
+
+  function sectionHref(target: SectionKey, page: number): string {
+    const sp = new URLSearchParams();
+    if (rawQuery) sp.set("q", rawQuery);
+    if (schoolFilter) sp.set("school", schoolFilter);
+    for (const key of Object.keys(SECTION_PAGE_KEYS) as SectionKey[]) {
+      const value = key === target ? page : sectionPages[key];
+      if (value > 1) sp.set(SECTION_PAGE_KEYS[key], String(value));
+    }
+    const qs = sp.toString();
+    return qs ? `/requests?${qs}` : "/requests";
+  }
 
   const session = await getSessionUser();
   if (!session) redirect("/login");
@@ -206,6 +267,29 @@ export default async function RequestsListPage({
     };
   }
 
+  const needsYouView = paginate(needsYou, sectionPages.needsYou);
+  const myWorkView = paginate(myWork, sectionPages.myWork);
+  const myDraftsView = paginate(myDrafts, sectionPages.myDrafts);
+  const inFlightView = paginate(inFlight, sectionPages.inFlight);
+  const publishedView = paginate(published, sectionPages.published);
+  const archivedView = paginate(archived, sectionPages.archived);
+
+  const needsYouApprovable = needsYou.filter(
+    (r) => r.status === "pending_admin_approval",
+  ).length;
+  const needsYouOthers = needsYou.length - needsYouApprovable;
+
+  function sectionPagination(key: SectionKey, totalItems: number) {
+    return (
+      <Pagination
+        totalItems={totalItems}
+        pageSize={SECTION_PAGE_SIZE}
+        currentPage={sectionPages[key]}
+        pageHref={(p) => sectionHref(key, p)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between gap-4">
@@ -233,66 +317,23 @@ export default async function RequestsListPage({
         </p>
       )}
 
-      <form className="flex items-center gap-2">
-        <input
-          name="q"
-          type="search"
-          placeholder="Search requests..."
-          defaultValue={searchQuery}
-          className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-        />
-        {schoolFilter && (
-          <input type="hidden" name="school" value={schoolFilter} />
-        )}
-        <button
-          type="submit"
-          className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          Search
-        </button>
-        {searchQuery && (
-          <Link
-            href={schoolFilter ? `/requests?school=${schoolFilter}` : "/requests"}
-            className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-          >
-            Clear
-          </Link>
-        )}
-      </form>
+      <SearchInput
+        initialValue={searchQuery}
+        placeholder="Search requests..."
+      />
 
       {showSchoolFilter && (
-        <form className="flex items-center gap-2">
-          <label htmlFor="school" className="text-xs font-medium text-zinc-500">
+        <div className="flex items-center gap-2">
+          <label htmlFor="school-filter" className="text-xs font-medium text-zinc-500">
             School
           </label>
-          <select
-            id="school"
-            name="school"
-            defaultValue={schoolFilter}
-            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-          >
-            <option value="">All schools</option>
-            {schoolsList.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-          >
-            Filter
-          </button>
-          {schoolFilter && (
-            <Link
-              href="/requests"
-              className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-            >
-              Clear
-            </Link>
-          )}
-        </form>
+          <SelectFilter
+            paramName="school"
+            ariaLabel="Filter by school"
+            options={schoolsList.map((s) => ({ value: s.id, label: s.name }))}
+            allLabel="All schools"
+          />
+        </div>
       )}
 
       {snapshot && (
@@ -317,7 +358,7 @@ export default async function RequestsListPage({
       {isReviewer && needsYou.length > 0 ? (
         <BulkApproveSection
           title="Needs you"
-          items={needsYou.map((r) => ({
+          items={needsYouView.slice.map((r) => ({
             id: r.id,
             title: r.title,
             status: r.status,
@@ -326,19 +367,57 @@ export default async function RequestsListPage({
             date: r.created_at,
             canDelete: isManagingAdmin && canDeleteStatus(r.status),
           }))}
+          totalCount={needsYou.length}
+          totalApprovable={needsYouApprovable}
+          totalOthers={needsYouOthers}
+          pagination={sectionPagination("needsYou", needsYou.length)}
           approveAction={bulkApproveRequests}
           deleteAction={isManagingAdmin ? deleteRequest : undefined}
         />
       ) : (
-        <Section title="Needs you" items={needsYou} variant="urgent" />
+        <Section
+          title="Needs you"
+          items={needsYouView.slice}
+          totalCount={needsYou.length}
+          variant="urgent"
+          pagination={sectionPagination("needsYou", needsYou.length)}
+        />
       )}
       {myWork.length > 0 && (
-        <Section title="My work" items={myWork} variant="urgent" />
+        <Section
+          title="My work"
+          items={myWorkView.slice}
+          totalCount={myWork.length}
+          variant="urgent"
+          pagination={sectionPagination("myWork", myWork.length)}
+        />
       )}
-      <Section title="My drafts" items={myDrafts} variant="muted" />
-      <Section title="In flight" items={inFlight} />
-      <Section title="Published" items={published} />
-      <Section title="Archived" items={archived} variant="muted" />
+      <Section
+        title="My drafts"
+        items={myDraftsView.slice}
+        totalCount={myDrafts.length}
+        variant="muted"
+        pagination={sectionPagination("myDrafts", myDrafts.length)}
+      />
+      <Section
+        title="In flight"
+        items={inFlightView.slice}
+        totalCount={inFlight.length}
+        pagination={sectionPagination("inFlight", inFlight.length)}
+      />
+      <Section
+        title="Published"
+        items={publishedView.slice}
+        totalCount={published.length}
+        pagination={sectionPagination("published", published.length)}
+      />
+      <Section
+        title="Archived"
+        items={archivedView.slice}
+        totalCount={archived.length}
+        variant="muted"
+        pagination={sectionPagination("archived", archived.length)}
+      />
 
       {requests.length === 0 && (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
@@ -364,13 +443,18 @@ export default async function RequestsListPage({
   function Section({
     title,
     items,
+    totalCount,
     variant,
+    pagination,
   }: {
     title: string;
     items: RequestListRow[];
+    totalCount?: number;
     variant?: "urgent" | "muted";
+    pagination?: React.ReactNode;
   }) {
-    if (items.length === 0) return null;
+    const headerCount = totalCount ?? items.length;
+    if (headerCount === 0) return null;
     return (
       <section className="space-y-2">
         <h2
@@ -382,7 +466,7 @@ export default async function RequestsListPage({
                 : "text-sm font-medium text-zinc-700 dark:text-zinc-300"
           }
         >
-          {title} ({items.length})
+          {title} ({headerCount})
         </h2>
         <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
           {items.map((r) => {
@@ -443,6 +527,7 @@ export default async function RequestsListPage({
             );
           })}
         </ul>
+        {pagination}
       </section>
     );
   }
