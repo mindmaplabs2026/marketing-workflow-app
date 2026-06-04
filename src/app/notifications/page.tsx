@@ -37,6 +37,8 @@ const TYPE_ICON: Record<NotificationType, string> = {
   request_published: "★",
   calendar_item_approved: "✓",
   user_added_to_school: "+",
+  ai_generation_completed: "✦",
+  ai_generation_failed: "✕",
 };
 
 const TYPE_TINT: Record<NotificationType, string> = {
@@ -49,6 +51,8 @@ const TYPE_TINT: Record<NotificationType, string> = {
   request_published: "bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-300",
   calendar_item_approved: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300",
   user_added_to_school: "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-300",
+  ai_generation_completed: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300",
+  ai_generation_failed: "bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300",
 };
 
 function formatRelative(iso: string): string {

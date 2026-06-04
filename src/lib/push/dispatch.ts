@@ -68,6 +68,10 @@ function titleFor(type: NotificationType): string {
       return "Calendar item approved";
     case "user_added_to_school":
       return "Added to a school";
+    case "ai_generation_completed":
+      return "AI posters ready";
+    case "ai_generation_failed":
+      return "AI generation failed";
   }
 }
 

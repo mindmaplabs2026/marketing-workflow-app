@@ -48,7 +48,26 @@ export type NotificationType =
   | "design_changes_requested"
   | "request_published"
   | "calendar_item_approved"
-  | "user_added_to_school";
+  | "user_added_to_school"
+  | "ai_generation_completed"
+  | "ai_generation_failed";
+
+export type AiJobStatus =
+  | "queued"
+  | "understanding"
+  | "creative"
+  | "generating"
+  | "completed"
+  | "failed";
+
+export type ChatMessageRole = "user" | "assistant" | "system";
+
+export type BrandAssetType =
+  | "logo"
+  | "header"
+  | "footer"
+  | "uniform"
+  | "infrastructure";
 
 export type NotificationEmailPref = "off" | "daily" | "immediate";
 
@@ -146,6 +165,7 @@ export type Database = {
           request_type: RequestType | null;
           due_date: DateOnly | null;
           change_feedback: string | null;
+          ai_generated: boolean;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
@@ -161,6 +181,7 @@ export type Database = {
           request_type?: RequestType | null;
           due_date?: DateOnly | null;
           change_feedback?: string | null;
+          ai_generated?: boolean;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -176,6 +197,7 @@ export type Database = {
           request_type?: RequestType | null;
           due_date?: DateOnly | null;
           change_feedback?: string | null;
+          ai_generated?: boolean;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
@@ -475,6 +497,156 @@ export type Database = {
         };
         Relationships: [];
       };
+      school_brand_assets: {
+        Row: {
+          id: string;
+          school_id: string;
+          asset_type: BrandAssetType;
+          storage_path: string;
+          mime_type: string | null;
+          file_size: number | null;
+          label: string | null;
+          uploaded_by: string;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          school_id: string;
+          asset_type: BrandAssetType;
+          storage_path: string;
+          mime_type?: string | null;
+          file_size?: number | null;
+          label?: string | null;
+          uploaded_by: string;
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          school_id?: string;
+          asset_type?: BrandAssetType;
+          storage_path?: string;
+          mime_type?: string | null;
+          file_size?: number | null;
+          label?: string | null;
+          uploaded_by?: string;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      ai_generation_jobs: {
+        Row: {
+          id: string;
+          request_id: string;
+          status: AiJobStatus;
+          inngest_run_id: string | null;
+          agent1_output: Record<string, unknown> | null;
+          agent2_output: Record<string, unknown> | null;
+          error_message: string | null;
+          started_at: Timestamp | null;
+          completed_at: Timestamp | null;
+          created_at: Timestamp;
+          updated_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          request_id: string;
+          status?: AiJobStatus;
+          inngest_run_id?: string | null;
+          agent1_output?: Record<string, unknown> | null;
+          agent2_output?: Record<string, unknown> | null;
+          error_message?: string | null;
+          started_at?: Timestamp | null;
+          completed_at?: Timestamp | null;
+          created_at?: Timestamp;
+          updated_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          request_id?: string;
+          status?: AiJobStatus;
+          inngest_run_id?: string | null;
+          agent1_output?: Record<string, unknown> | null;
+          agent2_output?: Record<string, unknown> | null;
+          error_message?: string | null;
+          started_at?: Timestamp | null;
+          completed_at?: Timestamp | null;
+          created_at?: Timestamp;
+          updated_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      ai_variations: {
+        Row: {
+          id: string;
+          job_id: string;
+          request_id: string;
+          variation_index: number;
+          creative_brief: Record<string, unknown>;
+          storage_paths: string[];
+          poster_type: "single" | "carousel";
+          is_accepted: boolean;
+          chat_rounds_used: number;
+          created_at: Timestamp;
+          updated_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          job_id: string;
+          request_id: string;
+          variation_index: number;
+          creative_brief: Record<string, unknown>;
+          storage_paths?: string[];
+          poster_type: "single" | "carousel";
+          is_accepted?: boolean;
+          chat_rounds_used?: number;
+          created_at?: Timestamp;
+          updated_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          job_id?: string;
+          request_id?: string;
+          variation_index?: number;
+          creative_brief?: Record<string, unknown>;
+          storage_paths?: string[];
+          poster_type?: "single" | "carousel";
+          is_accepted?: boolean;
+          chat_rounds_used?: number;
+          created_at?: Timestamp;
+          updated_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      ai_chat_messages: {
+        Row: {
+          id: string;
+          variation_id: string;
+          role: ChatMessageRole;
+          content: string;
+          image_paths: string[];
+          metadata: Record<string, unknown> | null;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          variation_id: string;
+          role: ChatMessageRole;
+          content: string;
+          image_paths?: string[];
+          metadata?: Record<string, unknown> | null;
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          variation_id?: string;
+          role?: ChatMessageRole;
+          content?: string;
+          image_paths?: string[];
+          metadata?: Record<string, unknown> | null;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -486,6 +658,9 @@ export type Database = {
       social_platform: SocialPlatform;
       notification_type: NotificationType;
       notification_email_pref: NotificationEmailPref;
+      ai_job_status: AiJobStatus;
+      chat_message_role: ChatMessageRole;
+      brand_asset_type: BrandAssetType;
     };
   };
 };

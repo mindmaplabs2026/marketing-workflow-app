@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -94,6 +95,16 @@ export default async function SchoolDetailPage({
           </h1>
         </div>
       </div>
+
+      <section className="space-y-3">
+        <Link
+          href={`/admin/schools/${school.id}/brand-assets`}
+          className="inline-flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-900/50 dark:bg-violet-900/20 dark:text-violet-300 dark:hover:bg-violet-900/30"
+        >
+          Brand Assets — Logo, header, footer, uniforms, infrastructure
+          <span aria-hidden="true">&rarr;</span>
+        </Link>
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">

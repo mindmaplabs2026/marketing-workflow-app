@@ -43,3 +43,59 @@ export async function removeMember(formData: FormData) {
 
   revalidatePath(`/admin/schools/${schoolId}`);
 }
+
+// ---------------------------------------------------------------
+// Brand asset actions
+// ---------------------------------------------------------------
+
+export async function attachBrandAsset(formData: FormData) {
+  const schoolId = String(formData.get("school_id") ?? "");
+  const assetType = String(formData.get("asset_type") ?? "");
+  const storagePath = String(formData.get("storage_path") ?? "");
+  const mimeType = String(formData.get("mime_type") ?? "") || null;
+  const fileSize = Number(formData.get("file_size") ?? 0) || null;
+  const label = String(formData.get("label") ?? "").trim() || null;
+
+  if (!schoolId || !assetType || !storagePath) {
+    return { error: "Missing required fields." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { error } = await supabase.from("school_brand_assets").insert({
+    school_id: schoolId,
+    asset_type: assetType as import("@/lib/supabase/types").BrandAssetType,
+    storage_path: storagePath,
+    mime_type: mimeType,
+    file_size: fileSize,
+    label,
+    uploaded_by: user.id,
+  });
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/admin/schools/${schoolId}/brand-assets`);
+}
+
+export async function removeBrandAsset(formData: FormData) {
+  const assetId = String(formData.get("asset_id") ?? "");
+  const schoolId = String(formData.get("school_id") ?? "");
+  const storagePath = String(formData.get("storage_path") ?? "");
+  if (!assetId || !schoolId) return;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("school_brand_assets")
+    .delete()
+    .eq("id", assetId);
+  if (error) throw new Error(error.message);
+
+  if (storagePath) {
+    await supabase.storage.from("school-assets").remove([storagePath]);
+  }
+
+  revalidatePath(`/admin/schools/${schoolId}/brand-assets`);
+}

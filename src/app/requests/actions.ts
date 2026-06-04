@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
+import { inngest } from "@/lib/inngest/client";
 import type {
   UserRole,
   RequestStatus,
@@ -12,7 +13,12 @@ import type {
 } from "@/lib/supabase/types";
 
 export type ActionState = { error?: string; success?: boolean };
-export type CreateRequestState = { error?: string; requestId?: string };
+export type CreateRequestState = {
+  error?: string;
+  requestId?: string;
+  aiGenerate?: boolean;
+  posterType?: "single" | "carousel";
+};
 
 const SOCIAL_PLATFORMS: ReadonlyArray<SocialPlatform> = [
   "facebook",
@@ -97,6 +103,9 @@ export async function createRequest(
   const schoolId = String(formData.get("school_id") ?? "");
   const requestType = String(formData.get("request_type") ?? "").trim() || null;
   const dueDate = String(formData.get("due_date") ?? "").trim() || null;
+  const aiGenerate = formData.get("ai_generate") === "1";
+  const posterType =
+    (formData.get("poster_type") as "single" | "carousel") || "single";
 
   if (!title) return { error: "Give the request a short title." };
   if (!schoolId) return { error: "Pick a school." };
@@ -127,6 +136,7 @@ export async function createRequest(
       approved_by: initialStatus === "approved" ? actor.userId : null,
       request_type: requestType as import("@/lib/supabase/types").RequestType | null,
       due_date: dueDate,
+      ai_generated: aiGenerate,
     })
     .select("id")
     .single<{ id: string }>();
@@ -135,7 +145,7 @@ export async function createRequest(
 
   revalidatePath("/requests");
   await dispatchPendingPushes();
-  return { requestId: data.id };
+  return { requestId: data.id, aiGenerate, posterType };
 }
 
 export async function updateRequestDraft(formData: FormData) {
@@ -731,4 +741,104 @@ export async function addComment(formData: FormData) {
 
   revalidatePath(`/requests/${requestId}`);
   revalidatePath("/feed");
+}
+
+// ---------------------------------------------------------------
+// AI Generation actions
+// ---------------------------------------------------------------
+
+export async function triggerAiGeneration(
+  requestId: string,
+  posterType: "single" | "carousel",
+): Promise<{ error?: string }> {
+  const actor = await loadActor();
+  if ("error" in actor) return { error: actor.error };
+
+  const req = await loadRequestForUpdate(requestId);
+  if ("error" in req) return { error: req.error };
+
+  if (req.created_by !== actor.userId && actor.role !== "super_admin") {
+    return { error: "Only the request creator can trigger AI generation." };
+  }
+
+  const supabase = await createClient();
+
+  // Create the AI generation job
+  const { data: job, error: jobErr } = await supabase
+    .from("ai_generation_jobs")
+    .insert({ request_id: requestId })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (jobErr || !job) {
+    return { error: jobErr?.message ?? "Could not create AI job." };
+  }
+
+  // Send Inngest event to start the pipeline
+  await inngest.send({
+    name: "ai/pipeline.started",
+    data: {
+      jobId: job.id,
+      requestId,
+      posterType,
+    },
+  });
+
+  return {};
+}
+
+export async function acceptAiVariation(formData: FormData) {
+  const variationId = String(formData.get("variation_id") ?? "");
+  const requestId = String(formData.get("request_id") ?? "");
+  if (!variationId || !requestId) throw new Error("Missing fields.");
+
+  const actor = await loadActor();
+  if ("error" in actor) throw new Error(actor.error);
+
+  const req = await loadRequestForUpdate(requestId);
+  if ("error" in req) throw new Error(req.error);
+
+  if (req.created_by !== actor.userId && actor.role !== "super_admin") {
+    throw new Error("Only the request creator can accept a variation.");
+  }
+
+  const supabase = await createClient();
+
+  // Load the variation to get its storage paths
+  const { data: variation, error: varErr } = await supabase
+    .from("ai_variations")
+    .select("id, storage_paths, variation_index")
+    .eq("id", variationId)
+    .single();
+  if (varErr || !variation) throw new Error("Variation not found.");
+
+  // Mark variation as accepted
+  const { error: updateErr } = await supabase
+    .from("ai_variations")
+    .update({ is_accepted: true })
+    .eq("id", variationId);
+  if (updateErr) throw new Error(updateErr.message);
+
+  // Copy AI-generated poster(s) into the designs table so the existing
+  // review flow works unchanged
+  const admin = createAdminClient();
+  for (const path of variation.storage_paths) {
+    await admin.from("designs").insert({
+      request_id: requestId,
+      uploaded_by: actor.userId,
+      storage_path: path,
+      notes: `AI variation ${variation.variation_index} — accepted by teacher`,
+    });
+  }
+
+  // Transition request to design_pending_approval for school admin review
+  const { error: statusErr } = await supabase
+    .from("requests")
+    .update({ status: "design_pending_approval" })
+    .eq("id", requestId);
+  if (statusErr) throw new Error(statusErr.message);
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  await dispatchPendingPushes();
 }

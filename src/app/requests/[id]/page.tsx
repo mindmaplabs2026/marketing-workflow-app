@@ -30,6 +30,9 @@ import { ProgressTracker } from "@/components/progress-tracker";
 import { BackLink } from "@/components/back-link";
 import { SubmitButton } from "@/components/submit-button";
 import { AssetDownloadGrid, type AssetItem } from "@/components/asset-download-grid";
+import { AiGenerationStatus } from "./ai-generation-status";
+import { AiVariations } from "./ai-variations";
+import type { AiJobStatus } from "@/lib/supabase/types";
 
 type RequestRow = {
   id: string;
@@ -42,6 +45,7 @@ type RequestRow = {
   status: RequestStatus;
   request_type: string | null;
   due_date: string | null;
+  ai_generated: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -102,6 +106,8 @@ const ACTIVITY_VERB: Record<NotificationType, string> = {
   // actually renders in the per-request timeline — but the Record type
   // needs every NotificationType key present.
   user_added_to_school: "added someone to a school",
+  ai_generation_completed: "AI generation completed",
+  ai_generation_failed: "AI generation failed",
 };
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
@@ -148,11 +154,43 @@ export default async function RequestDetailPage({
   const { data: req } = await supabase
     .from("requests")
     .select(
-      "id, school_id, created_by, assigned_designer_id, approved_by, title, description, status, request_type, due_date, created_at, updated_at",
+      "id, school_id, created_by, assigned_designer_id, approved_by, title, description, status, request_type, due_date, ai_generated, created_at, updated_at",
     )
     .eq("id", id)
     .single<RequestRow>();
   if (!req) notFound();
+
+  // Fetch AI generation data if this is an AI-generated request
+  let aiJob: { id: string; status: AiJobStatus; error_message: string | null } | null = null;
+  let aiVariations: {
+    id: string;
+    variation_index: number;
+    creative_brief: Record<string, unknown>;
+    storage_paths: string[];
+    poster_type: "single" | "carousel";
+    is_accepted: boolean;
+    chat_rounds_used: number;
+  }[] = [];
+
+  if (req.ai_generated) {
+    const { data: jobData } = await supabase
+      .from("ai_generation_jobs")
+      .select("id, status, error_message")
+      .eq("request_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    aiJob = jobData as { id: string; status: AiJobStatus; error_message: string | null } | null;
+
+    if (aiJob?.status === "completed") {
+      const { data: vars } = await supabase
+        .from("ai_variations")
+        .select("id, variation_index, creative_brief, storage_paths, poster_type, is_accepted, chat_rounds_used")
+        .eq("request_id", id)
+        .order("variation_index");
+      aiVariations = (vars ?? []) as typeof aiVariations;
+    }
+  }
 
   const [
     { data: schoolRow },
@@ -479,6 +517,29 @@ export default async function RequestDetailPage({
                 : undefined,
             };
           })}
+        />
+      )}
+
+      {/* AI Generation section */}
+      {req.ai_generated && aiJob && aiJob.status !== "completed" && (
+        <AiGenerationStatus
+          jobId={aiJob.id}
+          initialStatus={aiJob.status}
+        />
+      )}
+
+      {req.ai_generated && aiJob?.status === "completed" && aiVariations.length > 0 && (
+        <AiVariations
+          requestId={req.id}
+          variations={aiVariations.map((v) => ({
+            ...v,
+            creative_brief: v.creative_brief as {
+              direction?: string;
+              theme?: string;
+              colorPalette?: string[];
+              textContent?: { headline?: string };
+            },
+          }))}
         />
       )}
 
