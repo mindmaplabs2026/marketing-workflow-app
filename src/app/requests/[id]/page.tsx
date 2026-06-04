@@ -29,6 +29,7 @@ import { CommentThread } from "@/components/comment-thread";
 import { ProgressTracker } from "@/components/progress-tracker";
 import { BackLink } from "@/components/back-link";
 import { SubmitButton } from "@/components/submit-button";
+import { AssetDownloadGrid, type AssetItem } from "@/components/asset-download-grid";
 
 type RequestRow = {
   id: string;
@@ -113,13 +114,6 @@ const PLATFORM_LABEL: Record<SocialPlatform, string> = {
   youtube: "YouTube",
   other: "Link",
 };
-
-function formatBytes(bytes: number | null): string {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -458,156 +452,67 @@ export default async function RequestDetailPage({
       )}
 
       {uploadsList.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            From the school ({uploadsList.length})
-          </h2>
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {uploadsList.map((u) => {
-              const url = signedUploadUrls.get(u.storage_path);
-              const isImage = (u.mime_type ?? "").startsWith("image/");
-              const isVideo = (u.mime_type ?? "").startsWith("video/");
-              const name = u.storage_path.split("/").pop() ?? "file";
-              const canDelete =
-                u.uploaded_by === user.id || role === "super_admin";
-              return (
-                <li
-                  key={u.id}
-                  className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  {url && isImage && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={url}
-                      alt={name}
-                      className="aspect-square w-full object-cover"
-                    />
-                  )}
-                  {url && isVideo && (
-                    <video
-                      src={url}
-                      controls
-                      className="aspect-square w-full object-cover"
-                    />
-                  )}
-                  {url && !isImage && !isVideo && (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block aspect-square w-full bg-zinc-100 p-3 text-center text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                    >
-                      Open file →
-                    </a>
-                  )}
-                  <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-2 py-1.5 text-[10px] text-zinc-500 dark:border-zinc-800">
-                    <span className="truncate" title={name}>
-                      {formatBytes(u.file_size)}
-                    </span>
-                    {canDelete && (
-                      <ConfirmForm action={removeUpload} message="Remove this file? This cannot be undone.">
-                        <input type="hidden" name="upload_id" value={u.id} />
-                        <input type="hidden" name="request_id" value={req.id} />
-                        <input
-                          type="hidden"
-                          name="storage_path"
-                          value={u.storage_path}
-                        />
-                        <button
-                          type="submit"
-                          className="text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
-                        >
-                          Remove
-                        </button>
-                      </ConfirmForm>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <AssetDownloadGrid
+          requestId={req.id}
+          heading={<>From the school ({uploadsList.length})</>}
+          items={uploadsList.map<AssetItem>((u) => {
+            const name = u.storage_path.split("/").pop() ?? "file";
+            const canDelete =
+              u.uploaded_by === user.id || role === "super_admin";
+            return {
+              id: u.id,
+              kind: "upload",
+              name,
+              signedUrl: signedUploadUrls.get(u.storage_path) ?? null,
+              mimeType: u.mime_type,
+              byteSize: u.file_size,
+              removeAction: canDelete ? removeUpload : undefined,
+              removeFields: canDelete
+                ? {
+                    upload_id: u.id,
+                    request_id: req.id,
+                    storage_path: u.storage_path,
+                  }
+                : undefined,
+              removeConfirm: canDelete
+                ? "Remove this file? This cannot be undone."
+                : undefined,
+            };
+          })}
+        />
       )}
 
       {designsList.length > 0 && role !== "decision_maker" && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Designs ({designsList.length})
-          </h2>
-          <ul className="space-y-3">
-            {designsList.map((d) => {
-              const url = signedDesignUrls.get(d.storage_path);
-              const name = d.storage_path.split("/").pop() ?? "design";
-              const ext = name.toLowerCase();
-              const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/.test(ext);
-              const isVideo = /\.(mp4|mov|webm)$/.test(ext);
-              const isPdf = ext.endsWith(".pdf");
-              const canDelete =
-                d.uploaded_by === user.id || role === "super_admin";
-              return (
-                <li
-                  key={d.id}
-                  className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2 text-xs dark:border-zinc-800">
-                    <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                      v{d.version}
-                    </span>
-                    <span className="text-zinc-500">
-                      {formatDateTime(d.created_at)}
-                    </span>
-                    {canDelete && (
-                      <ConfirmForm action={removeDesign} message="Remove this design version? This cannot be undone." className="ml-auto">
-                        <input type="hidden" name="design_id" value={d.id} />
-                        <input type="hidden" name="request_id" value={req.id} />
-                        <input
-                          type="hidden"
-                          name="storage_path"
-                          value={d.storage_path}
-                        />
-                        <button
-                          type="submit"
-                          className="text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
-                        >
-                          Remove
-                        </button>
-                      </ConfirmForm>
-                    )}
-                  </div>
-                  {url && isImage && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={url} alt={name} className="w-full" />
-                  )}
-                  {url && isVideo && (
-                    <video src={url} controls className="w-full" />
-                  )}
-                  {url && isPdf && (
-                    <iframe
-                      src={url}
-                      className="h-96 w-full"
-                      title={`Design v${d.version}`}
-                    />
-                  )}
-                  {url && !isImage && !isVideo && !isPdf && (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block bg-zinc-100 p-4 text-center text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                    >
-                      Open file →
-                    </a>
-                  )}
-                  {d.notes && (
-                    <p className="border-t border-zinc-200 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
-                      {d.notes}
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <AssetDownloadGrid
+          requestId={req.id}
+          heading={<>Designs ({designsList.length})</>}
+          showVersion
+          items={designsList.map<AssetItem>((d) => {
+            const name = d.storage_path.split("/").pop() ?? "design";
+            const canDelete =
+              d.uploaded_by === user.id || role === "super_admin";
+            return {
+              id: d.id,
+              kind: "design",
+              name,
+              signedUrl: signedDesignUrls.get(d.storage_path) ?? null,
+              mimeType: null,
+              version: d.version,
+              footerText: d.notes,
+              removeAction: canDelete ? removeDesign : undefined,
+              removeFields: canDelete
+                ? {
+                    design_id: d.id,
+                    request_id: req.id,
+                    storage_path: d.storage_path,
+                  }
+                : undefined,
+              removeConfirm: canDelete
+                ? "Remove this design version? This cannot be undone."
+                : undefined,
+            };
+          })}
+        />
       )}
 
       {linksList.length > 0 && (

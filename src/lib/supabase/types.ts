@@ -445,6 +445,36 @@ export type Database = {
         };
         Relationships: [];
       };
+      asset_downloads: {
+        Row: {
+          id: string;
+          user_id: string;
+          request_id: string;
+          asset_kind: "upload" | "design" | "mixed";
+          file_count: number;
+          paths: string[];
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          request_id: string;
+          asset_kind: "upload" | "design" | "mixed";
+          file_count: number;
+          paths: string[];
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          request_id?: string;
+          asset_kind?: "upload" | "design" | "mixed";
+          file_count?: number;
+          paths?: string[];
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

@@ -4,6 +4,7 @@ import type { RequestStatus, UserRole } from "@/lib/supabase/types";
 import { removeUpload, updateRequestDraft } from "../../actions";
 import { AddAttachmentsForm } from "./add-attachments-form";
 import { BackLink } from "@/components/back-link";
+import { AssetDownloadGrid, type AssetItem } from "@/components/asset-download-grid";
 
 type RequestRow = {
   id: string;
@@ -23,13 +24,6 @@ type UploadRow = {
 };
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
-
-function formatBytes(bytes: number | null): string {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export default async function EditRequestPage({
   params,
@@ -159,74 +153,39 @@ export default async function EditRequestPage({
       </form>
 
       <section className="space-y-3 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Attachments ({uploadsList.length})
-        </h2>
-        {uploadsList.length > 0 && (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {uploadsList.map((u) => {
-              const url = signedUrlByPath.get(u.storage_path);
-              const isImage = (u.mime_type ?? "").startsWith("image/");
-              const isVideo = (u.mime_type ?? "").startsWith("video/");
+        {uploadsList.length > 0 ? (
+          <AssetDownloadGrid
+            requestId={req.id}
+            heading={<>Attachments ({uploadsList.length})</>}
+            items={uploadsList.map<AssetItem>((u) => {
               const name = u.storage_path.split("/").pop() ?? "file";
               const canDelete =
                 u.uploaded_by === user.id || role === "super_admin";
-              return (
-                <li
-                  key={u.id}
-                  className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  {url && isImage && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={url}
-                      alt={name}
-                      className="aspect-square w-full object-cover"
-                    />
-                  )}
-                  {url && isVideo && (
-                    <video
-                      src={url}
-                      controls
-                      className="aspect-square w-full object-cover"
-                    />
-                  )}
-                  {url && !isImage && !isVideo && (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block aspect-square w-full bg-zinc-100 p-3 text-center text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                    >
-                      Open file →
-                    </a>
-                  )}
-                  <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-2 py-1.5 text-[10px] text-zinc-500 dark:border-zinc-800">
-                    <span className="truncate" title={name}>
-                      {formatBytes(u.file_size)}
-                    </span>
-                    {canDelete && (
-                      <form action={removeUpload}>
-                        <input type="hidden" name="upload_id" value={u.id} />
-                        <input type="hidden" name="request_id" value={req.id} />
-                        <input
-                          type="hidden"
-                          name="storage_path"
-                          value={u.storage_path}
-                        />
-                        <button
-                          type="submit"
-                          className="text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
-                        >
-                          Remove
-                        </button>
-                      </form>
-                    )}
-                  </div>
-                </li>
-              );
+              return {
+                id: u.id,
+                kind: "upload",
+                name,
+                signedUrl: signedUrlByPath.get(u.storage_path) ?? null,
+                mimeType: u.mime_type,
+                byteSize: u.file_size,
+                removeAction: canDelete ? removeUpload : undefined,
+                removeFields: canDelete
+                  ? {
+                      upload_id: u.id,
+                      request_id: req.id,
+                      storage_path: u.storage_path,
+                    }
+                  : undefined,
+                removeConfirm: canDelete
+                  ? "Remove this file? This cannot be undone."
+                  : undefined,
+              };
             })}
-          </ul>
+          />
+        ) : (
+          <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Attachments (0)
+          </h2>
         )}
         <AddAttachmentsForm requestId={req.id} schoolId={req.school_id} />
       </section>
