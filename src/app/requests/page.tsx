@@ -132,10 +132,12 @@ export default async function RequestsListPage({
   const isDesigner = role === "designer" || role === "super_admin";
   // Same gate as the server action: super_admin and school_admin (RLS has
   // already scoped their visible rows to their own schools) can hard-delete
-  // requests, but only while still in draft or pending approval.
+  // requests. School_admin is limited to draft / pending so design history
+  // stays intact downstream; super_admin can delete at any status.
   const isManagingAdmin =
     role === "super_admin" || role === "school_admin";
   function canDeleteStatus(s: RequestStatus): boolean {
+    if (role === "super_admin") return true;
     return s === "draft" || s === "pending_admin_approval";
   }
 

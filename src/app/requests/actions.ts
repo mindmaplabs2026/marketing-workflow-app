@@ -157,12 +157,15 @@ export async function updateRequestDraft(formData: FormData) {
   }
 
   // Status rules: the creator can only edit while it's still a draft.
-  // Managing admins can also edit after submission, up until approval.
+  // School admins can also edit after submission, up until approval.
+  // Super admin has no status restriction — they can fix anything at any
+  // point in the flow.
+  const isSuperAdminEditable = actor.role === "super_admin";
   const isAdminEditable =
     canManage &&
     (req.status === "draft" || req.status === "pending_admin_approval");
   const isCreatorEditable = isCreator && req.status === "draft";
-  if (!isCreatorEditable && !isAdminEditable) {
+  if (!isCreatorEditable && !isAdminEditable && !isSuperAdminEditable) {
     throw new Error(
       "This request can no longer be edited. Archive it instead if needed.",
     );
@@ -319,7 +322,14 @@ export async function deleteRequest(formData: FormData) {
 
   const canManage = await callerCanManageRequest(actor, req);
   if (!canManage) throw new Error("You can't delete this request.");
-  if (req.status !== "draft" && req.status !== "pending_admin_approval") {
+  // School admins can only delete early-stage requests so design history
+  // isn't destroyed. Super admin can delete at any status — they're the
+  // safety valve when a published post needs to come down entirely.
+  if (
+    actor.role !== "super_admin" &&
+    req.status !== "draft" &&
+    req.status !== "pending_admin_approval"
+  ) {
     throw new Error(
       "Only draft or pending requests can be deleted. Archive later ones instead.",
     );

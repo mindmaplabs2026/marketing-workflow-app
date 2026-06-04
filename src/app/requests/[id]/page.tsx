@@ -344,16 +344,21 @@ export default async function RequestDetailPage({
   const isManagingAdmin =
     role === "super_admin" || (role === "school_admin" && isSchoolAdminInScope);
 
-  // Teachers can edit only their own draft. Managing admins can also edit
+  // Teachers can edit only their own draft. School admins can also edit
   // after the teacher has submitted, until the request is approved — so
-  // they can fix typos without forcing the teacher to recreate it.
+  // they can fix typos without forcing the teacher to recreate it. Super
+  // admin can edit and delete at any status (including after approval /
+  // publish) so the team has a way to fix mistakes downstream.
+  const isSuperAdmin = role === "super_admin";
   const canEdit =
+    isSuperAdmin ||
     (isCreator && req.status === "draft") ||
     (isManagingAdmin &&
       (req.status === "draft" || req.status === "pending_admin_approval"));
   const canDelete =
-    isManagingAdmin &&
-    (req.status === "draft" || req.status === "pending_admin_approval");
+    isSuperAdmin ||
+    (isManagingAdmin &&
+      (req.status === "draft" || req.status === "pending_admin_approval"));
   const canSubmit = isCreator && req.status === "draft";
   const canApprove = isReviewer && req.status === "pending_admin_approval";
   const canSendBack = isReviewer && req.status === "pending_admin_approval";

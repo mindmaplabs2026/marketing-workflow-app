@@ -71,12 +71,15 @@ export default async function EditRequestPage({
     isSchoolAdminInScope = !!membership;
   }
 
-  // Teachers (creators) can only edit drafts; super_admin and school_admin
-  // in scope can also edit pending_admin_approval requests so they can fix
-  // typos before approving.
-  const isManagingAdmin = role === "super_admin" || isSchoolAdminInScope;
+  // Teachers (creators) can only edit drafts; school_admin in scope can
+  // also edit pending_admin_approval requests so they can fix typos before
+  // approving. Super admin can edit at any status — including after
+  // approval / publish.
+  const isSuperAdmin = role === "super_admin";
+  const isManagingAdmin = isSuperAdmin || isSchoolAdminInScope;
   const isCreator = req.created_by === user.id;
   const canEdit =
+    isSuperAdmin ||
     (isCreator && req.status === "draft") ||
     (isManagingAdmin &&
       (req.status === "draft" || req.status === "pending_admin_approval"));
