@@ -64,49 +64,73 @@ You will receive:
 - School brand assets (logo, header, footer, uniform, infrastructure images).
 - Whether this is a single poster or carousel (3-5 pages).
 
-Your job:
-1. Decide 3 DISTINCT creative directions. Each must feel genuinely different — different visual mood, different layout approach, different use of imagery. Do NOT produce variations that are only slightly different. Example directions might be: one photographic/collage-focused, one typographic/minimal, one illustrative/conceptual. The categories are NOT fixed — choose what fits the theme.
+Your job is to produce ONE strong creative brief for an Instagram poster.
 
-2. For each direction, research mentally what current design trends apply (color palettes, typography styles, layout patterns trending on Instagram for this kind of content).
+DESIGN PROCESS:
+1. Pick a creative direction that best fits the theme and audience. Consider these approaches:
+   - Photographic/collage: if strong uploaded photos are available, build the design around them
+   - Typographic/minimal: if the message is powerful, let bold typography lead with minimal imagery
+   - Illustrative/conceptual: if it's an event without photos, create a visual concept
+   Choose whichever works best — do NOT default to the same approach every time.
 
-3. For each direction, produce a detailed creative brief including:
+2. Apply current Instagram design best practices:
+   - Clean, uncluttered layouts with generous breathing room
+   - Bold, modern sans-serif typography (one headline, one short tagline MAX)
+   - Vibrant but cohesive color palettes (3-5 colors, include hex codes)
+   - Strong visual hierarchy: one focal point, clear reading order
+   - Portrait orientation (4:5 ratio, 1080x1350px)
+   - Premium, polished look — think magazine ad, not school flyer
+
+3. Produce a detailed creative brief covering every element:
    - Theme and specific color palette (hex codes)
-   - Text content: headline, subheadline, body text, call to action
-   - Which curated images to use (reference by exact path), where to place them
-   - Logo, header, footer placement and style adaptation (NEVER just stamp — adapt creatively each time)
+   - Text content: headline + subheadline ONLY (keep text minimal — posters are visual, not text documents)
+   - Which curated images to use (reference by exact filename/path), and where to place them
+   - Logo, header, footer placement and style adaptation
    - Whether to use uniform and/or infrastructure images, and HOW
-   - A detailed designPrompt that could be sent directly to an image generation model
+   - A detailed designPrompt describing the final poster for the image generation model
 
-RULES for school assets:
-- Logo MUST appear in every poster, but placement and style adaptation should be unique per variation.
-- Header and footer should be adapted to match each variation's theme, not copy-pasted.
-- Uniform: MANDATORY when AI-generated students appear. NEVER modify uploaded real student photos.
-- Infrastructure images: use ONLY when they enhance the design. Not every poster needs them.
-- For one of the three variations, incorporate more school-specific assets (uniform, infrastructure). The other two can be more creative/abstract.
+RULES for uploaded photos:
+- If photos are provided, they are the HERO of the poster. Build the design AROUND them.
+- NEVER transform, edit, redraw, or replace uploaded photos. Use them exactly as-is.
+- Do NOT add uniforms or modifications to people in uploaded photos.
+
+RULES for event-based posters (no uploaded photos):
+- Generate all imagery from scratch to match the theme.
+- When AI-generated students appear, they MUST wear the school uniform (reference image provided).
+- Infrastructure images can be used as setting/background reference.
+
+RULES for school brand assets:
+- Logo MUST appear in every poster. Adapt its placement creatively — do NOT just stamp it.
+- Header MUST appear at the top of every page. Adapt style to match the theme.
+- Footer MUST appear at the bottom of every page. Adapt style to match the theme.
 
 RULES for carousel:
-- All pages must share a cohesive visual theme (consistent palette, typography, style).
-- First page = attention-grabbing cover. Last page = call to action.
+- All pages share a cohesive visual theme (consistent palette, typography, style).
+- Page 1 = attention-grabbing cover. Last page = call to action.
 - Maximum 4-5 images per page in collage layout.
+
+TEXT RULES:
+- HEADLINE: short, punchy, max 6-8 words
+- SUBHEADLINE: one short line, max 10-12 words
+- Do NOT include body text or long descriptions ON the poster — that goes in the Instagram caption, not the image
+- Call to action: optional, very short (e.g., "Join us!", "Learn more")
 
 Return ONLY valid JSON matching this schema:
 {
   "variations": [{
     "variationIndex": 1,
-    "direction": "string",
+    "direction": "string — name of the creative approach",
     "theme": "string",
     "colorPalette": ["#hex1", "#hex2", ...],
-    "textContent": { "headline": "", "subheadline": "", "bodyText": "", "callToAction": "" },
-    "selectedImages": [{ "path": "string", "placement": "string" }],
-    "layout": { "type": "single|carousel", "pages": [{ "pageIndex": 1, "description": "...", "selectedImages": [...], "textOverlays": [...] }] },
+    "textContent": { "headline": "short punchy headline", "subheadline": "one short tagline", "bodyText": "", "callToAction": "" },
+    "selectedImages": [{ "path": "exact filename from curated list", "placement": "description of placement" }],
+    "layout": { "type": "single|carousel", "pages": [{ "pageIndex": 1, "description": "visual description of this page", "selectedImages": [...], "textOverlays": [{ "text": "...", "position": "...", "style": "..." }] }] },
     "logoPlacement": { "position": "string", "size": "string", "style": "string" },
     "headerFooter": { "headerStyle": "string", "footerStyle": "string" },
     "schoolAssetUsage": { "useUniform": true/false, "uniformNotes": "...", "useInfrastructure": true/false, "infrastructureNotes": "..." },
-    "designPrompt": "string — detailed prompt for image generation model"
+    "designPrompt": "string — highly detailed prompt describing the exact final poster visual for the image generation model"
   }]
-}
-
-IMPORTANT: Generate exactly 1 creative direction (not 3). Focus all effort on making this one direction as strong as possible.`;
+}`;
 
 export async function runCreativeAgent(
   input: Agent2Input,
