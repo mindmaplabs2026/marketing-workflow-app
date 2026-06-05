@@ -148,7 +148,7 @@ Create 1 creative direction brief. Make it the strongest possible direction for 
   // Include curated image thumbnails so the model can see them
   const userContent: Array<
     | { type: "text"; text: string }
-    | { type: "image_url"; image_url: { url: string; detail: "low" } }
+    | { type: "image_url"; image_url: { url: string; detail: "high" } }
   > = [{ type: "text", text: userMessage }];
 
   // Attach brand asset images
@@ -156,7 +156,7 @@ Create 1 creative direction brief. Make it the strongest possible direction for 
     if (asset.signedUrl) {
       userContent.push({
         type: "image_url",
-        image_url: { url: asset.signedUrl, detail: "low" },
+        image_url: { url: asset.signedUrl, detail: "high" },
       });
       userContent.push({
         type: "text",

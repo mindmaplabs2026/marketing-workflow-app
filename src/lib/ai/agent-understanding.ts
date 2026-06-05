@@ -62,7 +62,7 @@ export async function runUnderstandingAgent(
 
   const userContent: Array<
     | { type: "text"; text: string }
-    | { type: "image_url"; image_url: { url: string; detail: "low" } }
+    | { type: "image_url"; image_url: { url: string; detail: "high" } }
   > = [
     {
       type: "text",
@@ -74,7 +74,7 @@ export async function runUnderstandingAgent(
   for (const img of input.images) {
     userContent.push({
       type: "image_url",
-      image_url: { url: img.signedUrl, detail: "low" },
+      image_url: { url: img.signedUrl, detail: "high" },
     });
     userContent.push({
       type: "text",
