@@ -8,14 +8,11 @@ import type { UploadedImage } from "@/lib/ai/agent-understanding";
 import type { UnderstandingOutput } from "@/lib/ai/agent-understanding";
 import type { VariationBrief } from "@/lib/ai/agent-creative";
 
-type PipelineEvent = {
-  name: "ai/pipeline.started";
-  data: {
-    jobId: string;
-    requestId: string;
-    posterType: "single" | "carousel";
-  };
-};
+/**
+ * The pipeline is split into chained Inngest functions to avoid the step
+ * output size limit. Each function fires an event to trigger the next,
+ * so no memoized state accumulates across the full pipeline.
+ */
 
 type BrandAsset = {
   assetType: string;
@@ -24,11 +21,6 @@ type BrandAsset = {
   label: string | null;
 };
 
-/**
- * Re-fetches context data (request, uploads, brand assets) from the DB.
- * Called at the start of each step to avoid passing large data between steps
- * (Inngest has a 4MB step output limit).
- */
 async function fetchContext(requestId: string) {
   const admin = createAdminClient();
 
@@ -93,51 +85,39 @@ async function fetchContext(requestId: string) {
   };
 }
 
-export const aiPipeline = inngest.createFunction(
+async function markFailed(jobId: string, message: string) {
+  const admin = createAdminClient();
+  await admin
+    .from("ai_generation_jobs")
+    .update({ status: "failed", error_message: message })
+    .eq("id", jobId);
+  try { await dispatchPendingPushes(); } catch { /* best effort */ }
+}
+
+// ---------------------------------------------------------------
+// Function 1: Understanding + Creative (single function, 2 steps)
+// Fires ai/pipeline.generate when done.
+// ---------------------------------------------------------------
+export const aiPipelineAnalyze = inngest.createFunction(
   {
-    id: "ai-poster-pipeline",
+    id: "ai-poster-analyze",
     retries: 1,
     triggers: [{ event: "ai/pipeline.started" }],
     onFailure: async ({ event }: { event: { data: { event: { data: { jobId: string } }; error: { message?: string } } } }) => {
-      const admin = createAdminClient();
-      const jobId = event.data.event.data.jobId;
-      await admin
-        .from("ai_generation_jobs")
-        .update({
-          status: "failed",
-          error_message: event.data.error.message ?? "Unknown error",
-        })
-        .eq("id", jobId);
-      try {
-        await dispatchPendingPushes();
-      } catch {
-        // best effort
-      }
+      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Analysis failed");
     },
   },
-  async ({ event, step }: { event: { data: PipelineEvent["data"] }; step: { run: <T>(name: string, fn: () => Promise<T>) => Promise<T> } }) => {
+  async ({ event, step }: { event: { data: { jobId: string; requestId: string; posterType: "single" | "carousel" } }; step: { run: (name: string, fn: () => Promise<void>) => Promise<void>; sendEvent: (name: string, event: { name: string; data: Record<string, string> }) => Promise<void> } }) => {
     const { jobId, requestId, posterType } = event.data;
 
-    // -----------------------------------------------------------
-    // Step 1: Fetch context + mark started
-    // Returns only minimal metadata — NOT the full context.
-    // -----------------------------------------------------------
-    await step.run("fetch-context", async () => {
+    // Step 1: Agent 1 — Understanding
+    await step.run("agent-understanding", async () => {
       const admin = createAdminClient();
       await admin
         .from("ai_generation_jobs")
         .update({ status: "understanding", started_at: new Date().toISOString() })
         .eq("id", jobId);
-      // Verify request exists
-      const ctx = await fetchContext(requestId);
-      return { imageCount: ctx.images.length, assetCount: ctx.brandAssets.length };
-    });
 
-    // -----------------------------------------------------------
-    // Step 2: Agent 1 — Understanding
-    // Stores output in DB; returns nothing to stay under size limit.
-    // -----------------------------------------------------------
-    await step.run("agent-understanding", async () => {
       const ctx = await fetchContext(requestId);
       const result = await runUnderstandingAgent({
         title: ctx.title,
@@ -146,7 +126,6 @@ export const aiPipeline = inngest.createFunction(
         brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       });
 
-      const admin = createAdminClient();
       await admin
         .from("ai_generation_jobs")
         .update({
@@ -154,19 +133,11 @@ export const aiPipeline = inngest.createFunction(
           agent1_output: result as unknown as Record<string, unknown>,
         })
         .eq("id", jobId);
-
-      // Return only a summary, not the full output
-      return { curatedCount: result.curatedImages.length, theme: result.theme };
     });
 
-    // -----------------------------------------------------------
-    // Step 3: Agent 2 — Creative directions
-    // Stores output in DB; returns only variation count.
-    // -----------------------------------------------------------
+    // Step 2: Agent 2 — Creative
     await step.run("agent-creative", async () => {
       const admin = createAdminClient();
-
-      // Re-read Agent 1 output from DB
       const { data: job } = await admin
         .from("ai_generation_jobs")
         .select("agent1_output")
@@ -191,18 +162,35 @@ export const aiPipeline = inngest.createFunction(
           agent2_output: result as unknown as Record<string, unknown>,
         })
         .eq("id", jobId);
-
-      return { variationCount: result.variations.length };
     });
 
-    // -----------------------------------------------------------
-    // Steps 4-6: Agent 3 — Generate each variation
-    // Each step re-reads everything from DB to stay independent.
-    // -----------------------------------------------------------
-    const generateVariation = async (variationIndex: number) => {
+    // Chain to generation function
+    await step.sendEvent("trigger-generate", {
+      name: "ai/pipeline.generate",
+      data: { jobId, requestId, posterType },
+    });
+  },
+);
+
+// ---------------------------------------------------------------
+// Function 2: Generate 3 variations + finalize
+// Triggered by ai/pipeline.generate — fresh state, no carryover.
+// ---------------------------------------------------------------
+export const aiPipelineGenerate = inngest.createFunction(
+  {
+    id: "ai-poster-generate",
+    retries: 1,
+    triggers: [{ event: "ai/pipeline.generate" }],
+    onFailure: async ({ event }: { event: { data: { event: { data: { jobId: string } }; error: { message?: string } } } }) => {
+      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation failed");
+    },
+  },
+  async ({ event, step }: { event: { data: { jobId: string; requestId: string; posterType: "single" | "carousel" } }; step: { run: (name: string, fn: () => Promise<void>) => Promise<void> } }) => {
+    const { jobId, requestId, posterType } = event.data;
+
+    const generateVariation = async (variationIndex: number): Promise<void> => {
       const admin = createAdminClient();
 
-      // Re-read agent outputs from DB
       const { data: job } = await admin
         .from("ai_generation_jobs")
         .select("agent1_output, agent2_output")
@@ -221,7 +209,7 @@ export const aiPipeline = inngest.createFunction(
 
       const curatedImages = [];
       for (const img of brief.selectedImages) {
-        const match = ctx.images.find((i) => i.path === img.path);
+        const match = ctx.images.find((i: UploadedImage) => i.path === img.path);
         if (match) {
           curatedImages.push({ path: match.path, signedUrl: match.signedUrl });
         }
@@ -239,7 +227,6 @@ export const aiPipeline = inngest.createFunction(
         schoolName: ctx.schoolName,
       });
 
-      // Download generated images and upload to Supabase Storage
       const storagePaths: string[] = [];
       for (let i = 0; i < result.imageUrls.length; i++) {
         const imageUrl = result.imageUrls[i];
@@ -265,7 +252,6 @@ export const aiPipeline = inngest.createFunction(
         storagePaths.push(storagePath);
       }
 
-      // Create variation record
       await admin.from("ai_variations").insert({
         job_id: jobId,
         request_id: requestId,
@@ -274,29 +260,19 @@ export const aiPipeline = inngest.createFunction(
         storage_paths: storagePaths,
         poster_type: posterType,
       });
-
-      // Return only the count, not full paths
-      return { pages: storagePaths.length };
     };
 
     await step.run("agent-generate-v1", () => generateVariation(0));
     await step.run("agent-generate-v2", () => generateVariation(1));
     await step.run("agent-generate-v3", () => generateVariation(2));
 
-    // -----------------------------------------------------------
-    // Step 7: Finalize
-    // -----------------------------------------------------------
     await step.run("finalize", async () => {
       const admin = createAdminClient();
       await admin
         .from("ai_generation_jobs")
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", jobId);
-
       await dispatchPendingPushes();
-      return { done: true };
     });
-
-    return { jobId, status: "completed" };
   },
 );
