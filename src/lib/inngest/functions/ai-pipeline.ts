@@ -242,7 +242,7 @@ export const aiPipelineAnalyze = inngest.createFunction(
       })
       .eq("id", jobId);
 
-    // Chain to variation 1
+    // Chain to variation 1 (V2/V3 disabled during testing)
     await inngest.send({
       name: "ai/pipeline.generate-v1",
       data: { jobId, requestId, posterType },
@@ -266,55 +266,7 @@ export const aiPipelineGenerateV1 = inngest.createFunction(
     const { jobId, requestId, posterType } = event.data;
     await generateOneVariation(jobId, requestId, posterType, 0);
 
-    // Chain to variation 2
-    await inngest.send({
-      name: "ai/pipeline.generate-v2",
-      data: { jobId, requestId, posterType },
-    });
-  },
-);
-
-// ---------------------------------------------------------------
-// Function 3: Generate variation 2
-// ---------------------------------------------------------------
-export const aiPipelineGenerateV2 = inngest.createFunction(
-  {
-    id: "ai-poster-generate-v2",
-    retries: 1,
-    triggers: [{ event: "ai/pipeline.generate-v2" }],
-    onFailure: async ({ event }: { event: FailureEvent }) => {
-      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation v2 failed");
-    },
-  },
-  async ({ event }: { event: { data: PipelineData } }) => {
-    const { jobId, requestId, posterType } = event.data;
-    await generateOneVariation(jobId, requestId, posterType, 1);
-
-    // Chain to variation 3
-    await inngest.send({
-      name: "ai/pipeline.generate-v3",
-      data: { jobId, requestId, posterType },
-    });
-  },
-);
-
-// ---------------------------------------------------------------
-// Function 4: Generate variation 3 + finalize
-// ---------------------------------------------------------------
-export const aiPipelineGenerateV3 = inngest.createFunction(
-  {
-    id: "ai-poster-generate-v3",
-    retries: 1,
-    triggers: [{ event: "ai/pipeline.generate-v3" }],
-    onFailure: async ({ event }: { event: FailureEvent }) => {
-      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation v3 failed");
-    },
-  },
-  async ({ event }: { event: { data: PipelineData } }) => {
-    const { jobId, requestId, posterType } = event.data;
-    await generateOneVariation(jobId, requestId, posterType, 2);
-
-    // Finalize
+    // Finalize (V2/V3 disabled during testing — only 1 variation)
     const admin = createAdminClient();
     await admin
       .from("ai_generation_jobs")
@@ -323,3 +275,9 @@ export const aiPipelineGenerateV3 = inngest.createFunction(
     await dispatchPendingPushes();
   },
 );
+
+// V2 and V3 generation functions — disabled during testing.
+// Uncomment and re-register in route.ts when ready for 3 variations.
+//
+// export const aiPipelineGenerateV2 = ...
+// export const aiPipelineGenerateV3 = ...

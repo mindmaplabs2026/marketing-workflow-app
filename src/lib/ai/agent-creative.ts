@@ -103,8 +103,10 @@ Return ONLY valid JSON matching this schema:
     "headerFooter": { "headerStyle": "string", "footerStyle": "string" },
     "schoolAssetUsage": { "useUniform": true/false, "uniformNotes": "...", "useInfrastructure": true/false, "infrastructureNotes": "..." },
     "designPrompt": "string — detailed prompt for image generation model"
-  }, ... (3 total)]
-}`;
+  }]
+}
+
+IMPORTANT: Generate exactly 1 creative direction (not 3). Focus all effort on making this one direction as strong as possible.`;
 
 export async function runCreativeAgent(
   input: Agent2Input,
@@ -141,7 +143,7 @@ ${curatedImagesSummary || "(No images uploaded — event-based poster, generate 
 ## School Brand Assets
 ${brandAssetSummary || "(No brand assets configured yet)"}
 
-Create 3 distinct creative direction briefs.`;
+Create 1 creative direction brief. Make it the strongest possible direction for this theme.`;
 
   // Include curated image thumbnails so the model can see them
   const userContent: Array<

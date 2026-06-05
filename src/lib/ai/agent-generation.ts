@@ -129,12 +129,40 @@ export async function runGenerationAgent(
       ? `\n\nThis is page ${i + 1} of ${pages.length} in a carousel. ${page.description}`
       : "";
 
-    const prompt = buildImagePrompt(input, page, pageContext);
+    const rawPrompt = buildImagePrompt(input, page, pageContext);
+
+    // Prompt enhancer: expand the raw prompt into a highly detailed,
+    // production-quality image generation prompt (like ChatGPT does internally)
+    const enhanced = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert image prompt engineer. Your job is to take a poster design brief and expand it into a highly detailed, production-quality prompt for gpt-image-1.
+
+Rules:
+- Output ONLY the enhanced prompt text, nothing else
+- Be extremely specific about: composition, layout, typography style, color usage, spacing, visual hierarchy, lighting, texture
+- Specify exact positions (top-left, center, bottom-right, etc.)
+- Describe typography: font style (sans-serif/serif), weight, size relative to poster, color, effects (shadow, outline)
+- For Instagram posters: clean design, modern typography, strong visual hierarchy, breathing room, professional marketing quality
+- Minimize text density — a poster should be visually driven, not text-heavy. Use only headline + one short line max
+- Specify: "Instagram social media poster, portrait orientation 1080x1350px, high resolution, print-ready quality, professional graphic design"
+- If there are uploaded photos, say: "Incorporate the provided reference photographs exactly as they are, without any modification, into a collage/featured layout"
+- Describe the poster as a finished design, not a concept`,
+        },
+        { role: "user", content: rawPrompt },
+      ],
+      max_tokens: 1500,
+    });
+
+    const prompt = enhanced.choices[0]?.message?.content ?? rawPrompt;
     prompts.push(prompt);
 
+    // Instagram portrait: 1024x1536 is the closest API size to 1080x1350 (4:5)
+    const imageSize = "1024x1536" as const;
+
     if (referenceImages.length > 0) {
-      // Use images.edit to pass reference images so the model can
-      // incorporate real photos, logos, headers, etc.
       const referenceFiles = await Promise.all(
         referenceImages.map((img) =>
           toFile(img.buffer, img.name, { type: "image/png" }),
@@ -146,7 +174,7 @@ export async function runGenerationAgent(
         image: referenceFiles,
         prompt,
         n: 1,
-        size: "1024x1024",
+        size: imageSize,
         quality: "high",
       });
 
@@ -171,7 +199,7 @@ export async function runGenerationAgent(
         model: "gpt-image-1",
         prompt,
         n: 1,
-        size: "1024x1024",
+        size: imageSize,
         quality: "high",
       });
 
@@ -305,5 +333,8 @@ ${pageContext}
 ## Design Prompt:
 ${brief.designPrompt}
 
-IMPORTANT: This is a polished, print-ready Instagram poster (1080x1080px square). High quality, vibrant, professional school marketing. All text must be crisp and legible.`;
+FORMAT: Instagram social media poster, portrait orientation 1080x1350px (4:5 ratio), high resolution, print-ready, professional graphic design.
+STYLE: Clean modern design, strong visual hierarchy, generous whitespace, minimal text (headline + one short tagline MAX). The poster should be VISUAL-DRIVEN, not text-heavy. Think premium magazine ad, not a flyer.
+TYPOGRAPHY: Modern sans-serif, bold headline, clean readable type with good contrast against background. No more than 2 lines of text total.
+QUALITY: Ultra high quality, commercial advertising standard, polished and professional.`;
 }
