@@ -614,8 +614,11 @@ export async function publishRequest(formData: FormData) {
 
   const actor = await loadActor();
   if ("error" in actor) throw new Error(actor.error);
-  if (actor.role !== "designer" && actor.role !== "super_admin") {
-    throw new Error("Only a designer can publish.");
+  // For AI-generated requests, school_admin can publish directly (no designer in the loop).
+  // For manual requests, only the assigned designer or super_admin can publish.
+  const allowedPublishRoles: import("@/lib/supabase/types").UserRole[] = ["designer", "super_admin", "school_admin"];
+  if (!allowedPublishRoles.includes(actor.role)) {
+    throw new Error("You don't have permission to publish.");
   }
 
   const req = await loadRequestForUpdate(id);

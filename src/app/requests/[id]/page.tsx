@@ -404,7 +404,12 @@ export default async function RequestDetailPage({
     isReviewer && req.status === "design_pending_approval";
   const awaitingPublish =
     req.status === "in_design" && designsList.length > 0;
-  const canPublish = isAssignedDesigner && awaitingPublish;
+  // For AI-generated requests, there's no assigned designer — school admin
+  // or super_admin publishes directly after approving the design.
+  const canPublish = awaitingPublish && (
+    isAssignedDesigner ||
+    (req.ai_generated && isReviewer)
+  );
   const canArchive =
     (isCreator || isReviewer) &&
     req.status !== "archived" &&
