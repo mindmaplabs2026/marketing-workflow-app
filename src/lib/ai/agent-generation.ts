@@ -60,13 +60,22 @@ export async function runGenerationAgent(
   const imageUrls: string[] = [];
   const prompts: string[] = [];
 
-  // Collect reference images — only what's needed for this variation:
-  // 1. Logo, header, footer: ALWAYS included (mandatory on every poster)
-  // 2. Uploaded photos: only the ones Agent 2 selected for this variation
-  // 3. Uniform/infrastructure: only if Agent 2 specified to use them
+  // Two distinct modes:
+  //
+  // MODE A — Teacher uploaded photos:
+  //   Reference images = uploaded photos (AS-IS, no transformation) + logo + header + footer
+  //   NO uniform/infrastructure assets — real photos must not be altered
+  //
+  // MODE B — No uploaded photos (event-based, e.g. "Environment Day"):
+  //   Reference images = logo + header + footer + uniform + infrastructure
+  //   AI generates all imagery from scratch using school assets as style reference
+
+  const hasUploadedPhotos = input.curatedImages.length > 0 &&
+    brief.selectedImages.length > 0;
+
   const referenceImages: { buffer: Buffer; name: string }[] = [];
 
-  // Always include: logo, header, footer
+  // Always include: logo, header, footer (both modes)
   const alwaysInclude = ["logo", "header", "footer"];
   for (const asset of input.brandAssets) {
     if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
@@ -80,50 +89,35 @@ export async function runGenerationAgent(
     }
   }
 
-  // Conditionally include: uniform (if Agent 2 says useUniform)
-  if (brief.schoolAssetUsage.useUniform) {
-    for (const asset of input.brandAssets) {
-      if (asset.assetType === "uniform" && asset.signedUrl) {
-        const buf = await downloadImage(asset.signedUrl);
+  if (hasUploadedPhotos) {
+    // MODE A: Include only the selected uploaded photos — no uniform/infrastructure
+    const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
+    for (const img of input.curatedImages) {
+      const imgFilename = img.path.split("/").pop() ?? "";
+      const isSelected = selectedPaths.has(img.path) ||
+        [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
+      if (isSelected) {
+        const buf = await downloadImage(img.signedUrl);
         if (buf) {
           referenceImages.push({
             buffer: buf,
-            name: `brand-uniform-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+            name: imgFilename || "upload.png",
           });
         }
       }
     }
-  }
-
-  // Conditionally include: infrastructure (if Agent 2 says useInfrastructure)
-  if (brief.schoolAssetUsage.useInfrastructure) {
+  } else {
+    // MODE B: No uploaded photos — include uniform + infrastructure as style references
+    const styleAssets = ["uniform", "infrastructure"];
     for (const asset of input.brandAssets) {
-      if (asset.assetType === "infrastructure" && asset.signedUrl) {
+      if (styleAssets.includes(asset.assetType) && asset.signedUrl) {
         const buf = await downloadImage(asset.signedUrl);
         if (buf) {
           referenceImages.push({
             buffer: buf,
-            name: `brand-infrastructure-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+            name: `brand-${asset.assetType}-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
           });
         }
-      }
-    }
-  }
-
-  // Only include the specific uploaded photos Agent 2 selected for this variation
-  const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
-  for (const img of input.curatedImages) {
-    // Match by filename (selectedImages uses just the filename, curatedImages has full path)
-    const imgFilename = img.path.split("/").pop() ?? "";
-    const isSelected = selectedPaths.has(img.path) ||
-      [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
-    if (isSelected) {
-      const buf = await downloadImage(img.signedUrl);
-      if (buf) {
-        referenceImages.push({
-          buffer: buf,
-          name: imgFilename || "upload.png",
-        });
       }
     }
   }
@@ -212,27 +206,78 @@ function buildImagePrompt(
   page: { description: string; selectedImages: { path: string; placement: string; size: string }[]; textOverlays: { text: string; position: string; style: string }[] } | undefined,
   pageContext: string,
 ): string {
-  const { brief, understanding, schoolName, brandAssets } = input;
+  const { brief, understanding, schoolName, brandAssets, curatedImages } = input;
 
-  const imageDescriptions = brief.selectedImages
-    .map((img) => {
-      const curated = understanding.curatedImages.find(
-        (c) => c.path === img.path,
-      );
-      return curated
-        ? `- ${curated.description} (placed: ${img.placement})`
-        : `- Image at ${img.path} (placed: ${img.placement})`;
-    })
-    .join("\n");
+  const hasUploadedPhotos = curatedImages.length > 0 && brief.selectedImages.length > 0;
 
   const textOverlays = page?.textOverlays
     ?.map((t) => `- "${t.text}" at ${t.position} in ${t.style} style`)
     .join("\n") ?? "";
 
-  // Describe brand assets so the model knows what reference images it has
-  const brandAssetDescriptions = brandAssets
-    .map((a) => `- ${a.assetType}: provided as reference image (filename: brand-${a.assetType}-...)`)
+  // Brand assets present as reference images (logo, header, footer always)
+  const brandRefDescriptions = brandAssets
+    .filter((a) => ["logo", "header", "footer"].includes(a.assetType))
+    .map((a) => `- ${a.assetType}: provided as reference image`)
     .join("\n");
+
+  let photoSection: string;
+  let assetRules: string;
+
+  if (hasUploadedPhotos) {
+    // MODE A: Teacher uploaded photos — use as-is, do not transform
+    const imageDescriptions = brief.selectedImages
+      .map((img) => {
+        const curated = understanding.curatedImages.find((c) => c.path === img.path);
+        return curated
+          ? `- ${curated.description} (placed: ${img.placement})`
+          : `- Image at ${img.path} (placed: ${img.placement})`;
+      })
+      .join("\n");
+
+    photoSection = `## Uploaded Photos (provided as reference images):
+${imageDescriptions}
+
+CRITICAL RULES FOR UPLOADED PHOTOS:
+- These are REAL photographs taken by the teacher. They are provided as reference images.
+- You MUST include these photos in the poster EXACTLY as they are — do NOT transform, edit, filter, redraw, or replace them with AI-generated versions.
+- Do NOT add uniforms, accessories, or any modifications to people in these photos.
+- Do NOT alter faces, bodies, backgrounds, or any part of the uploaded photos.
+- Arrange them in the poster layout (collage, grid, featured) but preserve them as-is.
+- You may add borders, frames, or decorative elements AROUND the photos, but never alter the photos themselves.`;
+
+    assetRules = `## School Brand Assets:
+${brandRefDescriptions || "(No brand assets)"}
+
+BRANDING RULES:
+- Use the school's actual LOGO from the reference images at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}.
+- HEADER must appear at the top of EVERY page. Use the provided header and adapt its style to the theme.
+- FOOTER must appear at the bottom of EVERY page. Use the provided footer and adapt its style to the theme.
+- Do NOT use uniform or infrastructure assets — this poster uses real uploaded photos.`;
+
+  } else {
+    // MODE B: No uploaded photos — AI generates everything from scratch
+    const styleAssets = brandAssets
+      .filter((a) => ["uniform", "infrastructure"].includes(a.assetType))
+      .map((a) => `- ${a.assetType}: provided as reference image — use as style/visual guide`)
+      .join("\n");
+
+    photoSection = `## No Uploaded Photos
+This is an event-based poster. Generate ALL imagery from scratch to match the theme.
+${brief.schoolAssetUsage.useUniform ? `- When generating students, they MUST wear the school uniform. A uniform reference image is provided — match it precisely.
+- ${brief.schoolAssetUsage.uniformNotes}` : ""}
+${brief.schoolAssetUsage.useInfrastructure ? `- Use the school infrastructure/campus images as visual reference for the setting.
+- ${brief.schoolAssetUsage.infrastructureNotes}` : ""}`;
+
+    assetRules = `## School Brand Assets:
+${brandRefDescriptions || "(No brand assets)"}
+${styleAssets ? `\n## Style Reference Assets:\n${styleAssets}` : ""}
+
+BRANDING RULES:
+- Use the school's actual LOGO from the reference images at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}.
+- HEADER must appear at the top of EVERY page. Use the provided header and adapt its style to the theme.
+- FOOTER must appear at the bottom of EVERY page. Use the provided footer and adapt its style to the theme.
+- All AI-generated imagery should match the school's visual identity (uniform colors, campus look).`;
+  }
 
   return `Create a professional Instagram poster for ${schoolName}.
 
@@ -248,23 +293,12 @@ ${brief.textContent.callToAction ? `- CTA: "${brief.textContent.callToAction}"` 
 
 ${textOverlays ? `## Text Overlays:\n${textOverlays}` : ""}
 
-## Uploaded Photos to incorporate into the poster:
-${imageDescriptions || "(No uploaded images — generate all visuals to match the theme)"}
-${input.curatedImages.length > 0 ? "\nIMPORTANT: The uploaded photos are provided as reference images. You MUST incorporate them into the poster design. Do NOT replace them with AI-generated imagery." : ""}
+${photoSection}
 
-## School Brand Assets (provided as reference images):
-${brandAssetDescriptions || "(No brand assets provided)"}
-${brandAssets.length > 0 ? `\nIMPORTANT BRANDING RULES:
-- Use the school's actual LOGO from the reference images. Place it at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}.
-- The HEADER must appear at the top of EVERY poster (single or carousel page). Use the provided header reference image and adapt its style to match the theme.
-- The FOOTER must appear at the bottom of EVERY poster (single or carousel page). Use the provided footer reference image and adapt its style to match the theme.
-- Header and footer are MANDATORY on every single page. Do not omit them.` : `\n## Logo: ${brief.logoPlacement.position}, ${brief.logoPlacement.size}, style: ${brief.logoPlacement.style}`}
+${assetRules}
 
-## Header style: ${brief.headerFooter.headerStyle} (MUST appear on every page)
-## Footer style: ${brief.headerFooter.footerStyle} (MUST appear on every page)
-
-${brief.schoolAssetUsage.useUniform ? `## Uniform: ${brief.schoolAssetUsage.uniformNotes}` : ""}
-${brief.schoolAssetUsage.useInfrastructure ? `## Infrastructure: ${brief.schoolAssetUsage.infrastructureNotes}` : ""}
+## Header style: ${brief.headerFooter.headerStyle} (MANDATORY on every page)
+## Footer style: ${brief.headerFooter.footerStyle} (MANDATORY on every page)
 
 ${pageContext}
 
