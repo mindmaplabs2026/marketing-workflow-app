@@ -185,27 +185,29 @@ export const aiPipelineGenerate = inngest.createFunction(
       await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation failed");
     },
   },
-  async ({ event, step }: { event: { data: { jobId: string; requestId: string; posterType: "single" | "carousel" } }; step: { run: (name: string, fn: () => Promise<void>) => Promise<void> } }) => {
+  async ({ event }: { event: { data: { jobId: string; requestId: string; posterType: "single" | "carousel" } } }) => {
     const { jobId, requestId, posterType } = event.data;
 
-    const generateVariation = async (variationIndex: number): Promise<void> => {
-      const admin = createAdminClient();
+    // All generation work in a single execution — no step.run calls,
+    // no memoized state accumulation, no step output size issues.
+    const admin = createAdminClient();
 
-      const { data: job } = await admin
-        .from("ai_generation_jobs")
-        .select("agent1_output, agent2_output")
-        .eq("id", jobId)
-        .single();
-      if (!job?.agent1_output || !job?.agent2_output) {
-        throw new Error("Agent outputs not found in DB");
-      }
+    const { data: job } = await admin
+      .from("ai_generation_jobs")
+      .select("agent1_output, agent2_output")
+      .eq("id", jobId)
+      .single();
+    if (!job?.agent1_output || !job?.agent2_output) {
+      throw new Error("Agent outputs not found in DB");
+    }
 
-      const understanding = job.agent1_output as unknown as UnderstandingOutput;
-      const creative = job.agent2_output as unknown as { variations: VariationBrief[] };
-      const brief = creative.variations[variationIndex];
-      if (!brief) throw new Error(`Variation ${variationIndex} not found`);
+    const understanding = job.agent1_output as unknown as UnderstandingOutput;
+    const creative = job.agent2_output as unknown as { variations: VariationBrief[] };
+    const ctx = await fetchContext(requestId);
 
-      const ctx = await fetchContext(requestId);
+    // Generate each variation sequentially
+    for (let vi = 0; vi < creative.variations.length; vi++) {
+      const brief = creative.variations[vi];
 
       const curatedImages = [];
       for (const img of brief.selectedImages) {
@@ -260,19 +262,13 @@ export const aiPipelineGenerate = inngest.createFunction(
         storage_paths: storagePaths,
         poster_type: posterType,
       });
-    };
+    }
 
-    await step.run("agent-generate-v1", () => generateVariation(0));
-    await step.run("agent-generate-v2", () => generateVariation(1));
-    await step.run("agent-generate-v3", () => generateVariation(2));
-
-    await step.run("finalize", async () => {
-      const admin = createAdminClient();
-      await admin
-        .from("ai_generation_jobs")
-        .update({ status: "completed", completed_at: new Date().toISOString() })
-        .eq("id", jobId);
-      await dispatchPendingPushes();
-    });
+    // Finalize
+    await admin
+      .from("ai_generation_jobs")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("id", jobId);
+    await dispatchPendingPushes();
   },
 );
