@@ -170,7 +170,15 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
     job_id: jobId,
     request_id: requestId,
     variation_index: brief.variationIndex,
-    creative_brief: brief as unknown as Record<string, unknown>,
+    creative_brief: {
+      ...brief,
+      _generation_log: {
+        prompts: result.prompts,
+        referenceImageCount: result.referenceImageCount,
+        model: result.model,
+        generatedAt: new Date().toISOString(),
+      },
+    } as unknown as Record<string, unknown>,
     storage_paths: storagePaths,
     poster_type: posterType,
   });
