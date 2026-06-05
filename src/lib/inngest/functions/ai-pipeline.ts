@@ -9,9 +9,11 @@ import type { UnderstandingOutput } from "@/lib/ai/agent-understanding";
 import type { VariationBrief } from "@/lib/ai/agent-creative";
 
 /**
- * The pipeline is split into chained Inngest functions to avoid the step
- * output size limit. Each function fires an event to trigger the next,
- * so no memoized state accumulates across the full pipeline.
+ * Pipeline split into 5 chained functions to avoid:
+ * 1. Inngest step output size limits (no memoized state between steps)
+ * 2. Vercel function timeout (each function is one focused task)
+ *
+ * Chain: started → analyze-done → generate-v1-done → generate-v2-done → generate-v3-done (finalize)
  */
 
 type BrandAsset = {
@@ -19,6 +21,12 @@ type BrandAsset = {
   storagePath: string;
   signedUrl: string;
   label: string | null;
+};
+
+type PipelineData = {
+  jobId: string;
+  requestId: string;
+  posterType: "single" | "carousel";
 };
 
 async function fetchContext(requestId: string) {
@@ -94,177 +102,212 @@ async function markFailed(jobId: string, message: string) {
   try { await dispatchPendingPushes(); } catch { /* best effort */ }
 }
 
+async function generateOneVariation(jobId: string, requestId: string, posterType: "single" | "carousel", variationIndex: number) {
+  const admin = createAdminClient();
+
+  const { data: job } = await admin
+    .from("ai_generation_jobs")
+    .select("agent1_output, agent2_output")
+    .eq("id", jobId)
+    .single();
+  if (!job?.agent1_output || !job?.agent2_output) {
+    throw new Error("Agent outputs not found in DB");
+  }
+
+  const understanding = job.agent1_output as unknown as UnderstandingOutput;
+  const creative = job.agent2_output as unknown as { variations: VariationBrief[] };
+  const brief = creative.variations[variationIndex];
+  if (!brief) throw new Error(`Variation ${variationIndex} not found`);
+
+  const ctx = await fetchContext(requestId);
+
+  const curatedImages = [];
+  for (const img of brief.selectedImages) {
+    const match = ctx.images.find((i: UploadedImage) => i.path === img.path);
+    if (match) {
+      curatedImages.push({ path: match.path, signedUrl: match.signedUrl });
+    }
+  }
+
+  const result = await runGenerationAgent({
+    brief,
+    understanding,
+    brandAssets: ctx.brandAssets.map((a) => ({
+      assetType: a.assetType,
+      storagePath: a.storagePath,
+      signedUrl: a.signedUrl,
+    })),
+    curatedImages,
+    schoolName: ctx.schoolName,
+  });
+
+  const storagePaths: string[] = [];
+  for (let i = 0; i < result.imageUrls.length; i++) {
+    const imageUrl = result.imageUrls[i];
+    const timestamp = Date.now();
+    const storagePath = `${ctx.schoolId}/${requestId}/ai/${brief.variationIndex}/${timestamp}-page${i + 1}.png`;
+
+    let imageBuffer: Buffer;
+    if (imageUrl.startsWith("data:")) {
+      const base64 = imageUrl.split(",")[1];
+      imageBuffer = Buffer.from(base64, "base64");
+    } else {
+      const res = await fetch(imageUrl);
+      imageBuffer = Buffer.from(await res.arrayBuffer());
+    }
+
+    await admin.storage
+      .from("designs")
+      .upload(storagePath, imageBuffer, {
+        contentType: "image/png",
+        upsert: false,
+      });
+
+    storagePaths.push(storagePath);
+  }
+
+  await admin.from("ai_variations").insert({
+    job_id: jobId,
+    request_id: requestId,
+    variation_index: brief.variationIndex,
+    creative_brief: brief as unknown as Record<string, unknown>,
+    storage_paths: storagePaths,
+    poster_type: posterType,
+  });
+}
+
+type FailureEvent = { data: { event: { data: PipelineData }; error: { message?: string } } };
+
 // ---------------------------------------------------------------
-// Function 1: Understanding + Creative (single function, 2 steps)
-// Fires ai/pipeline.generate when done.
+// Function 1: Understanding + Creative
 // ---------------------------------------------------------------
 export const aiPipelineAnalyze = inngest.createFunction(
   {
     id: "ai-poster-analyze",
     retries: 1,
     triggers: [{ event: "ai/pipeline.started" }],
-    onFailure: async ({ event }: { event: { data: { event: { data: { jobId: string } }; error: { message?: string } } } }) => {
+    onFailure: async ({ event }: { event: FailureEvent }) => {
       await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Analysis failed");
     },
   },
-  async ({ event, step }: { event: { data: { jobId: string; requestId: string; posterType: "single" | "carousel" } }; step: { run: (name: string, fn: () => Promise<void>) => Promise<void>; sendEvent: (name: string, event: { name: string; data: Record<string, string> }) => Promise<void> } }) => {
+  async ({ event }: { event: { data: PipelineData } }) => {
     const { jobId, requestId, posterType } = event.data;
+    const admin = createAdminClient();
 
-    // Step 1: Agent 1 — Understanding
-    await step.run("agent-understanding", async () => {
-      const admin = createAdminClient();
-      await admin
-        .from("ai_generation_jobs")
-        .update({ status: "understanding", started_at: new Date().toISOString() })
-        .eq("id", jobId);
+    // Mark started
+    await admin
+      .from("ai_generation_jobs")
+      .update({ status: "understanding", started_at: new Date().toISOString() })
+      .eq("id", jobId);
 
-      const ctx = await fetchContext(requestId);
-      const result = await runUnderstandingAgent({
-        title: ctx.title,
-        description: ctx.description,
-        images: ctx.images,
-        brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
-      });
-
-      await admin
-        .from("ai_generation_jobs")
-        .update({
-          status: "creative",
-          agent1_output: result as unknown as Record<string, unknown>,
-        })
-        .eq("id", jobId);
+    // Agent 1: Understanding
+    const ctx = await fetchContext(requestId);
+    const understanding = await runUnderstandingAgent({
+      title: ctx.title,
+      description: ctx.description,
+      images: ctx.images,
+      brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
     });
 
-    // Step 2: Agent 2 — Creative
-    await step.run("agent-creative", async () => {
-      const admin = createAdminClient();
-      const { data: job } = await admin
-        .from("ai_generation_jobs")
-        .select("agent1_output")
-        .eq("id", jobId)
-        .single();
-      if (!job?.agent1_output) throw new Error("Agent 1 output not found");
+    await admin
+      .from("ai_generation_jobs")
+      .update({
+        status: "creative",
+        agent1_output: understanding as unknown as Record<string, unknown>,
+      })
+      .eq("id", jobId);
 
-      const understanding = job.agent1_output as unknown as UnderstandingOutput;
-      const ctx = await fetchContext(requestId);
-
-      const result = await runCreativeAgent({
-        understanding,
-        brandAssets: ctx.brandAssets,
-        posterType,
-        schoolName: ctx.schoolName,
-      });
-
-      await admin
-        .from("ai_generation_jobs")
-        .update({
-          status: "generating",
-          agent2_output: result as unknown as Record<string, unknown>,
-        })
-        .eq("id", jobId);
+    // Agent 2: Creative (re-fetch context for fresh signed URLs)
+    const ctx2 = await fetchContext(requestId);
+    const creative = await runCreativeAgent({
+      understanding,
+      brandAssets: ctx2.brandAssets,
+      posterType,
+      schoolName: ctx2.schoolName,
     });
 
-    // Chain to generation function
-    await step.sendEvent("trigger-generate", {
-      name: "ai/pipeline.generate",
+    await admin
+      .from("ai_generation_jobs")
+      .update({
+        status: "generating",
+        agent2_output: creative as unknown as Record<string, unknown>,
+      })
+      .eq("id", jobId);
+
+    // Chain to variation 1
+    await inngest.send({
+      name: "ai/pipeline.generate-v1",
       data: { jobId, requestId, posterType },
     });
   },
 );
 
 // ---------------------------------------------------------------
-// Function 2: Generate 3 variations + finalize
-// Triggered by ai/pipeline.generate — fresh state, no carryover.
+// Function 2: Generate variation 1
 // ---------------------------------------------------------------
-export const aiPipelineGenerate = inngest.createFunction(
+export const aiPipelineGenerateV1 = inngest.createFunction(
   {
-    id: "ai-poster-generate",
+    id: "ai-poster-generate-v1",
     retries: 1,
-    triggers: [{ event: "ai/pipeline.generate" }],
-    onFailure: async ({ event }: { event: { data: { event: { data: { jobId: string } }; error: { message?: string } } } }) => {
-      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation failed");
+    triggers: [{ event: "ai/pipeline.generate-v1" }],
+    onFailure: async ({ event }: { event: FailureEvent }) => {
+      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation v1 failed");
     },
   },
-  async ({ event }: { event: { data: { jobId: string; requestId: string; posterType: "single" | "carousel" } } }) => {
+  async ({ event }: { event: { data: PipelineData } }) => {
     const { jobId, requestId, posterType } = event.data;
+    await generateOneVariation(jobId, requestId, posterType, 0);
 
-    // All generation work in a single execution — no step.run calls,
-    // no memoized state accumulation, no step output size issues.
-    const admin = createAdminClient();
+    // Chain to variation 2
+    await inngest.send({
+      name: "ai/pipeline.generate-v2",
+      data: { jobId, requestId, posterType },
+    });
+  },
+);
 
-    const { data: job } = await admin
-      .from("ai_generation_jobs")
-      .select("agent1_output, agent2_output")
-      .eq("id", jobId)
-      .single();
-    if (!job?.agent1_output || !job?.agent2_output) {
-      throw new Error("Agent outputs not found in DB");
-    }
+// ---------------------------------------------------------------
+// Function 3: Generate variation 2
+// ---------------------------------------------------------------
+export const aiPipelineGenerateV2 = inngest.createFunction(
+  {
+    id: "ai-poster-generate-v2",
+    retries: 1,
+    triggers: [{ event: "ai/pipeline.generate-v2" }],
+    onFailure: async ({ event }: { event: FailureEvent }) => {
+      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation v2 failed");
+    },
+  },
+  async ({ event }: { event: { data: PipelineData } }) => {
+    const { jobId, requestId, posterType } = event.data;
+    await generateOneVariation(jobId, requestId, posterType, 1);
 
-    const understanding = job.agent1_output as unknown as UnderstandingOutput;
-    const creative = job.agent2_output as unknown as { variations: VariationBrief[] };
-    const ctx = await fetchContext(requestId);
+    // Chain to variation 3
+    await inngest.send({
+      name: "ai/pipeline.generate-v3",
+      data: { jobId, requestId, posterType },
+    });
+  },
+);
 
-    // Generate each variation sequentially
-    for (let vi = 0; vi < creative.variations.length; vi++) {
-      const brief = creative.variations[vi];
-
-      const curatedImages = [];
-      for (const img of brief.selectedImages) {
-        const match = ctx.images.find((i: UploadedImage) => i.path === img.path);
-        if (match) {
-          curatedImages.push({ path: match.path, signedUrl: match.signedUrl });
-        }
-      }
-
-      const result = await runGenerationAgent({
-        brief,
-        understanding,
-        brandAssets: ctx.brandAssets.map((a) => ({
-          assetType: a.assetType,
-          storagePath: a.storagePath,
-          signedUrl: a.signedUrl,
-        })),
-        curatedImages,
-        schoolName: ctx.schoolName,
-      });
-
-      const storagePaths: string[] = [];
-      for (let i = 0; i < result.imageUrls.length; i++) {
-        const imageUrl = result.imageUrls[i];
-        const timestamp = Date.now();
-        const storagePath = `${ctx.schoolId}/${requestId}/ai/${brief.variationIndex}/${timestamp}-page${i + 1}.png`;
-
-        let imageBuffer: Buffer;
-        if (imageUrl.startsWith("data:")) {
-          const base64 = imageUrl.split(",")[1];
-          imageBuffer = Buffer.from(base64, "base64");
-        } else {
-          const res = await fetch(imageUrl);
-          imageBuffer = Buffer.from(await res.arrayBuffer());
-        }
-
-        await admin.storage
-          .from("designs")
-          .upload(storagePath, imageBuffer, {
-            contentType: "image/png",
-            upsert: false,
-          });
-
-        storagePaths.push(storagePath);
-      }
-
-      await admin.from("ai_variations").insert({
-        job_id: jobId,
-        request_id: requestId,
-        variation_index: brief.variationIndex,
-        creative_brief: brief as unknown as Record<string, unknown>,
-        storage_paths: storagePaths,
-        poster_type: posterType,
-      });
-    }
+// ---------------------------------------------------------------
+// Function 4: Generate variation 3 + finalize
+// ---------------------------------------------------------------
+export const aiPipelineGenerateV3 = inngest.createFunction(
+  {
+    id: "ai-poster-generate-v3",
+    retries: 1,
+    triggers: [{ event: "ai/pipeline.generate-v3" }],
+    onFailure: async ({ event }: { event: FailureEvent }) => {
+      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Generation v3 failed");
+    },
+  },
+  async ({ event }: { event: { data: PipelineData } }) => {
+    const { jobId, requestId, posterType } = event.data;
+    await generateOneVariation(jobId, requestId, posterType, 2);
 
     // Finalize
+    const admin = createAdminClient();
     await admin
       .from("ai_generation_jobs")
       .update({ status: "completed", completed_at: new Date().toISOString() })
