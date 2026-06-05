@@ -56,6 +56,19 @@ function isVideo(mime: string | null, name: string): boolean {
   return /\.(mp4|mov|webm)$/i.test(name);
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Strip the data URL prefix (data:mime;base64,)
+      resolve(result.split(",")[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function isNativeApp(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -89,34 +102,43 @@ async function triggerDownload(
 
   if (isNativeApp()) {
     // Native Capacitor: blob + anchor trick doesn't work in Android WebView.
-    // Convert blob to base64 and use Capacitor Filesystem to save, or fall
-    // back to opening a data URL which triggers Android's download intent.
+    // Try multiple approaches in order of reliability.
     try {
       const { Filesystem, Directory } = await import("@capacitor/filesystem");
-      const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(",")[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+      const base64 = await blobToBase64(blob);
       await Filesystem.writeFile({
         path: `Download/${filename}`,
         data: base64,
         directory: Directory.ExternalStorage,
         recursive: true,
       });
+      // Notify user since there's no browser download bar
+      alert(`Saved to Downloads/${filename}`);
     } catch {
-      // Filesystem plugin not available — open blob as data URL in new window.
-      // This triggers Android's built-in download handler for most file types.
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        window.open(dataUrl, "_system");
-      };
-      reader.readAsDataURL(blob);
+      // Filesystem plugin not in APK — use share sheet as fallback.
+      // This works on all Android versions without extra permissions.
+      try {
+        const { Share } = await import("@capacitor/share");
+        const base64 = await blobToBase64(blob);
+        const dataUrl = `data:${blob.type || "application/octet-stream"};base64,${base64}`;
+        await Share.share({
+          title: filename,
+          url: dataUrl,
+          dialogTitle: `Save ${filename}`,
+        });
+      } catch {
+        // Last resort: create a temporary link and try the anchor approach
+        // anyway — some WebView versions handle it.
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.target = "_blank";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 3000);
+      }
     }
   } else {
     // Web: standard blob + anchor trick
