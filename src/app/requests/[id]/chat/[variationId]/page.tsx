@@ -23,7 +23,6 @@ export default async function VariationChatPage({
   const { id: requestId, variationId } = await params;
   const supabase = await createClient();
 
-  // Fetch the variation
   const { data: variation } = await supabase
     .from("ai_variations")
     .select(
@@ -35,7 +34,6 @@ export default async function VariationChatPage({
 
   if (!variation) notFound();
 
-  // Fetch the request to verify ownership
   const { data: req } = await supabase
     .from("requests")
     .select("title, created_by")
@@ -44,7 +42,6 @@ export default async function VariationChatPage({
 
   if (!req) notFound();
 
-  // Load chat history
   const { data: messages } = await supabase
     .from("ai_chat_messages")
     .select("id, role, content, image_paths, created_at")
@@ -52,15 +49,13 @@ export default async function VariationChatPage({
     .order("created_at", { ascending: true })
     .returns<ChatMessage[]>();
 
-  // Get signed URL for the current poster
-  const currentPath =
-    variation.storage_paths[variation.storage_paths.length - 1];
-  let currentPosterUrl: string | null = null;
-  if (currentPath) {
+  // Sign ALL carousel page URLs (not just the last one)
+  const posterUrls: string[] = [];
+  for (const path of variation.storage_paths) {
     const { data } = await supabase.storage
       .from("designs")
-      .createSignedUrl(currentPath, 600);
-    currentPosterUrl = data?.signedUrl ?? null;
+      .createSignedUrl(path, 600);
+    if (data?.signedUrl) posterUrls.push(data.signedUrl);
   }
 
   // Sign image URLs in chat messages
@@ -106,7 +101,8 @@ export default async function VariationChatPage({
       <VariationChat
         variationId={variationId}
         requestId={requestId}
-        currentPosterUrl={currentPosterUrl}
+        posterUrls={posterUrls}
+        posterType={variation.poster_type as "single" | "carousel"}
         initialMessages={(messages ?? []).map((m) => ({
           ...m,
           imageUrls: m.image_paths
