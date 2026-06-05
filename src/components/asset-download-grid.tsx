@@ -76,10 +76,30 @@ function isNativeApp(): boolean {
   );
 }
 
+/**
+ * On mobile (Capacitor WebView), open the signed URL directly in the
+ * system browser. The browser handles the download natively. For single
+ * files we use the signedUrl from the asset item. For multi-file we
+ * fall back to the blob approach which may not work on all devices.
+ */
+function mobileDownloadSingleFile(signedUrl: string): void {
+  // Open in system browser — this triggers Android's native download
+  // manager which works reliably across all devices.
+  window.open(signedUrl, "_blank");
+}
+
 async function triggerDownload(
   requestId: string,
   items: { id: string; kind: AssetItem["kind"] }[],
+  signedUrl?: string | null,
 ): Promise<void> {
+  // Mobile single-file: open signed URL directly in system browser.
+  // This is the most reliable approach on Android WebView.
+  if (isNativeApp() && items.length === 1 && signedUrl) {
+    mobileDownloadSingleFile(signedUrl);
+    return;
+  }
+
   const res = await fetch("/api/assets/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -92,8 +112,6 @@ async function triggerDownload(
   }
   const blob = await res.blob();
 
-  // Pull the server-suggested filename out of Content-Disposition, falling
-  // back to a sensible default.
   const cd = res.headers.get("Content-Disposition") ?? "";
   const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(cd);
   const filename =
@@ -101,8 +119,7 @@ async function triggerDownload(
     (items.length === 1 ? "asset" : "assets.zip");
 
   if (isNativeApp()) {
-    // Native Capacitor: blob + anchor trick doesn't work in Android WebView.
-    // Try multiple approaches in order of reliability.
+    // Multi-file on mobile: try Capacitor plugins, then blob fallback
     try {
       const { Filesystem, Directory } = await import("@capacitor/filesystem");
       const base64 = await blobToBase64(blob);
@@ -112,33 +129,12 @@ async function triggerDownload(
         directory: Directory.ExternalStorage,
         recursive: true,
       });
-      // Notify user since there's no browser download bar
       alert(`Saved to Downloads/${filename}`);
     } catch {
-      // Filesystem plugin not in APK — use share sheet as fallback.
-      // This works on all Android versions without extra permissions.
-      try {
-        const { Share } = await import("@capacitor/share");
-        const base64 = await blobToBase64(blob);
-        const dataUrl = `data:${blob.type || "application/octet-stream"};base64,${base64}`;
-        await Share.share({
-          title: filename,
-          url: dataUrl,
-          dialogTitle: `Save ${filename}`,
-        });
-      } catch {
-        // Last resort: create a temporary link and try the anchor approach
-        // anyway — some WebView versions handle it.
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        a.target = "_blank";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 3000);
-      }
+      // Plugins not available — convert to data URL and open
+      const base64 = await blobToBase64(blob);
+      const dataUrl = `data:${blob.type || "application/octet-stream"};base64,${base64}`;
+      window.open(dataUrl, "_blank");
     }
   } else {
     // Web: standard blob + anchor trick
@@ -193,7 +189,10 @@ export function AssetDownloadGrid({
     setError(null);
     startTransition(async () => {
       try {
-        await triggerDownload(requestId, payload);
+        const singleItem = payload.length === 1
+          ? items.find((i) => i.id === payload[0].id)
+          : undefined;
+        await triggerDownload(requestId, payload, singleItem?.signedUrl);
         setSelected(new Set());
       } catch (err) {
         setError(err instanceof Error ? err.message : "Download failed.");
@@ -205,7 +204,7 @@ export function AssetDownloadGrid({
     setError(null);
     setBusyId(item.id);
     try {
-      await triggerDownload(requestId, [{ id: item.id, kind: item.kind }]);
+      await triggerDownload(requestId, [{ id: item.id, kind: item.kind }], item.signedUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed.");
     } finally {
