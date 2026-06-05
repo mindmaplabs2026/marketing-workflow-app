@@ -60,25 +60,70 @@ export async function runGenerationAgent(
   const imageUrls: string[] = [];
   const prompts: string[] = [];
 
-  // Collect reference images: curated uploads + brand assets (logo, header, footer)
+  // Collect reference images — only what's needed for this variation:
+  // 1. Logo, header, footer: ALWAYS included (mandatory on every poster)
+  // 2. Uploaded photos: only the ones Agent 2 selected for this variation
+  // 3. Uniform/infrastructure: only if Agent 2 specified to use them
   const referenceImages: { buffer: Buffer; name: string }[] = [];
 
-  // Download curated images (teacher uploads selected by Agent 2)
-  for (const img of input.curatedImages) {
-    const buf = await downloadImage(img.signedUrl);
-    if (buf) {
-      const filename = img.path.split("/").pop() ?? "upload.png";
-      referenceImages.push({ buffer: buf, name: filename });
+  // Always include: logo, header, footer
+  const alwaysInclude = ["logo", "header", "footer"];
+  for (const asset of input.brandAssets) {
+    if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
+      const buf = await downloadImage(asset.signedUrl);
+      if (buf) {
+        referenceImages.push({
+          buffer: buf,
+          name: `brand-${asset.assetType}-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+        });
+      }
     }
   }
 
-  // Download brand assets (logo, header, footer, uniform, infrastructure)
-  for (const asset of input.brandAssets) {
-    if (asset.signedUrl) {
-      const buf = await downloadImage(asset.signedUrl);
+  // Conditionally include: uniform (if Agent 2 says useUniform)
+  if (brief.schoolAssetUsage.useUniform) {
+    for (const asset of input.brandAssets) {
+      if (asset.assetType === "uniform" && asset.signedUrl) {
+        const buf = await downloadImage(asset.signedUrl);
+        if (buf) {
+          referenceImages.push({
+            buffer: buf,
+            name: `brand-uniform-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+          });
+        }
+      }
+    }
+  }
+
+  // Conditionally include: infrastructure (if Agent 2 says useInfrastructure)
+  if (brief.schoolAssetUsage.useInfrastructure) {
+    for (const asset of input.brandAssets) {
+      if (asset.assetType === "infrastructure" && asset.signedUrl) {
+        const buf = await downloadImage(asset.signedUrl);
+        if (buf) {
+          referenceImages.push({
+            buffer: buf,
+            name: `brand-infrastructure-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+          });
+        }
+      }
+    }
+  }
+
+  // Only include the specific uploaded photos Agent 2 selected for this variation
+  const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
+  for (const img of input.curatedImages) {
+    // Match by filename (selectedImages uses just the filename, curatedImages has full path)
+    const imgFilename = img.path.split("/").pop() ?? "";
+    const isSelected = selectedPaths.has(img.path) ||
+      [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
+    if (isSelected) {
+      const buf = await downloadImage(img.signedUrl);
       if (buf) {
-        const filename = `brand-${asset.assetType}-${asset.storagePath.split("/").pop() ?? "asset.png"}`;
-        referenceImages.push({ buffer: buf, name: filename });
+        referenceImages.push({
+          buffer: buf,
+          name: imgFilename || "upload.png",
+        });
       }
     }
   }
@@ -97,7 +142,7 @@ export async function runGenerationAgent(
       // Use images.edit to pass reference images so the model can
       // incorporate real photos, logos, headers, etc.
       const referenceFiles = await Promise.all(
-        referenceImages.slice(0, 10).map((img) =>
+        referenceImages.map((img) =>
           toFile(img.buffer, img.name, { type: "image/png" }),
         ),
       );
@@ -209,10 +254,14 @@ ${input.curatedImages.length > 0 ? "\nIMPORTANT: The uploaded photos are provide
 
 ## School Brand Assets (provided as reference images):
 ${brandAssetDescriptions || "(No brand assets provided)"}
-${brandAssets.length > 0 ? `\nIMPORTANT: Use the school's actual logo from the reference images. Place it at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}. Adapt the header and footer style to match the theme but use the provided brand elements.` : `\n## Logo: ${brief.logoPlacement.position}, ${brief.logoPlacement.size}, style: ${brief.logoPlacement.style}`}
+${brandAssets.length > 0 ? `\nIMPORTANT BRANDING RULES:
+- Use the school's actual LOGO from the reference images. Place it at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}.
+- The HEADER must appear at the top of EVERY poster (single or carousel page). Use the provided header reference image and adapt its style to match the theme.
+- The FOOTER must appear at the bottom of EVERY poster (single or carousel page). Use the provided footer reference image and adapt its style to match the theme.
+- Header and footer are MANDATORY on every single page. Do not omit them.` : `\n## Logo: ${brief.logoPlacement.position}, ${brief.logoPlacement.size}, style: ${brief.logoPlacement.style}`}
 
-## Header: ${brief.headerFooter.headerStyle}
-## Footer: ${brief.headerFooter.footerStyle}
+## Header style: ${brief.headerFooter.headerStyle} (MUST appear on every page)
+## Footer style: ${brief.headerFooter.footerStyle} (MUST appear on every page)
 
 ${brief.schoolAssetUsage.useUniform ? `## Uniform: ${brief.schoolAssetUsage.uniformNotes}` : ""}
 ${brief.schoolAssetUsage.useInfrastructure ? `## Infrastructure: ${brief.schoolAssetUsage.infrastructureNotes}` : ""}
