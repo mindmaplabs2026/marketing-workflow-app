@@ -56,6 +56,13 @@ function isVideo(mime: string | null, name: string): boolean {
   return /\.(mp4|mov|webm)$/i.test(name);
 }
 
+function isNativeApp(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    !!window.Capacitor?.isNativePlatform?.()
+  );
+}
+
 async function triggerDownload(
   requestId: string,
   items: { id: string; kind: AssetItem["kind"] }[],
@@ -63,6 +70,7 @@ async function triggerDownload(
   const res = await fetch("/api/assets/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ requestId, items }),
   });
   if (!res.ok) {
@@ -79,15 +87,49 @@ async function triggerDownload(
     (match?.[1] && decodeURIComponent(match[1])) ||
     (items.length === 1 ? "asset" : "assets.zip");
 
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Hand the blob back to the GC promptly — important for video downloads.
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  if (isNativeApp()) {
+    // Native Capacitor: blob + anchor trick doesn't work in Android WebView.
+    // Convert blob to base64 and use Capacitor Filesystem to save, or fall
+    // back to opening a data URL which triggers Android's download intent.
+    try {
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      await Filesystem.writeFile({
+        path: `Download/${filename}`,
+        data: base64,
+        directory: Directory.ExternalStorage,
+        recursive: true,
+      });
+    } catch {
+      // Filesystem plugin not available — open blob as data URL in new window.
+      // This triggers Android's built-in download handler for most file types.
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        window.open(dataUrl, "_system");
+      };
+      reader.readAsDataURL(blob);
+    }
+  } else {
+    // Web: standard blob + anchor trick
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Hand the blob back to the GC promptly — important for video downloads.
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
 }
 
 export function AssetDownloadGrid({
