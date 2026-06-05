@@ -137,10 +137,15 @@ The user will describe edits they want. Respond briefly confirming what you'll c
       quality: "high",
     });
 
-    const imageUrl =
-      imageResponse.data?.[0]?.url ?? imageResponse.data?.[0]?.b64_json;
-    if (!imageUrl) {
+    const imageItem = imageResponse.data?.[0];
+    if (!imageItem) {
       throw new Error("No image returned from generation.");
+    }
+    const imageUrl = imageItem.b64_json
+      ? `data:image/png;base64,${imageItem.b64_json}`
+      : imageItem.url;
+    if (!imageUrl) {
+      throw new Error("No image url or b64_json returned.");
     }
 
     // Download and upload to Supabase

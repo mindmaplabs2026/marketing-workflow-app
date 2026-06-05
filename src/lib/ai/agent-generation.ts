@@ -62,13 +62,23 @@ export async function runGenerationAgent(
       quality: "high",
     });
 
-    const imageUrl = response.data?.[0]?.url ?? response.data?.[0]?.b64_json;
-    if (!imageUrl) {
+    const item = response.data?.[0];
+    if (!item) {
       throw new Error(
         `Agent 3: no image returned for variation ${brief.variationIndex}, page ${i + 1}`,
       );
     }
-    imageUrls.push(imageUrl);
+    // gpt-image-1 returns b64_json by default; prefix it so downstream
+    // code can distinguish base64 from HTTP URLs.
+    if (item.b64_json) {
+      imageUrls.push(`data:image/png;base64,${item.b64_json}`);
+    } else if (item.url) {
+      imageUrls.push(item.url);
+    } else {
+      throw new Error(
+        `Agent 3: no url or b64_json for variation ${brief.variationIndex}, page ${i + 1}`,
+      );
+    }
   }
 
   return { imageUrls, model: "gpt-image-1" };
