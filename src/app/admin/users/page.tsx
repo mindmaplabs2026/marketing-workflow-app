@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/supabase/auth";
 import { AddUserForm } from "./add-user-form";
 import { RoleSelect } from "./role-select";
 import { DeleteUserButton } from "./delete-user-button";
+import { ResetPasswordButton } from "./reset-password-button";
 import { SearchInput } from "@/components/search-input";
 import type { UserRole } from "@/lib/supabase/types";
 
@@ -230,9 +231,14 @@ export default async function UsersPage({
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {canManage && (
-                      <DeleteUserButton userId={p.id} label={label} />
-                    )}
+                    <div className="flex items-center justify-end gap-3">
+                      {canManage && isSuperAdmin && (
+                        <ResetPasswordButton userId={p.id} label={label} />
+                      )}
+                      {canManage && (
+                        <DeleteUserButton userId={p.id} label={label} />
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

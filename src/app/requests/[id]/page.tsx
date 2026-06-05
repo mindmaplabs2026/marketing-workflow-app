@@ -404,9 +404,11 @@ export default async function RequestDetailPage({
     isReviewer && req.status === "design_pending_approval";
   const awaitingPublish =
     req.status === "in_design" && designsList.length > 0;
-  // For AI-generated requests, there's no assigned designer — school admin
-  // or super_admin publishes directly after approving the design.
+  // Super admin can always publish any request.
+  // For AI-generated requests, school admin can also publish (no designer in the loop).
+  // For manual requests, the assigned designer can publish.
   const canPublish = awaitingPublish && (
+    isSuperAdmin ||
     isAssignedDesigner ||
     (req.ai_generated && isReviewer)
   );

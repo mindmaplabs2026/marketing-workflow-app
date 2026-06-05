@@ -456,6 +456,160 @@ Please change your password after first login. You'll be prompted to do it as so
   return { subject, html, text };
 }
 
+// ---------------------------------------------------------------
+// Reset password
+// ---------------------------------------------------------------
+
+function generatePassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghkmnpqrstuvwxyz23456789";
+  let pw = "";
+  for (let i = 0; i < 12; i++) {
+    pw += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return pw;
+}
+
+export type ResetPasswordState = { error?: string; success?: boolean };
+
+export async function resetUserPassword(
+  _prev: ResetPasswordState,
+  formData: FormData,
+): Promise<ResetPasswordState> {
+  const targetId = String(formData.get("user_id") ?? "");
+  if (!targetId) return { error: "Missing user." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  const { data: caller } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single<{ role: UserRole }>();
+  if (!caller) return { error: "Profile not found." };
+
+  if (caller.role !== "super_admin") {
+    return { error: "Only a super admin can reset passwords." };
+  }
+
+  const admin = createAdminClient();
+
+  // Get target user info
+  const { data: targetProfile } = await admin
+    .from("profiles")
+    .select("full_name, email, role")
+    .eq("id", targetId)
+    .single<{ full_name: string | null; email: string | null; role: UserRole }>();
+  if (!targetProfile) return { error: "User not found." };
+
+  const { data: authUser } = await admin.auth.admin.getUserById(targetId);
+  const email = authUser?.user?.email ?? targetProfile.email;
+  if (!email) return { error: "No email on file for this user." };
+
+  const newPassword = generatePassword();
+
+  // Update password via admin API
+  const { error: updateErr } = await admin.auth.admin.updateUserById(targetId, {
+    password: newPassword,
+  });
+  if (updateErr) return { error: updateErr.message };
+
+  // Force password change on next login
+  await admin
+    .from("profiles")
+    .update({ password_set: false })
+    .eq("id", targetId);
+
+  // Send email with new credentials
+  const resend = resendClient();
+  if (!resend) {
+    return { error: `Password reset to: ${newPassword} — but email not sent (RESEND_API_KEY not set). Share it manually.` };
+  }
+
+  const fullName = targetProfile.full_name?.trim() || email;
+  const { subject, html, text } = renderPasswordResetEmail(fullName, email, newPassword);
+
+  try {
+    const { error: sendErr } = await resend.emails.send({
+      from: emailFrom(),
+      to: email,
+      subject,
+      html,
+      text,
+    });
+    if (sendErr) {
+      const isSandbox = /testing.*email|sandbox|verify.*domain/i.test(sendErr.message);
+      if (isSandbox) {
+        return {
+          error: `Password reset but email not sent (Resend sandbox). New password: ${newPassword} — share it manually.`,
+        };
+      }
+      return { error: sendErr.message };
+    }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Email send failed." };
+  }
+
+  revalidatePath("/admin/users");
+  return { success: true };
+}
+
+function renderPasswordResetEmail(
+  fullName: string,
+  email: string,
+  password: string,
+): { subject: string; html: string; text: string } {
+  const loginUrl = `${appUrl()}/login`;
+  const subject = "Your password has been reset";
+
+  const html = `<!doctype html>
+<html><body style="font-family:-apple-system,Segoe UI,sans-serif;background:#fafafa;margin:0;padding:24px">
+  <table cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:24px">
+    <tr><td>
+      <p style="margin:0;color:#52525b;font-size:13px">Marketing Workflow</p>
+      <h1 style="margin:8px 0 4px;font-size:20px;color:#18181b">Hi ${escapeHtml(fullName)},</h1>
+      <p style="margin:0 0 16px;color:#52525b;font-size:14px">
+        Your password has been reset by an administrator. Use the new credentials below to sign in.
+      </p>
+      <table cellpadding="0" cellspacing="0" style="width:100%;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;padding:16px;margin:0 0 16px">
+        <tr>
+          <td style="padding:4px 0;color:#71717a;font-size:12px;width:100px">Email</td>
+          <td style="padding:4px 0;color:#18181b;font-size:14px;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(email)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;color:#71717a;font-size:12px">New password</td>
+          <td style="padding:4px 0;color:#18181b;font-size:14px;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(password)}</td>
+        </tr>
+      </table>
+      <p style="margin:0 0 24px">
+        <a href="${escapeHtml(loginUrl)}" style="display:inline-block;background:#7c3aed;color:#fafafa;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:500;font-size:14px">
+          Sign in &rarr;
+        </a>
+      </p>
+      <p style="margin:0;color:#52525b;font-size:13px">
+        <strong>Please change your password after signing in.</strong> You&rsquo;ll be prompted to set a new one.
+      </p>
+    </td></tr>
+  </table>
+</body></html>`;
+
+  const text = `Hi ${fullName},
+
+Your password has been reset by an administrator.
+
+Email: ${email}
+New password: ${password}
+
+Sign in: ${loginUrl}
+
+Please change your password after signing in. You'll be prompted to set a new one.`;
+
+  return { subject, html, text };
+}
+
 // Returns true if the caller and the target appear together in any
 // school_members row. Used to scope school_admin actions to their own
 // school. Runs on the service-role client so it sees both sides even
