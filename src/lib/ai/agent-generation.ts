@@ -263,15 +263,18 @@ export async function runGenerationAgent(
   const briefAny = brief as Record<string, unknown>;
   const fullCreativeVision = (briefAny.creativeVision as string) ?? "";
   const pageVisions = parsePageVisions(fullCreativeVision, pages.length);
+  const isCarousel = brief.layout.type === "carousel";
+  const brandRefImages = referenceImages.filter((r) => !r.role.includes("UPLOADED PHOTO"));
 
-  for (let i = 0; i < pages.length; i++) {
+  /**
+   * Generate a single page — extracted so carousel pages can run in parallel.
+   */
+  async function generateOnePage(i: number): Promise<{ base64: string; prompt: string }> {
     const page = pages[i];
-    const isCarousel = brief.layout.type === "carousel";
 
     // For carousels: build per-page reference images (brand assets shared, photos per-page)
     const pagePhotoImages: typeof referenceImages = [];
     if (isCarousel && page?.selectedImages?.length) {
-      // Only include photos assigned to THIS page — match by full path or filename
       const pagePhotoPaths = new Set(page.selectedImages.map((s) => s.path));
       for (const ref of referenceImages) {
         if (!ref.role.includes("UPLOADED PHOTO") || !ref.sourcePath) continue;
@@ -288,16 +291,14 @@ export async function runGenerationAgent(
       }
     }
 
-    // Build image manifest — brand assets + page-specific photos (or all photos for single)
-    const brandRefImages = referenceImages.filter((r) => !r.role.includes("UPLOADED PHOTO"));
     const photoRefImages = isCarousel && page?.selectedImages?.length
       ? pagePhotoImages
       : referenceImages.filter((r) => r.role.includes("UPLOADED PHOTO"));
     const pageReferenceImages = [...brandRefImages, ...photoRefImages];
 
-    const logoImages = pageReferenceImages.filter((r) => r.role.includes("LOGO"));
-    const otherImages = pageReferenceImages.filter((r) => !r.role.includes("LOGO"));
-    const orderedImages = [...logoImages, ...otherImages];
+    const logoImgs = pageReferenceImages.filter((r) => r.role.includes("LOGO"));
+    const otherImgs = pageReferenceImages.filter((r) => !r.role.includes("LOGO"));
+    const orderedImages = [...logoImgs, ...otherImgs];
 
     const copyInstructions = [
       hasLogo ? "Copy the LOGO exactly" : null,
@@ -312,9 +313,6 @@ export async function runGenerationAgent(
 
     const rawPrompt = buildImagePrompt(input, page, i, pages.length, pageVisions, { hasLogo, hasHeader, hasFooter });
 
-    // Prompt enhancer: expand ONLY the creative direction.
-    // The manifest is appended AFTER enhancement so the enhancer can't
-    // rewrite, summarize, or drop reference image instructions.
     const enhancerSystemPrompt = isCarousel
       ? `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt for ONE PAGE of a carousel.
 
@@ -346,25 +344,16 @@ Rules:
     });
 
     const enhancedPrompt = enhanced.choices[0]?.message?.content ?? rawPrompt;
-
-    // Append manifest AFTER enhancement — this is the single source of truth
-    // for reference images and must reach the image model exactly as-is
     const prompt = enhancedPrompt + imageManifest;
-    prompts.push(prompt);
 
-    // Instagram portrait: 1024x1536 is the closest API size to 1080x1350 (4:5)
     const imageSize = "1024x1536" as const;
-
-    // Single-pass generation (evaluate+refine handled in separate Inngest functions)
     let base64Result: string;
 
     if (pageReferenceImages.length > 0) {
-      // Put logo images first — the model gives more weight to earlier reference images
       const logoFirst = [
         ...pageReferenceImages.filter((r) => r.role.includes("LOGO")),
         ...pageReferenceImages.filter((r) => !r.role.includes("LOGO")),
       ];
-      // Filter out any invalid buffers before converting to files
       const validImages = logoFirst.filter((img) => img.buffer && img.buffer.length > 0);
       if (validImages.length === 0) {
         throw new Error(`Agent 3: no valid reference images for variation ${brief.variationIndex}`);
@@ -388,7 +377,7 @@ Rules:
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`OpenAI images.edit failed for variation ${brief.variationIndex}, page ${i + 1}:`, msg);
-        throw new Error(`Image generation failed: ${msg}`);
+        throw new Error(`Image generation failed (page ${i + 1}): ${msg}`);
       }
 
       const item = response.data?.[0];
@@ -413,7 +402,7 @@ Rules:
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`OpenAI images.generate failed for variation ${brief.variationIndex}, page ${i + 1}:`, msg);
-        throw new Error(`Image generation failed: ${msg}`);
+        throw new Error(`Image generation failed (page ${i + 1}): ${msg}`);
       }
 
       const item = response.data?.[0];
@@ -427,7 +416,17 @@ Rules:
       }
     }
 
-    imageUrls.push(`data:image/png;base64,${base64Result}`);
+    return { base64: base64Result, prompt };
+  }
+
+  // Generate all pages — parallel for carousel, single for poster
+  const pageResults = await Promise.all(
+    pages.map((_, i) => generateOnePage(i)),
+  );
+
+  for (const result of pageResults) {
+    imageUrls.push(`data:image/png;base64,${result.base64}`);
+    prompts.push(result.prompt);
   }
 
   return {
