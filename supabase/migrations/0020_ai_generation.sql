@@ -208,16 +208,19 @@ create policy "ai_generation_jobs_select"
     )
   );
 
--- Allow the request creator to insert the initial job row
+-- Allow designers (assigned to the school) or super_admin to create AI jobs
 create policy "ai_generation_jobs_insert"
   on public.ai_generation_jobs for insert
   to authenticated
   with check (
     public.is_super_admin()
-    or exists (
-      select 1 from public.requests r
-      where r.id = ai_generation_jobs.request_id
-        and r.created_by = auth.uid()
+    or (
+      public.current_user_role() = 'designer'
+      and exists (
+        select 1 from public.requests r
+        where r.id = ai_generation_jobs.request_id
+          and public.is_member_of_school(r.school_id)
+      )
     )
   );
 
