@@ -67,7 +67,8 @@ export type BrandAssetType =
   | "header"
   | "footer"
   | "uniform"
-  | "infrastructure";
+  | "infrastructure"
+  | "sample";
 
 export type NotificationEmailPref = "off" | "daily" | "immediate";
 

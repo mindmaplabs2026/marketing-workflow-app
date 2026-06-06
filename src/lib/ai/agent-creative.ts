@@ -169,14 +169,37 @@ ${brandAssetSummary || "(No brand assets configured yet)"}
 
 Create 1 creative direction brief. Make it the strongest possible direction for this theme.`;
 
-  // Include curated image thumbnails so the model can see them
+  // Separate sample posters from other brand assets
+  const sampleAssets = input.brandAssets.filter((a) => a.assetType === "sample");
+  const otherAssets = input.brandAssets.filter((a) => a.assetType !== "sample");
+
   const userContent: Array<
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string; detail: "high" } }
   > = [{ type: "text", text: userMessage }];
 
-  // Attach brand asset images
-  for (const asset of input.brandAssets) {
+  // Attach sample posters FIRST as style inspiration
+  if (sampleAssets.length > 0) {
+    userContent.push({
+      type: "text",
+      text: `\n## STYLE REFERENCE — Sample Posters from this school\nStudy these carefully. These are real posters previously designed for this school. Your creative brief should match this level of quality and follow a similar design language:\n- Same type of layout structure (header bar, hero section, icon grid, footer bar)\n- Similar typography treatment (mixed bold/script fonts, clear hierarchy)\n- Same level of visual richness and compositing\n- School-specific branding elements integrated naturally\nAnalyze each sample and extract the design patterns.`,
+    });
+    for (const sample of sampleAssets.slice(0, 5)) {
+      if (sample.signedUrl) {
+        userContent.push({
+          type: "image_url",
+          image_url: { url: sample.signedUrl, detail: "high" },
+        });
+        userContent.push({
+          type: "text",
+          text: `[Sample poster: ${sample.label ?? sample.storagePath}]`,
+        });
+      }
+    }
+  }
+
+  // Attach other brand asset images (logo, header, footer, etc.)
+  for (const asset of otherAssets) {
     if (asset.signedUrl) {
       userContent.push({
         type: "image_url",

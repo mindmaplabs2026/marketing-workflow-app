@@ -175,6 +175,7 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
       _generation_log: {
         prompts: result.prompts,
         referenceImageCount: result.referenceImageCount,
+        refinementRounds: result.refinementRounds,
         model: result.model,
         generatedAt: new Date().toISOString(),
       },

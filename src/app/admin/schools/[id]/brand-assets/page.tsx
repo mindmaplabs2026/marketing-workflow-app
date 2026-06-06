@@ -13,6 +13,7 @@ const ASSET_TYPE_LABELS: Record<BrandAssetType, string> = {
   footer: "Footer",
   uniform: "Uniform Standards",
   infrastructure: "Infrastructure",
+  sample: "Sample Posters (Style Reference)",
 };
 
 const ASSET_TYPES: BrandAssetType[] = [
@@ -21,6 +22,7 @@ const ASSET_TYPES: BrandAssetType[] = [
   "footer",
   "uniform",
   "infrastructure",
+  "sample",
 ];
 
 type AssetRow = {

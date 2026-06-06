@@ -49,7 +49,7 @@ alter table public.requests
 create table public.school_brand_assets (
   id           uuid primary key default gen_random_uuid(),
   school_id    uuid not null references public.schools(id) on delete cascade,
-  asset_type   text not null check (asset_type in ('logo','header','footer','uniform','infrastructure')),
+  asset_type   text not null check (asset_type in ('logo','header','footer','uniform','infrastructure','sample')),
   storage_path text not null,
   mime_type    text,
   file_size    bigint,
