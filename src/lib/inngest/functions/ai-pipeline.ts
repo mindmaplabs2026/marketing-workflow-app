@@ -52,6 +52,8 @@ async function fetchContext(requestId: string) {
 
   const images: UploadedImage[] = [];
   for (const u of uploads ?? []) {
+    // Only pass images to the AI agents — skip videos, PDFs, etc.
+    if (u.mime_type && !u.mime_type.startsWith("image/")) continue;
     const { data: signedData } = await admin.storage
       .from("request-uploads")
       .createSignedUrl(u.storage_path, 3600);
