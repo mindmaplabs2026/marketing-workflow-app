@@ -140,7 +140,8 @@ Return ONLY valid JSON matching this schema:
     "logoPlacement": { "position": "string", "size": "string", "style": "string" },
     "headerFooter": { "headerStyle": "string", "footerStyle": "string" },
     "schoolAssetUsage": { "useUniform": true/false, "uniformNotes": "...", "useInfrastructure": true/false, "infrastructureNotes": "..." },
-    "designPrompt": "string — highly detailed prompt describing the exact final poster visual for the image generation model"
+    "creativeVision": "string — THIS IS THE MOST IMPORTANT FIELD. Write a rich, vivid, detailed creative narrative describing the poster as if you're painting a picture for a designer. Describe the scene top-to-bottom: what the header area looks like, what the hero visual shows (people, setting, lighting, mood, composition, camera angle), how the typography sits in the design, what textures and decorative elements surround the content, how the colors flow, where the eye travels, what the footer area looks like. Include emotional tone, artistic style references, and specific visual details. Think of this as a creative director's verbal walkthrough of the final poster — minimum 150 words.",
+    "designPrompt": "string — concise technical prompt for the image model, derived from the creativeVision above"
   }]
 }`;
 

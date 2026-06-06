@@ -344,26 +344,31 @@ function buildImagePrompt(
 
   const hasUploadedPhotos = curatedImages.length > 0 && brief.selectedImages.length > 0;
 
+  // Use creativeVision as primary (rich narrative), fall back to designPrompt
+  const briefAny = brief as Record<string, unknown>;
+  const creativeVision = (briefAny.creativeVision as string) ?? "";
+  const designPrompt = brief.designPrompt ?? "";
+
   return `Instagram poster for ${schoolName}. Portrait 1080x1350px, print-ready, professional.
 
+## Creative Vision
+${creativeVision || designPrompt}
+
+## Technical Details
 Direction: ${brief.direction}
 Theme: ${brief.theme}
 Palette: ${brief.colorPalette.join(", ")}
-
 Headline: "${brief.textContent.headline}"
 ${brief.textContent.subheadline ? `Tagline: "${brief.textContent.subheadline}"` : ""}
 
 Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}
-Header: copy from reference image → top of poster. ${brief.headerFooter.headerStyle}
-Footer: copy from reference image → bottom of poster. ${brief.headerFooter.footerStyle}
+Header: copy from reference image → top. ${brief.headerFooter.headerStyle}
+Footer: copy from reference image → bottom. ${brief.headerFooter.footerStyle}
 
-${hasUploadedPhotos ? "Uploaded photos are provided as reference images. Include them AS-IS — do NOT redraw, modify, or replace them." : `No uploaded photos. Generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? " Students MUST wear the school uniform from the reference image." : ""}${brief.schoolAssetUsage.useInfrastructure ? " Use the infrastructure reference for setting." : ""}`}
+${hasUploadedPhotos ? "Uploaded photos provided as reference — include AS-IS, do NOT redraw." : `Generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? " Students MUST wear uniform from reference." : ""}${brief.schoolAssetUsage.useInfrastructure ? " Use infrastructure reference for setting." : ""}`}
+${pageContext ? `\n${pageContext}` : ""}
 
-${pageContext ? `Page context: ${pageContext}` : ""}
-
-${brief.designPrompt}
-
-Style: visual-driven, minimal text, bold typography, generous whitespace, premium magazine quality. Maximum 2 lines of text on the poster.`;
+Maximum 2 lines of text on the poster. Visual-driven, premium quality.`;
 }
 
 /**
