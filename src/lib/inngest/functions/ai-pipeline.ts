@@ -124,9 +124,31 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
 
   const ctx = await fetchContext(requestId);
 
-  const curatedImages = [];
+  // Collect selected images — for carousel, Agent 2 assigns photos at page level,
+  // not brief level. We need to gather from both to build the full set.
+  const imagePaths = new Set<string>();
   for (const img of brief.selectedImages) {
-    const match = ctx.images.find((i: UploadedImage) => i.path === img.path);
+    imagePaths.add(img.path);
+  }
+  // Also collect from page-level selections (carousel)
+  if (brief.layout?.pages) {
+    for (const page of brief.layout.pages) {
+      for (const img of page.selectedImages ?? []) {
+        imagePaths.add(img.path);
+      }
+    }
+  }
+
+  const curatedImages = [];
+  for (const imagePath of imagePaths) {
+    // Match by exact path or by filename (Agent 2 may use truncated paths)
+    const imageFilename = imagePath.split("/").pop() ?? "";
+    const match = ctx.images.find((i: UploadedImage) =>
+      i.path === imagePath ||
+      i.path.endsWith(imagePath) ||
+      imagePath.endsWith(i.path.split("/").pop() ?? "___") ||
+      i.path.split("/").pop() === imageFilename
+    );
     if (match) {
       curatedImages.push({ path: match.path, signedUrl: match.signedUrl });
     }

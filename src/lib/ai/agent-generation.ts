@@ -236,14 +236,27 @@ export async function runGenerationAgent(
     }
   }
 
-  // Add uploaded photos selected by Agent 2
-  const hasUploadedPhotos = input.curatedImages.length > 0 && brief.selectedImages.length > 0;
+  // Add uploaded photos selected by Agent 2.
+  // For carousel, Agent 2 assigns photos at page level (layout.pages[].selectedImages),
+  // not brief level. Collect from both to build the complete set.
+  const allSelectedPaths = new Set<string>();
+  for (const img of brief.selectedImages) {
+    allSelectedPaths.add(img.path);
+  }
+  if (brief.layout?.pages) {
+    for (const p of brief.layout.pages) {
+      for (const img of p.selectedImages ?? []) {
+        allSelectedPaths.add(img.path);
+      }
+    }
+  }
+
+  const hasUploadedPhotos = input.curatedImages.length > 0 && allSelectedPaths.size > 0;
   if (hasUploadedPhotos) {
-    const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
     for (const img of input.curatedImages) {
       const imgFilename = img.path.split("/").pop() ?? "";
-      const isSelected = selectedPaths.has(img.path) ||
-        [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
+      const isSelected = allSelectedPaths.has(img.path) ||
+        [...allSelectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
       if (isSelected) {
         const buf = await downloadImage(img.signedUrl);
         if (buf) {
@@ -495,10 +508,12 @@ ${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) 
     visionSection = fullCreativeVision || designPrompt;
   }
 
-  // For carousels, use page-level selectedImages; for single, use brief-level
+  // For carousels, prefer page-level selectedImages, fall back to brief-level
   const pageSelectedImages = isCarousel && page?.selectedImages?.length
     ? page.selectedImages.map((img) => ({ path: img.path, placement: img.placement }))
-    : brief.selectedImages;
+    : brief.selectedImages.length > 0
+      ? brief.selectedImages
+      : [];
 
   const hasUploadedPhotos = curatedImages.length > 0 && pageSelectedImages.length > 0;
 
@@ -619,13 +634,18 @@ export async function refineAndRegenerate(
     }
   }
 
-  // Uploaded photos
-  const hasUploadedPhotos = input.curatedImages.length > 0 && brief.selectedImages.length > 0;
-  if (hasUploadedPhotos) {
-    const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
+  // Uploaded photos — collect from both brief-level and page-level selections
+  const refineSelectedPaths = new Set<string>();
+  for (const img of brief.selectedImages) refineSelectedPaths.add(img.path);
+  if (brief.layout?.pages) {
+    for (const p of brief.layout.pages) {
+      for (const img of p.selectedImages ?? []) refineSelectedPaths.add(img.path);
+    }
+  }
+  if (input.curatedImages.length > 0 && refineSelectedPaths.size > 0) {
     for (const img of input.curatedImages) {
       const fn = img.path.split("/").pop() ?? "";
-      const isSelected = selectedPaths.has(img.path) || [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(fn));
+      const isSelected = refineSelectedPaths.has(img.path) || [...refineSelectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(fn));
       if (isSelected) {
         const buf = await downloadImage(img.signedUrl);
         if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_photo.png`, role: `IMAGE ${idx}: UPLOADED PHOTO — "${fn}"` }); idx++; }
