@@ -162,7 +162,7 @@ export async function runGenerationAgent(
   // Agent 2 outputs selectedAssets with exact storage_paths for each role.
   // No random sampling, no "always include all" — just what was picked.
 
-  const referenceImages: { buffer: Buffer; name: string; role: string }[] = [];
+  const referenceImages: { buffer: Buffer; name: string; role: string; sourcePath?: string }[] = [];
   let imageIndex = 1;
 
   const selectedAssets = (brief as Record<string, unknown>).selectedAssets as {
@@ -251,6 +251,7 @@ export async function runGenerationAgent(
             buffer: buf,
             name: `image${imageIndex}_photo.png`,
             role: `IMAGE ${imageIndex}: UPLOADED PHOTO — "${imgFilename}". Include this photo AS-IS. Do NOT modify or redraw it.`,
+            sourcePath: img.path,
           });
           imageIndex++;
         }
@@ -270,16 +271,20 @@ export async function runGenerationAgent(
     // For carousels: build per-page reference images (brand assets shared, photos per-page)
     const pagePhotoImages: typeof referenceImages = [];
     if (isCarousel && page?.selectedImages?.length) {
-      // Only include photos assigned to THIS page
+      // Only include photos assigned to THIS page — match by full path or filename
       const pagePhotoPaths = new Set(page.selectedImages.map((s) => s.path));
       for (const ref of referenceImages) {
-        if (ref.role.includes("UPLOADED PHOTO")) {
-          // Check if this photo's filename matches any page-level selection
-          const refFilename = ref.name.replace(/^image\d+_photo\.png$/, "");
-          const refRole = ref.role;
-          const isForThisPage = [...pagePhotoPaths].some((p) => refRole.includes(p.split("/").pop() ?? "___"));
-          if (isForThisPage) pagePhotoImages.push(ref);
-        }
+        if (!ref.role.includes("UPLOADED PHOTO") || !ref.sourcePath) continue;
+        const refFilename = ref.sourcePath.split("/").pop() ?? "";
+        const isForThisPage = pagePhotoPaths.has(ref.sourcePath) ||
+          [...pagePhotoPaths].some((p) => {
+            const pFilename = p.split("/").pop() ?? "";
+            return ref.sourcePath === p ||
+              ref.sourcePath!.endsWith(p) ||
+              p.endsWith(refFilename) ||
+              pFilename === refFilename;
+          });
+        if (isForThisPage) pagePhotoImages.push(ref);
       }
     }
 

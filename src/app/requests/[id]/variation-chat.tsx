@@ -76,10 +76,12 @@ export function VariationChat({
           if (data.imageUrl) {
             setCurrentUrls((prev) => {
               const updated = [...prev];
-              if (posterType === "single" || updated.length <= 1) {
-                updated[0] = data.imageUrl!;
-              } else {
+              if (posterType === "carousel") {
+                // Carousel: replace the specific page that was edited
                 updated[activePage] = data.imageUrl!;
+              } else {
+                // Single: replace the preview with the latest edit
+                updated[0] = data.imageUrl!;
               }
               return updated;
             });
@@ -134,6 +136,7 @@ export function VariationChat({
         body: JSON.stringify({
           variation_id: variationId,
           message: text,
+          page_index: posterType === "carousel" ? activePage : undefined,
         }),
       });
 

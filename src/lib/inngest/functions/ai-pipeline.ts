@@ -356,30 +356,10 @@ export const aiPipelineEvaluate = inngest.createFunction(
       return;
     }
 
-    // Download the generated image to evaluate
-    const latestPath = variation.storage_paths[variation.storage_paths.length - 1];
-    const { data: imageData } = await admin.storage
-      .from("designs")
-      .download(latestPath);
-
-    if (!imageData) {
-      // Can't evaluate — finalize with what we have
-      await admin
-        .from("ai_generation_jobs")
-        .update({ status: "completed", completed_at: new Date().toISOString() })
-        .eq("id", jobId);
-      await dispatchPendingPushes();
-      return;
-    }
-
-    const imageBase64 = Buffer.from(await imageData.arrayBuffer()).toString("base64");
     const brief = variation.creative_brief as unknown as VariationBrief;
-
-    // Get school name and context for evaluation
     const ctx = await fetchContext(requestId);
 
-    // Collect reference images for comparison — download the assets
-    // Agent 2 selected so the evaluator can verify accuracy
+    // Collect reference images for comparison
     const selectedAssets = (brief as Record<string, unknown>).selectedAssets as {
       logo?: string | null; header?: string | null; footer?: string | null;
       samples?: string[];
@@ -387,7 +367,7 @@ export const aiPipelineEvaluate = inngest.createFunction(
 
     const evalReferences: { role: string; base64: string }[] = [];
 
-    async function addEvalRef(storagePath: string | null | undefined, role: string, bucket: string): Promise<void> {
+    async function addEvalRef(storagePath: string | null | undefined, role: string): Promise<void> {
       if (!storagePath) return;
       const asset = ctx.brandAssets.find((a) =>
         a.storagePath === storagePath || a.storagePath.endsWith(storagePath) || storagePath.endsWith(a.storagePath.split("/").pop() ?? "")
@@ -403,12 +383,11 @@ export const aiPipelineEvaluate = inngest.createFunction(
     }
 
     if (selectedAssets) {
-      await addEvalRef(selectedAssets.logo, "SCHOOL LOGO — verify this matches exactly", "school-assets");
-      await addEvalRef(selectedAssets.header, "SCHOOL HEADER — verify this is reproduced", "school-assets");
-      await addEvalRef(selectedAssets.footer, "SCHOOL FOOTER — verify this is reproduced", "school-assets");
-      // Include one sample for quality comparison
+      await addEvalRef(selectedAssets.logo, "SCHOOL LOGO — verify this matches exactly");
+      await addEvalRef(selectedAssets.header, "SCHOOL HEADER — verify this is reproduced");
+      await addEvalRef(selectedAssets.footer, "SCHOOL FOOTER — verify this is reproduced");
       if (selectedAssets.samples?.[0]) {
-        await addEvalRef(selectedAssets.samples[0], "STYLE REFERENCE — poster should match this quality level", "school-assets");
+        await addEvalRef(selectedAssets.samples[0], "STYLE REFERENCE — poster should match this quality level");
       }
     }
 
@@ -430,7 +409,47 @@ export const aiPipelineEvaluate = inngest.createFunction(
       }
     }
 
-    const evaluation = await evaluatePoster(imageBase64, brief, ctx.schoolName, evalReferences);
+    // Evaluate ALL pages (carousel) or the single poster
+    // Track the worst-scoring page for targeted refinement
+    let worstScore = 10;
+    let worstFeedback = "";
+    let worstPageIndex = 0;
+    const pageEvaluations: { pageIndex: number; score: number; feedback: string; passed: boolean }[] = [];
+
+    for (let pi = 0; pi < variation.storage_paths.length; pi++) {
+      const pagePath = variation.storage_paths[pi];
+      const { data: pageImageData } = await admin.storage
+        .from("designs")
+        .download(pagePath);
+
+      if (!pageImageData) continue;
+
+      const pageBase64 = Buffer.from(await pageImageData.arrayBuffer()).toString("base64");
+      const isCarousel = variation.storage_paths.length > 1;
+      const pageLabel = isCarousel ? ` (page ${pi + 1} of ${variation.storage_paths.length})` : "";
+
+      const evaluation = await evaluatePoster(pageBase64, brief, ctx.schoolName + pageLabel, evalReferences);
+      pageEvaluations.push({ pageIndex: pi, score: evaluation.score, feedback: evaluation.feedback, passed: evaluation.passesThreshold });
+
+      if (evaluation.score < worstScore) {
+        worstScore = evaluation.score;
+        worstFeedback = evaluation.feedback;
+        worstPageIndex = pi;
+      }
+    }
+
+    if (pageEvaluations.length === 0) {
+      // Couldn't evaluate any page — finalize
+      await admin
+        .from("ai_generation_jobs")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", jobId);
+      await dispatchPendingPushes();
+      return;
+    }
+
+    const allPassed = pageEvaluations.every((e) => e.passed);
+    const avgScore = Math.round(pageEvaluations.reduce((s, e) => s + e.score, 0) / pageEvaluations.length * 10) / 10;
 
     // Log evaluation in the variation's creative brief
     await admin
@@ -440,15 +459,15 @@ export const aiPipelineEvaluate = inngest.createFunction(
           ...brief,
           _evaluation: {
             round: refinementRound + 1,
-            score: evaluation.score,
-            feedback: evaluation.feedback,
-            passed: evaluation.passesThreshold,
+            averageScore: avgScore,
+            pages: pageEvaluations,
+            passed: allPassed || refinementRound >= 1,
           },
         } as unknown as Record<string, unknown>,
       })
       .eq("id", variation.id);
 
-    if (evaluation.passesThreshold || refinementRound >= 1) {
+    if (allPassed || refinementRound >= 1) {
       // Good enough or max refinements reached — finalize
       await admin
         .from("ai_generation_jobs")
@@ -456,7 +475,7 @@ export const aiPipelineEvaluate = inngest.createFunction(
         .eq("id", jobId);
       await dispatchPendingPushes();
     } else {
-      // Needs refinement — chain to refine
+      // Needs refinement — refine the worst-scoring page
       await inngest.send({
         name: "ai/pipeline.refine",
         data: {
@@ -464,8 +483,9 @@ export const aiPipelineEvaluate = inngest.createFunction(
           requestId,
           posterType,
           refinementRound: refinementRound + 1,
-          feedback: evaluation.feedback,
-          score: evaluation.score,
+          feedback: worstFeedback,
+          score: worstScore,
+          pageIndex: worstPageIndex,
         },
       });
     }
@@ -475,7 +495,7 @@ export const aiPipelineEvaluate = inngest.createFunction(
 // ---------------------------------------------------------------
 // Function 5: Refine and regenerate
 // ---------------------------------------------------------------
-type RefineData = EvaluateData & { feedback: string; score: number };
+type RefineData = EvaluateData & { feedback: string; score: number; pageIndex: number };
 
 export const aiPipelineRefine = inngest.createFunction(
   {
@@ -494,13 +514,13 @@ export const aiPipelineRefine = inngest.createFunction(
     },
   },
   async ({ event }: { event: { data: RefineData } }) => {
-    const { jobId, requestId, posterType, refinementRound, feedback, score } = event.data;
+    const { jobId, requestId, posterType, refinementRound, feedback, score, pageIndex } = event.data;
     const admin = createAdminClient();
 
-    // Get the original prompt from the variation
+    // Get the variation (including storage_paths so we can preserve other pages)
     const { data: variation } = await admin
       .from("ai_variations")
-      .select("id, creative_brief")
+      .select("id, creative_brief, storage_paths")
       .eq("job_id", jobId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -511,7 +531,10 @@ export const aiPipelineRefine = inngest.createFunction(
     const brief = variation.creative_brief as unknown as VariationBrief & {
       _generation_log?: { prompts?: string[] };
     };
-    const originalPrompt = brief._generation_log?.prompts?.[0] ?? brief.designPrompt;
+
+    // Use the prompt for the specific page that failed evaluation
+    const prompts = brief._generation_log?.prompts ?? [];
+    const originalPrompt = prompts[pageIndex] ?? prompts[0] ?? brief.designPrompt;
 
     // Re-read agent outputs and context
     const { data: job } = await admin
@@ -546,30 +569,34 @@ export const aiPipelineRefine = inngest.createFunction(
 
     // Upload the refined image
     const timestamp = Date.now();
-    const storagePath = `${ctx.schoolId}/${requestId}/ai/${brief.variationIndex}/refined-${timestamp}.png`;
+    const storagePath = `${ctx.schoolId}/${requestId}/ai/${brief.variationIndex}/refined-${pageIndex + 1}-${timestamp}.png`;
     const imageBuffer = Buffer.from(result.base64, "base64");
 
     await admin.storage
       .from("designs")
       .upload(storagePath, imageBuffer, { contentType: "image/png", upsert: false });
 
-    // Update variation with the new image
+    // Replace ONLY the refined page in storage_paths — preserve other pages
+    const updatedPaths = [...variation.storage_paths];
+    updatedPaths[pageIndex] = storagePath;
+
     await admin
       .from("ai_variations")
       .update({
-        storage_paths: [storagePath],
+        storage_paths: updatedPaths,
         creative_brief: {
           ...brief,
           _generation_log: {
             ...brief._generation_log,
             refinedPrompt: result.refinedPrompt,
+            refinedPageIndex: pageIndex,
             refinementRound,
           },
         } as unknown as Record<string, unknown>,
       })
       .eq("id", variation.id);
 
-    // Evaluate the refined version
+    // Evaluate the refined version (re-evaluates all pages)
     await inngest.send({
       name: "ai/pipeline.evaluate",
       data: { jobId, requestId, posterType, refinementRound },

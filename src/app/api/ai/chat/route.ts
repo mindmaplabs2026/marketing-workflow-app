@@ -24,9 +24,10 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { variation_id, message } = body as {
+  const { variation_id, message, page_index } = body as {
     variation_id?: string;
     message?: string;
+    page_index?: number;
   };
 
   if (!variation_id || !message?.trim()) {
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
       variationId: variation_id,
       requestId: variation.request_id,
       message: message.trim(),
+      pageIndex: page_index ?? null,
     },
   });
 
