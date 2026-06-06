@@ -101,9 +101,12 @@ RULES for event-based posters (no uploaded photos):
 - Infrastructure images can be used as setting/background reference.
 
 RULES for school brand assets:
-- Logo MUST appear in every poster. Adapt its placement creatively — do NOT just stamp it.
-- Header MUST appear at the top of every page. Adapt style to match the theme.
-- Footer MUST appear at the bottom of every page. Adapt style to match the theme.
+- Logo MUST appear in every poster. Pick the BEST logo from the available options (some schools have multiple logos). Specify the exact storage_path in selectedAssets.
+- Header MUST appear at the top of every page. Pick ONE header. Specify its exact storage_path.
+- Footer MUST appear at the bottom of every page. Pick ONE footer. Specify its exact storage_path.
+- If uniform or infrastructure are needed, pick the most relevant one and specify its storage_path.
+- Pick 2-3 sample posters that are MOST relevant to this theme as style references. Specify their exact storage_paths.
+- IMPORTANT: Use the EXACT storage_path strings from the "School Brand Assets" list above. Do not modify them.
 
 RULES for carousel:
 - All pages share a cohesive visual theme (consistent palette, typography, style).
@@ -125,6 +128,14 @@ Return ONLY valid JSON matching this schema:
     "colorPalette": ["#hex1", "#hex2", ...],
     "textContent": { "headline": "short punchy headline", "subheadline": "one short tagline", "bodyText": "", "callToAction": "" },
     "selectedImages": [{ "path": "exact filename from curated list", "placement": "description of placement" }],
+    "selectedAssets": {
+      "logo": "exact storage_path of the logo to use (pick ONE from the brand assets list)",
+      "header": "exact storage_path of the header to use (pick ONE)",
+      "footer": "exact storage_path of the footer to use (pick ONE)",
+      "uniform": "exact storage_path or null if not needed",
+      "infrastructure": "exact storage_path or null if not needed",
+      "samples": ["storage_path of 2-3 sample posters to use as style reference — pick the most relevant ones for this theme"]
+    },
     "layout": { "type": "single|carousel", "pages": [{ "pageIndex": 1, "description": "visual description of this page", "selectedImages": [...], "textOverlays": [{ "text": "...", "position": "...", "style": "..." }] }] },
     "logoPlacement": { "position": "string", "size": "string", "style": "string" },
     "headerFooter": { "headerStyle": "string", "footerStyle": "string" },

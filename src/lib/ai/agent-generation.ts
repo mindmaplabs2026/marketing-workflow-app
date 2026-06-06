@@ -132,63 +132,77 @@ export async function runGenerationAgent(
   const imageUrls: string[] = [];
   const prompts: string[] = [];
 
-  // Two distinct modes:
-  //
-  // MODE A — Teacher uploaded photos:
-  //   Reference images = uploaded photos (AS-IS, no transformation) + logo + header + footer
-  //   NO uniform/infrastructure assets — real photos must not be altered
-  //
-  // MODE B — No uploaded photos (event-based, e.g. "Environment Day"):
-  //   Reference images = logo + header + footer + uniform + infrastructure
-  //   AI generates all imagery from scratch using school assets as style reference
-
-  const hasUploadedPhotos = input.curatedImages.length > 0 &&
-    brief.selectedImages.length > 0;
+  // Use ONLY the assets that Agent 2 (creative director) selected.
+  // Agent 2 outputs selectedAssets with exact storage_paths for each role.
+  // No random sampling, no "always include all" — just what was picked.
 
   const referenceImages: { buffer: Buffer; name: string; role: string }[] = [];
-
-  // Always include: logo, header, footer (both modes)
-  const alwaysInclude = ["logo", "header", "footer"];
-
-  // Randomly pick 3 sample posters as style reference for the image model
-  const sampleAssets = input.brandAssets.filter((a) => a.assetType === "sample");
-  const shuffledSamples = [...sampleAssets].sort(() => Math.random() - 0.5).slice(0, 3);
-
   let imageIndex = 1;
 
-  for (const asset of input.brandAssets) {
-    if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
-      const buf = await downloadImage(asset.signedUrl);
-      if (buf) {
-        const label = asset.label ?? asset.storagePath.split("/").pop() ?? "asset";
-        referenceImages.push({
-          buffer: buf,
-          name: `image${imageIndex}_${asset.assetType}.png`,
-          role: `IMAGE ${imageIndex}: SCHOOL ${asset.assetType.toUpperCase()} — "${label}"`,
-        });
-        imageIndex++;
-      }
+  const selectedAssets = (brief as Record<string, unknown>).selectedAssets as {
+    logo?: string | null;
+    header?: string | null;
+    footer?: string | null;
+    uniform?: string | null;
+    infrastructure?: string | null;
+    samples?: string[];
+  } | undefined;
+
+  // Helper: find a brand asset by storage_path and download it
+  async function addAsset(storagePath: string | null | undefined, role: string, assetType: string): Promise<void> {
+    if (!storagePath) return;
+    const asset = input.brandAssets.find((a) =>
+      a.storagePath === storagePath || a.storagePath.endsWith(storagePath) || storagePath.endsWith(a.storagePath.split("/").pop() ?? "")
+    );
+    if (!asset?.signedUrl) return;
+    const buf = await downloadImage(asset.signedUrl);
+    if (!buf) return;
+    const label = asset.label ?? asset.storagePath.split("/").pop() ?? assetType;
+    referenceImages.push({
+      buffer: buf,
+      name: `image${imageIndex}_${assetType}.png`,
+      role: `IMAGE ${imageIndex}: ${role} — "${label}"`,
+    });
+    imageIndex++;
+  }
+
+  if (selectedAssets) {
+    // Agent 2 specified exactly which assets to use
+    await addAsset(selectedAssets.logo, "SCHOOL LOGO — Copy this EXACTLY. Do NOT redraw", "logo");
+    await addAsset(selectedAssets.header, "SCHOOL HEADER — Copy this exactly at the top", "header");
+    await addAsset(selectedAssets.footer, "SCHOOL FOOTER — Copy this exactly at the bottom", "footer");
+    await addAsset(selectedAssets.uniform, "UNIFORM REFERENCE — Match this for any AI-generated students", "uniform");
+    await addAsset(selectedAssets.infrastructure, "INFRASTRUCTURE REFERENCE — Use as setting/background guide", "infrastructure");
+
+    // Sample posters picked by Agent 2 for style reference
+    for (const samplePath of selectedAssets.samples ?? []) {
+      await addAsset(samplePath, "STYLE REFERENCE POSTER — Match this design quality and layout", "sample");
+    }
+  } else {
+    // Fallback: Agent 2 didn't output selectedAssets (old format).
+    // Use one of each core type.
+    for (const assetType of ["logo", "header", "footer"] as const) {
+      const asset = input.brandAssets.find((a) => a.assetType === assetType);
+      if (asset) await addAsset(asset.storagePath, `SCHOOL ${assetType.toUpperCase()}`, assetType);
+    }
+    if (brief.schoolAssetUsage.useUniform) {
+      const asset = input.brandAssets.find((a) => a.assetType === "uniform");
+      if (asset) await addAsset(asset.storagePath, "UNIFORM REFERENCE", "uniform");
+    }
+    if (brief.schoolAssetUsage.useInfrastructure) {
+      const asset = input.brandAssets.find((a) => a.assetType === "infrastructure");
+      if (asset) await addAsset(asset.storagePath, "INFRASTRUCTURE REFERENCE", "infrastructure");
+    }
+    // Pick 2 random samples as fallback
+    const samples = input.brandAssets.filter((a) => a.assetType === "sample");
+    for (const s of samples.sort(() => Math.random() - 0.5).slice(0, 2)) {
+      await addAsset(s.storagePath, "STYLE REFERENCE POSTER", "sample");
     }
   }
 
-  // Include random sample posters as style reference (both modes)
-  for (const sample of shuffledSamples) {
-    if (sample.signedUrl) {
-      const buf = await downloadImage(sample.signedUrl);
-      if (buf) {
-        const label = sample.label ?? sample.storagePath.split("/").pop() ?? "sample";
-        referenceImages.push({
-          buffer: buf,
-          name: `image${imageIndex}_sample.png`,
-          role: `IMAGE ${imageIndex}: STYLE REFERENCE POSTER — "${label}". Study this poster's layout, typography, and design quality. Match this standard.`,
-        });
-        imageIndex++;
-      }
-    }
-  }
-
+  // Add uploaded photos selected by Agent 2
+  const hasUploadedPhotos = input.curatedImages.length > 0 && brief.selectedImages.length > 0;
   if (hasUploadedPhotos) {
-    // MODE A: Include only the selected uploaded photos — no uniform/infrastructure
     const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
     for (const img of input.curatedImages) {
       const imgFilename = img.path.split("/").pop() ?? "";
@@ -200,24 +214,7 @@ export async function runGenerationAgent(
           referenceImages.push({
             buffer: buf,
             name: `image${imageIndex}_photo.png`,
-            role: `IMAGE ${imageIndex}: UPLOADED PHOTO — "${imgFilename}". Include this photo AS-IS in the poster. Do NOT modify or redraw it.`,
-          });
-          imageIndex++;
-        }
-      }
-    }
-  } else {
-    // MODE B: No uploaded photos — include uniform + infrastructure as style references
-    const styleAssets = ["uniform", "infrastructure"];
-    for (const asset of input.brandAssets) {
-      if (styleAssets.includes(asset.assetType) && asset.signedUrl) {
-        const buf = await downloadImage(asset.signedUrl);
-        if (buf) {
-          const label = asset.label ?? asset.storagePath.split("/").pop() ?? "asset";
-          referenceImages.push({
-            buffer: buf,
-            name: `image${imageIndex}_${asset.assetType}.png`,
-            role: `IMAGE ${imageIndex}: ${asset.assetType.toUpperCase()} REFERENCE — "${label}". Use as visual style guide for AI-generated ${asset.assetType}.`,
+            role: `IMAGE ${imageIndex}: UPLOADED PHOTO — "${imgFilename}". Include this photo AS-IS. Do NOT modify or redraw it.`,
           });
           imageIndex++;
         }
@@ -499,46 +496,51 @@ export async function refineAndRegenerate(
   const imageSize = "1024x1536" as const;
   const { brief } = input;
 
-  // Collect reference images with roles (same logic as runGenerationAgent)
-  const hasUploadedPhotos = input.curatedImages.length > 0 && brief.selectedImages.length > 0;
+  // Re-use the same Agent 2-driven asset selection as runGenerationAgent
   const referenceImages: { buffer: Buffer; name: string; role: string }[] = [];
   let idx = 1;
 
-  const alwaysInclude = ["logo", "header", "footer"];
-  for (const asset of input.brandAssets) {
-    if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
-      const buf = await downloadImage(asset.signedUrl);
-      if (buf) {
-        referenceImages.push({ buffer: buf, name: `image${idx}_${asset.assetType}.png`, role: `IMAGE ${idx}: SCHOOL ${asset.assetType.toUpperCase()}` });
-        idx++;
-      }
+  const selectedAssets = (brief as Record<string, unknown>).selectedAssets as {
+    logo?: string | null; header?: string | null; footer?: string | null;
+    uniform?: string | null; infrastructure?: string | null; samples?: string[];
+  } | undefined;
+
+  async function addRefAsset(storagePath: string | null | undefined, role: string, type: string): Promise<void> {
+    if (!storagePath) return;
+    const asset = input.brandAssets.find((a) =>
+      a.storagePath === storagePath || a.storagePath.endsWith(storagePath) || storagePath.endsWith(a.storagePath.split("/").pop() ?? "")
+    );
+    if (!asset?.signedUrl) return;
+    const buf = await downloadImage(asset.signedUrl);
+    if (!buf) return;
+    referenceImages.push({ buffer: buf, name: `image${idx}_${type}.png`, role: `IMAGE ${idx}: ${role}` });
+    idx++;
+  }
+
+  if (selectedAssets) {
+    await addRefAsset(selectedAssets.logo, "SCHOOL LOGO — Copy EXACTLY", "logo");
+    await addRefAsset(selectedAssets.header, "SCHOOL HEADER", "header");
+    await addRefAsset(selectedAssets.footer, "SCHOOL FOOTER", "footer");
+    await addRefAsset(selectedAssets.uniform, "UNIFORM REFERENCE", "uniform");
+    await addRefAsset(selectedAssets.infrastructure, "INFRASTRUCTURE REFERENCE", "infrastructure");
+    for (const sp of selectedAssets.samples ?? []) await addRefAsset(sp, "STYLE REFERENCE POSTER", "sample");
+  } else {
+    for (const type of ["logo", "header", "footer"] as const) {
+      const a = input.brandAssets.find((x) => x.assetType === type);
+      if (a) await addRefAsset(a.storagePath, `SCHOOL ${type.toUpperCase()}`, type);
     }
   }
 
-  const samples = input.brandAssets.filter((a) => a.assetType === "sample");
-  for (const s of samples.sort(() => Math.random() - 0.5).slice(0, 3)) {
-    if (s.signedUrl) {
-      const buf = await downloadImage(s.signedUrl);
-      if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_sample.png`, role: `IMAGE ${idx}: STYLE REFERENCE POSTER` }); idx++; }
-    }
-  }
-
+  // Uploaded photos
+  const hasUploadedPhotos = input.curatedImages.length > 0 && brief.selectedImages.length > 0;
   if (hasUploadedPhotos) {
     const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
     for (const img of input.curatedImages) {
-      const imgFilename = img.path.split("/").pop() ?? "";
-      const isSelected = selectedPaths.has(img.path) ||
-        [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
+      const fn = img.path.split("/").pop() ?? "";
+      const isSelected = selectedPaths.has(img.path) || [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(fn));
       if (isSelected) {
         const buf = await downloadImage(img.signedUrl);
-        if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_photo.png`, role: `IMAGE ${idx}: UPLOADED PHOTO` }); idx++; }
-      }
-    }
-  } else {
-    for (const asset of input.brandAssets) {
-      if (["uniform", "infrastructure"].includes(asset.assetType) && asset.signedUrl) {
-        const buf = await downloadImage(asset.signedUrl);
-        if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_${asset.assetType}.png`, role: `IMAGE ${idx}: ${asset.assetType.toUpperCase()} REFERENCE` }); idx++; }
+        if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_photo.png`, role: `IMAGE ${idx}: UPLOADED PHOTO — "${fn}"` }); idx++; }
       }
     }
   }
