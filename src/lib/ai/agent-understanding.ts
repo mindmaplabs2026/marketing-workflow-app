@@ -36,43 +36,122 @@ type Agent1Input = {
   schoolGuidelines?: string | null;
 };
 
-const SYSTEM_PROMPT = `You are an expert visual content analyst for school marketing posters.
+const MAX_SHORTLIST = 15;
 
-Your job is to:
-1. Understand the theme, audience, and tone from the title and description.
-2. Analyze every uploaded image for quality, content, and relevance to the theme.
-3. Curate a shortlist of the best images (max 10-15) ranked by relevance.
-4. Reject images that are blurry, irrelevant, or low quality — explain why.
-5. Identify the core message that should come through in the poster(s).
-
-Return ONLY valid JSON matching this schema:
-{
-  "theme": "string — the central theme/topic",
-  "coreMessage": "string — the key message for the poster",
-  "curatedImages": [{ "path": "string", "relevanceScore": 0-100, "description": "string", "quality": "high|medium|low" }],
-  "rejectedImages": [{ "path": "string", "reason": "string" }],
-  "audience": "string — target audience (parents, students, community, etc.)",
-  "tone": "string — visual tone (celebratory, informational, urgent, etc.)",
-  "constraints": ["string — any constraints or notes for the designer"]
-}`;
-
+/**
+ * Two-pass image analysis:
+ *
+ * Pass 1 (quick scan): All images at detail:"low" (~85 tokens each).
+ *   Quick relevance + quality filter. Returns top 15-20 paths.
+ *
+ * Pass 2 (deep analysis): Only the shortlisted images at detail:"high" (~1100 tokens each).
+ *   Detailed descriptions, precise quality assessment, final ranking.
+ *
+ * This avoids context dilution from 60-70 high-detail images in one call.
+ */
 export async function runUnderstandingAgent(
   input: Agent1Input,
 ): Promise<UnderstandingOutput> {
   const openai = getOpenAI();
 
+  const contextText = `Title: ${input.title}\n\nDescription: ${input.description ?? "(none provided)"}\n\nSchool brand asset types available: ${input.brandAssetTypes.join(", ") || "none"}${input.schoolGuidelines ? `\n\nSchool-specific guidelines:\n${input.schoolGuidelines}` : ""}`;
+
+  // If 15 or fewer images, skip pass 1 and go straight to deep analysis
+  if (input.images.length <= MAX_SHORTLIST) {
+    return deepAnalysis(openai, input.images, contextText);
+  }
+
+  // ---------------------------------------------------------------
+  // Pass 1: Quick scan at low detail — filter down to top 15-20
+  // ---------------------------------------------------------------
+  const pass1Content: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string; detail: "low" } }
+  > = [
+    {
+      type: "text",
+      text: `${contextText}\n\nTotal images: ${input.images.length}\n\nQuickly scan ALL images below. For each one, give a relevance score (0-100) based on the title/description. Return ONLY valid JSON:\n{"shortlist": [{"path": "string", "score": 0-100, "reason": "brief reason"}], "rejected": [{"path": "string", "reason": "brief reason"}]}\n\nShortlist the top ${MAX_SHORTLIST} most relevant, high-quality images. Reject the rest.`,
+    },
+  ];
+
+  for (const img of input.images) {
+    pass1Content.push({
+      type: "image_url",
+      image_url: { url: img.signedUrl, detail: "low" },
+    });
+    pass1Content.push({
+      type: "text",
+      text: `[${img.path}]`,
+    });
+  }
+
+  const pass1Response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: "You are a quick image scanner for school marketing posters. Rapidly assess each image for relevance and quality. Be decisive — reject blurry, irrelevant, or duplicate images immediately.",
+      },
+      { role: "user", content: pass1Content },
+    ],
+    response_format: { type: "json_object" },
+    max_tokens: 4096,
+  });
+
+  const pass1Raw = pass1Response.choices[0]?.message?.content;
+  if (!pass1Raw) throw new Error("Agent 1 Pass 1: empty response");
+
+  let shortlistedPaths: string[];
+  try {
+    const pass1Result = JSON.parse(pass1Raw) as {
+      shortlist: { path: string; score: number }[];
+      rejected: { path: string; reason: string }[];
+    };
+    // Sort by score descending, take top MAX_SHORTLIST
+    shortlistedPaths = pass1Result.shortlist
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_SHORTLIST)
+      .map((s) => s.path);
+  } catch {
+    // If pass 1 fails to parse, take all images (fallback)
+    shortlistedPaths = input.images.slice(0, MAX_SHORTLIST).map((i) => i.path);
+  }
+
+  // Filter to shortlisted images only
+  const shortlistedImages = input.images.filter((img) => {
+    const imgFilename = img.path.split("/").pop() ?? "";
+    return shortlistedPaths.some(
+      (p) => p === img.path || img.path.endsWith(p) || p.endsWith(imgFilename),
+    );
+  });
+
+  // If no images made the cut, take the first few as fallback
+  if (shortlistedImages.length === 0) {
+    return deepAnalysis(openai, input.images.slice(0, MAX_SHORTLIST), contextText);
+  }
+
+  // ---------------------------------------------------------------
+  // Pass 2: Deep analysis at high detail — only shortlisted images
+  // ---------------------------------------------------------------
+  return deepAnalysis(openai, shortlistedImages, contextText);
+}
+
+async function deepAnalysis(
+  openai: ReturnType<typeof getOpenAI>,
+  images: UploadedImage[],
+  contextText: string,
+): Promise<UnderstandingOutput> {
   const userContent: Array<
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string; detail: "high" } }
   > = [
     {
       type: "text",
-      text: `Title: ${input.title}\n\nDescription: ${input.description ?? "(none provided)"}\n\nNumber of images uploaded: ${input.images.length}\nSchool brand asset types available: ${input.brandAssetTypes.join(", ") || "none"}${input.schoolGuidelines ? `\n\nSchool-specific guidelines (consider these when analyzing relevance and selecting images):\n${input.schoolGuidelines}` : ""}`,
+      text: `${contextText}\n\nAnalyze the following ${images.length} images in detail.`,
     },
   ];
 
-  // Attach images (up to 60) with low detail to save tokens
-  for (const img of input.images) {
+  for (const img of images) {
     userContent.push({
       type: "image_url",
       image_url: { url: img.signedUrl, detail: "high" },
@@ -86,7 +165,29 @@ export async function runUnderstandingAgent(
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "system",
+        content: `You are an expert visual content analyst for school marketing posters.
+
+Your job is to:
+1. Understand the theme, audience, and tone from the title and description.
+2. Analyze every image for quality, composition, content, and relevance to the theme.
+3. Curate a shortlist of the best images (max 10-15) ranked by relevance.
+4. Reject images that are blurry, irrelevant, or low quality — explain why.
+5. For each curated image, write a detailed description of what's in it (people, setting, action, mood).
+6. Identify the core message that should come through in the poster(s).
+
+Return ONLY valid JSON matching this schema:
+{
+  "theme": "string — the central theme/topic",
+  "coreMessage": "string — the key message for the poster",
+  "curatedImages": [{ "path": "string", "relevanceScore": 0-100, "description": "detailed description of the image content", "quality": "high|medium|low" }],
+  "rejectedImages": [{ "path": "string", "reason": "string" }],
+  "audience": "string — target audience (parents, students, community, etc.)",
+  "tone": "string — visual tone (celebratory, informational, urgent, etc.)",
+  "constraints": ["string — any constraints or notes for the designer"]
+}`,
+      },
       { role: "user", content: userContent },
     ],
     response_format: { type: "json_object" },
