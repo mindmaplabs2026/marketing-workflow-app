@@ -1,6 +1,7 @@
 import { inngest } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getOpenAI } from "@/lib/ai/openai-client";
+import { toFile } from "openai";
 
 type ChatEditEvent = {
   name: "ai/chat.edit";
@@ -39,103 +40,63 @@ export const aiChatEdit = inngest.createFunction(
       .eq("variation_id", variationId)
       .order("created_at", { ascending: true });
 
-    // Load job context
-    const { data: job } = await admin
-      .from("ai_generation_jobs")
-      .select("agent1_output, agent2_output")
-      .eq("request_id", requestId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    // Build system prompt
-    const brief = variation.creative_brief as Record<string, unknown>;
-    const systemPrompt = `You are a poster design editing assistant. You help refine Instagram posters based on user feedback.
-
-## Creative Brief for This Variation
-${JSON.stringify(brief, null, 2).slice(0, 3000)}
-
-## Current Poster
-The current poster has ${variation.storage_paths.length} page(s).
-
-## Instructions
-The user will describe edits they want. Respond briefly confirming what you'll change. Keep the same creative direction and overall theme — only modify what the user asks for.`;
-
-    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-      { role: "system", content: systemPrompt },
+    // Step 1: Get the text response — what will be changed
+    const chatMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      {
+        role: "system",
+        content: `You are a poster design editing assistant. The user wants minor tweaks to an existing poster. Respond briefly confirming what you'll change. Do NOT list the full design — just confirm the specific edit. Keep it to 1-2 sentences.`,
+      },
     ];
 
     for (const msg of history ?? []) {
-      messages.push({
+      chatMessages.push({
         role: msg.role as "user" | "assistant",
         content: msg.content,
       });
     }
 
-    // Step 1: Get text response
     const chatResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages,
-      max_tokens: 500,
+      messages: chatMessages,
+      max_tokens: 200,
     });
 
-    const assistantText = chatResponse.choices[0]?.message?.content ?? "Applying your edits...";
+    const assistantText = chatResponse.choices[0]?.message?.content ?? "Applying your edit...";
 
-    // Step 2: Generate updated poster
-    const creativeVision = (brief as { creativeVision?: string }).creativeVision ?? "";
-    const designPrompt = (brief as { designPrompt?: string }).designPrompt ?? "";
-    const editPrompt = `${creativeVision || designPrompt}\n\nUser edit request: ${message}\n\nAssistant plan: ${assistantText}\n\nApply the user's requested changes while keeping the overall design, branding, and layout intact. Instagram poster, portrait 1080x1350px.`;
-
-    // Download current poster as reference for the edit
+    // Step 2: Download the CURRENT poster — this is what we're editing
+    // Always use the latest version (last in storage_paths)
     const currentPath = variation.storage_paths[variation.storage_paths.length - 1];
-    let currentImageBuffer: Buffer | null = null;
-    if (currentPath) {
-      const { data: imgData } = await admin.storage.from("designs").download(currentPath);
-      if (imgData) {
-        currentImageBuffer = Buffer.from(await imgData.arrayBuffer());
-      }
+    if (!currentPath) throw new Error("No current poster to edit");
+
+    const { data: imgData } = await admin.storage.from("designs").download(currentPath);
+    if (!imgData) throw new Error("Could not download current poster");
+
+    const currentImageBuffer = Buffer.from(await imgData.arrayBuffer());
+    const file = await toFile(currentImageBuffer, "current-poster.png", { type: "image/png" });
+
+    // Step 3: Use images.edit with a SHORT, targeted edit instruction
+    // Do NOT re-describe the whole poster — just say what to change
+    const editPrompt = `This is an existing Instagram poster. Make ONLY this change: ${message}
+
+Keep EVERYTHING else exactly the same — same layout, same images, same colors, same branding, same logo, same header, same footer. Only modify what was specifically requested. The poster dimensions are portrait 1080x1350px.`;
+
+    const response = await openai.images.edit({
+      model: "gpt-image-2",
+      image: [file],
+      prompt: editPrompt,
+      n: 1,
+      size: "1024x1536",
+      quality: "high",
+    });
+
+    const item = response.data?.[0];
+    let base64Result = item?.b64_json ?? "";
+    if (!base64Result && item?.url) {
+      base64Result = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
     }
-
-    let base64Result: string;
-
-    if (currentImageBuffer) {
-      // Use images.edit with the current poster as reference
-      const { toFile } = await import("openai");
-      const file = await toFile(currentImageBuffer, "current-poster.png", { type: "image/png" });
-
-      const response = await openai.images.edit({
-        model: "gpt-image-2",
-        image: [file],
-        prompt: editPrompt,
-        n: 1,
-        size: "1024x1536",
-        quality: "high",
-      });
-
-      const item = response.data?.[0];
-      base64Result = item?.b64_json ?? "";
-      if (!base64Result && item?.url) {
-        base64Result = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
-      }
-    } else {
-      const response = await openai.images.generate({
-        model: "gpt-image-2",
-        prompt: editPrompt,
-        n: 1,
-        size: "1024x1536",
-        quality: "high",
-      });
-
-      const item = response.data?.[0];
-      base64Result = item?.b64_json ?? "";
-      if (!base64Result && item?.url) {
-        base64Result = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
-      }
-    }
-
     if (!base64Result) throw new Error("Chat edit: no image returned");
 
-    // Upload to storage
+    // Step 4: Upload the edited poster (do NOT replace the original)
     const { data: fullReq } = await admin
       .from("requests")
       .select("school_id")
@@ -166,19 +127,16 @@ The user will describe edits they want. Respond briefly confirming what you'll c
       },
     });
 
-    // Update variation
-    const newStoragePaths = [...variation.storage_paths];
-    if (newStoragePaths.length === 1) {
-      newStoragePaths[0] = storagePath;
-    } else {
-      newStoragePaths.push(storagePath);
-    }
+    // Update variation — APPEND the new path, do NOT replace the original.
+    // storage_paths[0] always stays as the original Agent 3 output.
+    // Edits are appended so the designer can see the progression.
+    const updatedPaths = [...variation.storage_paths, storagePath];
 
     await admin
       .from("ai_variations")
       .update({
         chat_rounds_used: round,
-        storage_paths: newStoragePaths,
+        storage_paths: updatedPaths,
       })
       .eq("id", variationId);
   },
