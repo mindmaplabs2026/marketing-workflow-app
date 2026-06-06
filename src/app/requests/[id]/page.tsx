@@ -32,6 +32,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { AssetDownloadGrid, type AssetItem } from "@/components/asset-download-grid";
 import { AiGenerationStatus } from "./ai-generation-status";
 import { AiVariations } from "./ai-variations";
+import { AiGenerateButton } from "./ai-generate-button";
 import type { AiJobStatus } from "@/lib/supabase/types";
 
 type RequestRow = {
@@ -404,14 +405,14 @@ export default async function RequestDetailPage({
     isReviewer && req.status === "design_pending_approval";
   const awaitingPublish =
     req.status === "in_design" && designsList.length > 0;
-  // Super admin can always publish any request.
-  // For AI-generated requests, school admin can also publish (no designer in the loop).
-  // For manual requests, the assigned designer can publish.
-  const canPublish = awaitingPublish && (
-    isSuperAdmin ||
-    isAssignedDesigner ||
-    (req.ai_generated && isReviewer)
-  );
+  // Designer (assigned) or super admin can publish after design is approved.
+  const canPublish = awaitingPublish && (isSuperAdmin || isAssignedDesigner);
+  // Designer can trigger AI generation when they've picked up the request
+  const canTriggerAi =
+    isAssignedDesigner &&
+    !req.ai_generated &&
+    (req.status === "in_design" || req.status === "changes_requested") &&
+    designsList.length === 0;
   const canArchive =
     (isCreator || isReviewer) &&
     req.status !== "archived" &&
@@ -527,15 +528,21 @@ export default async function RequestDetailPage({
         />
       )}
 
-      {/* AI Generation section */}
-      {req.ai_generated && aiJob && aiJob.status !== "completed" && (
+      {/* AI: trigger button for designer */}
+      {canTriggerAi && (
+        <AiGenerateButton requestId={req.id} />
+      )}
+
+      {/* AI: generation progress (visible to designer + super_admin) */}
+      {req.ai_generated && aiJob && aiJob.status !== "completed" && (isAssignedDesigner || isSuperAdmin) && (
         <AiGenerationStatus
           jobId={aiJob.id}
           initialStatus={aiJob.status}
         />
       )}
 
-      {req.ai_generated && aiJob?.status === "completed" && aiVariations.length > 0 && (
+      {/* AI: variation review (visible to designer + super_admin) */}
+      {req.ai_generated && aiJob?.status === "completed" && aiVariations.length > 0 && (isAssignedDesigner || isSuperAdmin) && (
         <AiVariations
           requestId={req.id}
           variations={aiVariations.map((v) => ({

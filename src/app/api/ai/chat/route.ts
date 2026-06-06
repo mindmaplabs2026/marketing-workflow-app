@@ -43,16 +43,25 @@ export async function POST(request: Request) {
     );
   }
 
-  // Check the user is the request creator
+  // Check the user is the assigned designer or super_admin
   const { data: req } = await supabase
     .from("requests")
-    .select("created_by")
+    .select("assigned_designer_id")
     .eq("id", variation.request_id)
     .single();
 
-  if (!req || req.created_by !== user.id) {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const isAssignedDesigner = req?.assigned_designer_id === user.id;
+  const isSuperAdmin = profile?.role === "super_admin";
+
+  if (!isAssignedDesigner && !isSuperAdmin) {
     return NextResponse.json(
-      { error: "Only the request creator can chat." },
+      { error: "Only the assigned designer can chat." },
       { status: 403 },
     );
   }

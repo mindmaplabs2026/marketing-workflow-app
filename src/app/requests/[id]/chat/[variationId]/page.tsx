@@ -36,7 +36,7 @@ export default async function VariationChatPage({
 
   const { data: req } = await supabase
     .from("requests")
-    .select("title, created_by")
+    .select("title, created_by, assigned_designer_id")
     .eq("id", requestId)
     .single();
 
@@ -73,7 +73,9 @@ export default async function VariationChatPage({
     direction?: string;
     theme?: string;
   };
-  const isCreator = req.created_by === session.id;
+  const isDesigner = req.assigned_designer_id === session.id;
+  const isSuperAdmin = session.role === "super_admin";
+  const canChat = isDesigner || isSuperAdmin;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
@@ -111,7 +113,7 @@ export default async function VariationChatPage({
         }))}
         roundsUsed={variation.chat_rounds_used}
         maxRounds={25}
-        canChat={isCreator}
+        canChat={canChat}
       />
     </div>
   );

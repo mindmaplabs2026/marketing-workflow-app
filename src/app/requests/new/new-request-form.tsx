@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { attachUpload, createRequest, triggerAiGeneration } from "../actions";
+import { attachUpload, createRequest } from "../actions";
 
 type School = { id: string; name: string };
 
@@ -19,8 +19,6 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
-  const [aiGenerate, setAiGenerate] = useState(false);
-  const [posterType, setPosterType] = useState<"single" | "carousel">("single");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -89,18 +87,6 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
           attachData.set("file_size", String(file.size));
           await attachUpload(attachData);
           setProgress(`Uploading ${i + 1} / ${files.length}…`);
-        }
-      }
-
-      // Trigger AI generation pipeline if opted in
-      if (created.aiGenerate) {
-        setProgress("Starting AI generation…");
-        const aiResult = await triggerAiGeneration(
-          requestId,
-          created.posterType ?? "single",
-        );
-        if (aiResult.error) {
-          setError(aiResult.error);
         }
       }
 
@@ -210,49 +196,6 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
           placeholder="Date, hashtags, key names to mention…"
           className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
         />
-      </div>
-
-      {/* AI Generate toggle */}
-      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            name="ai_generate"
-            value="1"
-            checked={aiGenerate}
-            onChange={(e) => setAiGenerate(e.target.checked)}
-            className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500"
-          />
-          <div>
-            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-              Generate with AI
-            </span>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              AI will create 3 poster variations for you to review (~20-30 min)
-            </p>
-          </div>
-        </label>
-
-        {aiGenerate && (
-          <div className="mt-3 ml-7">
-            <label
-              htmlFor="poster_type"
-              className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
-            >
-              Poster type
-            </label>
-            <select
-              id="poster_type"
-              name="poster_type"
-              value={posterType}
-              onChange={(e) => setPosterType(e.target.value as "single" | "carousel")}
-              className="mt-1 block w-full max-w-xs rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-            >
-              <option value="single">Single poster</option>
-              <option value="carousel">Carousel (3-5 pages)</option>
-            </select>
-          </div>
-        )}
       </div>
 
       <div>

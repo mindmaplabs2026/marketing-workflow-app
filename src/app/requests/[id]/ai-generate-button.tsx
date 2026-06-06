@@ -1,0 +1,72 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { triggerAiGeneration } from "../actions";
+
+export function AiGenerateButton({ requestId }: { requestId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [posterType, setPosterType] = useState<"single" | "carousel">("single");
+
+  async function handleGenerate() {
+    setBusy(true);
+    setError(null);
+    const result = await triggerAiGeneration(requestId, posterType);
+    if (result.error) {
+      setError(result.error);
+      setBusy(false);
+    } else {
+      router.refresh();
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-900/40 dark:bg-violet-900/10">
+      <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+        Assign to AI
+      </p>
+      <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+        AI will generate a poster based on the request details and uploaded
+        photos. Takes about 5-10 minutes.
+      </p>
+
+      <div className="mt-3 flex items-end gap-3">
+        <div>
+          <label
+            htmlFor="ai_poster_type"
+            className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+          >
+            Poster type
+          </label>
+          <select
+            id="ai_poster_type"
+            value={posterType}
+            onChange={(e) =>
+              setPosterType(e.target.value as "single" | "carousel")
+            }
+            disabled={busy}
+            className="mt-1 block rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          >
+            <option value="single">Single poster</option>
+            <option value="carousel">Carousel (3-5 pages)</option>
+          </select>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={busy}
+          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
+        >
+          {busy ? "Starting…" : "Generate with AI"}
+        </button>
+      </div>
+
+      {error && (
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+      )}
+    </div>
+  );
+}

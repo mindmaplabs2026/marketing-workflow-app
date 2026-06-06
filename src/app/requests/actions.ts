@@ -13,12 +13,7 @@ import type {
 } from "@/lib/supabase/types";
 
 export type ActionState = { error?: string; success?: boolean };
-export type CreateRequestState = {
-  error?: string;
-  requestId?: string;
-  aiGenerate?: boolean;
-  posterType?: "single" | "carousel";
-};
+export type CreateRequestState = { error?: string; requestId?: string };
 
 const SOCIAL_PLATFORMS: ReadonlyArray<SocialPlatform> = [
   "facebook",
@@ -103,9 +98,6 @@ export async function createRequest(
   const schoolId = String(formData.get("school_id") ?? "");
   const requestType = String(formData.get("request_type") ?? "").trim() || null;
   const dueDate = String(formData.get("due_date") ?? "").trim() || null;
-  const aiGenerate = formData.get("ai_generate") === "1";
-  const posterType =
-    (formData.get("poster_type") as "single" | "carousel") || "single";
 
   if (!title) return { error: "Give the request a short title." };
   if (!schoolId) return { error: "Pick a school." };
@@ -136,7 +128,6 @@ export async function createRequest(
       approved_by: initialStatus === "approved" ? actor.userId : null,
       request_type: requestType as import("@/lib/supabase/types").RequestType | null,
       due_date: dueDate,
-      ai_generated: aiGenerate,
     })
     .select("id")
     .single<{ id: string }>();
@@ -145,7 +136,7 @@ export async function createRequest(
 
   revalidatePath("/requests");
   await dispatchPendingPushes();
-  return { requestId: data.id, aiGenerate, posterType };
+  return { requestId: data.id };
 }
 
 export async function updateRequestDraft(formData: FormData) {
@@ -614,11 +605,8 @@ export async function publishRequest(formData: FormData) {
 
   const actor = await loadActor();
   if ("error" in actor) throw new Error(actor.error);
-  // For AI-generated requests, school_admin can publish directly (no designer in the loop).
-  // For manual requests, only the assigned designer or super_admin can publish.
-  const allowedPublishRoles: import("@/lib/supabase/types").UserRole[] = ["designer", "super_admin", "school_admin"];
-  if (!allowedPublishRoles.includes(actor.role)) {
-    throw new Error("You don't have permission to publish.");
+  if (actor.role !== "designer" && actor.role !== "super_admin") {
+    throw new Error("Only a designer or super admin can publish.");
   }
 
   const req = await loadRequestForUpdate(id);
@@ -760,11 +748,21 @@ export async function triggerAiGeneration(
   const req = await loadRequestForUpdate(requestId);
   if ("error" in req) return { error: req.error };
 
-  if (req.created_by !== actor.userId && actor.role !== "super_admin") {
-    return { error: "Only the request creator can trigger AI generation." };
+  // Only the assigned designer or super_admin can trigger AI generation
+  if (actor.role !== "super_admin" && actor.role !== "designer") {
+    return { error: "Only a designer can trigger AI generation." };
+  }
+  if (actor.role === "designer" && req.status !== "in_design" && req.status !== "changes_requested") {
+    return { error: "Pick up the request first before assigning to AI." };
   }
 
   const supabase = await createClient();
+
+  // Mark request as AI-generated
+  await supabase
+    .from("requests")
+    .update({ ai_generated: true })
+    .eq("id", requestId);
 
   // Create the AI generation job
   const { data: job, error: jobErr } = await supabase
@@ -801,8 +799,10 @@ export async function acceptAiVariation(formData: FormData) {
   const req = await loadRequestForUpdate(requestId);
   if ("error" in req) throw new Error(req.error);
 
-  if (req.created_by !== actor.userId && actor.role !== "super_admin") {
-    throw new Error("Only the request creator can accept a variation.");
+  // Only the assigned designer or super_admin can accept a variation
+  const isAssigned = actor.role === "designer" && req.status === "in_design";
+  if (!isAssigned && actor.role !== "super_admin") {
+    throw new Error("Only the assigned designer can accept a variation.");
   }
 
   const supabase = await createClient();
@@ -830,7 +830,7 @@ export async function acceptAiVariation(formData: FormData) {
       request_id: requestId,
       uploaded_by: actor.userId,
       storage_path: path,
-      notes: `AI variation ${variation.variation_index} — accepted by teacher`,
+      notes: `AI variation ${variation.variation_index} — accepted by designer`,
     });
   }
 
