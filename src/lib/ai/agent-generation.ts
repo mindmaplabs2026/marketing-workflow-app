@@ -42,15 +42,49 @@ export const QUALITY_THRESHOLD = 7; // out of 10
 
 /**
  * Evaluates a generated poster using GPT-4o-mini vision.
- * Returns a score (1-10) and specific feedback for improvement.
- * Exported so the pipeline can call it from a separate Inngest function.
+ * Compares the output against reference images (logo, header, footer,
+ * uploaded photos, samples) to check accuracy, not just generic quality.
  */
 export async function evaluatePoster(
   imageBase64: string,
   brief: VariationBrief,
   schoolName: string,
+  referenceImages?: { role: string; base64: string }[],
 ): Promise<EvaluationResult> {
   const openai = getOpenAI();
+
+  const userContent: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string; detail: "high" | "low" } }
+  > = [];
+
+  // First: show the reference images so the evaluator knows what to compare against
+  if (referenceImages && referenceImages.length > 0) {
+    userContent.push({
+      type: "text",
+      text: `REFERENCE IMAGES — compare the generated poster against these:\n${referenceImages.map((r) => `- ${r.role}`).join("\n")}`,
+    });
+    for (const ref of referenceImages) {
+      userContent.push({
+        type: "image_url",
+        image_url: { url: `data:image/png;base64,${ref.base64}`, detail: "low" },
+      });
+      userContent.push({
+        type: "text",
+        text: `[${ref.role}]`,
+      });
+    }
+  }
+
+  // Then: show the generated poster to evaluate
+  userContent.push({
+    type: "text",
+    text: `\nGENERATED POSTER TO EVALUATE:\nSchool: ${schoolName}\nTheme: ${brief.theme}\nDirection: ${brief.direction}\nHeadline: ${brief.textContent.headline}`,
+  });
+  userContent.push({
+    type: "image_url",
+    image_url: { url: `data:image/png;base64,${imageBase64}`, detail: "high" },
+  });
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -59,34 +93,26 @@ export async function evaluatePoster(
         role: "system",
         content: `You are a professional graphic design quality assessor for school marketing posters on Instagram.
 
+You will receive REFERENCE IMAGES first (logo, header, footer, sample posters, uploaded photos), then the GENERATED POSTER to evaluate.
+
 Score the poster from 1-10 on these criteria:
-- Visual impact and professional quality (does it look like a premium marketing poster?)
+- Logo accuracy: does the logo in the poster match the reference logo exactly? Same shape, colors, text?
+- Header/footer accuracy: do they match the reference header and footer?
+- Uploaded photo usage: if uploaded photos were provided, are they included as-is (not redrawn)?
+- Style match: does the design quality match the sample poster references?
 - Typography: is text legible, well-sized, not too much text?
 - Layout: clean composition, clear visual hierarchy, breathing room?
-- Branding: does it include school logo, header, footer appropriately?
 - Theme relevance: does the imagery match the intended theme?
 - Instagram readiness: would this perform well as an Instagram post?
 
 Return ONLY valid JSON:
 {
   "score": 1-10,
-  "feedback": "specific actionable improvements — be precise about what to change",
+  "feedback": "specific actionable improvements — be precise. If the logo doesn't match, say so. If uploaded photos were redrawn instead of included, say so. If the style doesn't match the samples, explain how.",
   "passesThreshold": true/false (true if score >= ${QUALITY_THRESHOLD})
 }`,
       },
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `School: ${schoolName}\nTheme: ${brief.theme}\nDirection: ${brief.direction}\nHeadline: ${brief.textContent.headline}\n\nEvaluate this poster:`,
-          },
-          {
-            type: "image_url",
-            image_url: { url: `data:image/png;base64,${imageBase64}`, detail: "high" },
-          },
-        ],
-      },
+      { role: "user", content: userContent },
     ],
     response_format: { type: "json_object" },
     max_tokens: 500,

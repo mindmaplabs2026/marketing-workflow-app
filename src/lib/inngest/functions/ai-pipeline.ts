@@ -375,19 +375,62 @@ export const aiPipelineEvaluate = inngest.createFunction(
     const imageBase64 = Buffer.from(await imageData.arrayBuffer()).toString("base64");
     const brief = variation.creative_brief as unknown as VariationBrief;
 
-    // Get school name for evaluation context
-    const { data: request } = await admin
-      .from("requests")
-      .select("school_id")
-      .eq("id", requestId)
-      .single();
-    const { data: school } = await admin
-      .from("schools")
-      .select("name")
-      .eq("id", request?.school_id ?? "")
-      .single();
+    // Get school name and context for evaluation
+    const ctx = await fetchContext(requestId);
 
-    const evaluation = await evaluatePoster(imageBase64, brief, school?.name ?? "School");
+    // Collect reference images for comparison — download the assets
+    // Agent 2 selected so the evaluator can verify accuracy
+    const selectedAssets = (brief as Record<string, unknown>).selectedAssets as {
+      logo?: string | null; header?: string | null; footer?: string | null;
+      samples?: string[];
+    } | undefined;
+
+    const evalReferences: { role: string; base64: string }[] = [];
+
+    async function addEvalRef(storagePath: string | null | undefined, role: string, bucket: string): Promise<void> {
+      if (!storagePath) return;
+      const asset = ctx.brandAssets.find((a) =>
+        a.storagePath === storagePath || a.storagePath.endsWith(storagePath) || storagePath.endsWith(a.storagePath.split("/").pop() ?? "")
+      );
+      if (!asset?.signedUrl) return;
+      try {
+        const res = await fetch(asset.signedUrl);
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          evalReferences.push({ role, base64: buf.toString("base64") });
+        }
+      } catch { /* skip if download fails */ }
+    }
+
+    if (selectedAssets) {
+      await addEvalRef(selectedAssets.logo, "SCHOOL LOGO — verify this matches exactly", "school-assets");
+      await addEvalRef(selectedAssets.header, "SCHOOL HEADER — verify this is reproduced", "school-assets");
+      await addEvalRef(selectedAssets.footer, "SCHOOL FOOTER — verify this is reproduced", "school-assets");
+      // Include one sample for quality comparison
+      if (selectedAssets.samples?.[0]) {
+        await addEvalRef(selectedAssets.samples[0], "STYLE REFERENCE — poster should match this quality level", "school-assets");
+      }
+    }
+
+    // Include uploaded photos so evaluator can check they're used as-is
+    if (brief.selectedImages.length > 0) {
+      for (const img of brief.selectedImages.slice(0, 3)) {
+        const upload = ctx.images.find((u) =>
+          u.path === img.path || u.path.endsWith(img.path) || img.path.endsWith(u.path.split("/").pop() ?? "")
+        );
+        if (upload?.signedUrl) {
+          try {
+            const res = await fetch(upload.signedUrl);
+            if (res.ok) {
+              const buf = Buffer.from(await res.arrayBuffer());
+              evalReferences.push({ role: `UPLOADED PHOTO — verify this appears as-is in the poster`, base64: buf.toString("base64") });
+            }
+          } catch { /* skip */ }
+        }
+      }
+    }
+
+    const evaluation = await evaluatePoster(imageBase64, brief, ctx.schoolName, evalReferences);
 
     // Log evaluation in the variation's creative brief
     await admin
