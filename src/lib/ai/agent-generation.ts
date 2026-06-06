@@ -147,8 +147,13 @@ export async function runGenerationAgent(
 
   const referenceImages: { buffer: Buffer; name: string }[] = [];
 
-  // Always include: logo, header, footer, sample posters (both modes)
-  const alwaysInclude = ["logo", "header", "footer", "sample"];
+  // Always include: logo, header, footer (both modes)
+  const alwaysInclude = ["logo", "header", "footer"];
+
+  // Randomly pick 3 sample posters as style reference for the image model
+  const sampleAssets = input.brandAssets.filter((a) => a.assetType === "sample");
+  const shuffledSamples = [...sampleAssets].sort(() => Math.random() - 0.5).slice(0, 3);
+
   for (const asset of input.brandAssets) {
     if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
       const buf = await downloadImage(asset.signedUrl);
@@ -156,6 +161,19 @@ export async function runGenerationAgent(
         referenceImages.push({
           buffer: buf,
           name: `brand-${asset.assetType}-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+        });
+      }
+    }
+  }
+
+  // Include random sample posters as style reference (both modes)
+  for (const sample of shuffledSamples) {
+    if (sample.signedUrl) {
+      const buf = await downloadImage(sample.signedUrl);
+      if (buf) {
+        referenceImages.push({
+          buffer: buf,
+          name: `style-sample-${sample.storagePath.split("/").pop() ?? "sample.png"}`,
         });
       }
     }

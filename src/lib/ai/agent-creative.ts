@@ -178,13 +178,19 @@ Create 1 creative direction brief. Make it the strongest possible direction for 
     | { type: "image_url"; image_url: { url: string; detail: "high" } }
   > = [{ type: "text", text: userMessage }];
 
-  // Attach sample posters FIRST as style inspiration
+  // Attach a RANDOM set of sample posters as style inspiration.
+  // Randomizing ensures the creative agent gets fresh references on every
+  // run, which naturally produces more variety in output.
   if (sampleAssets.length > 0) {
+    // Shuffle and pick up to 10
+    const shuffled = [...sampleAssets].sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, 10);
+
     userContent.push({
       type: "text",
-      text: `\n## STYLE REFERENCE — Sample Posters from this school\nStudy these carefully. These are real posters previously designed for this school. Your creative brief should match this level of quality and follow a similar design language:\n- Same type of layout structure (header bar, hero section, icon grid, footer bar)\n- Similar typography treatment (mixed bold/script fonts, clear hierarchy)\n- Same level of visual richness and compositing\n- School-specific branding elements integrated naturally\nAnalyze each sample and extract the design patterns.`,
+      text: `\n## STYLE REFERENCE — ${selected.length} Sample Posters from this school (randomly selected from ${sampleAssets.length} total)\nStudy these carefully. These are real posters previously designed for this school. Your creative brief should match this level of quality and follow a similar design language:\n- Same type of layout structure (header bar, hero section, icon grid, footer bar)\n- Similar typography treatment (mixed bold/script fonts, clear hierarchy)\n- Same level of visual richness and compositing\n- School-specific branding elements integrated naturally\n- Note the contact bar at the bottom with phone, website, address\nAnalyze each sample and extract the design patterns. Do NOT copy any specific poster — create something original that feels like it belongs in the same series.`,
     });
-    for (const sample of sampleAssets.slice(0, 5)) {
+    for (const sample of selected) {
       if (sample.signedUrl) {
         userContent.push({
           type: "image_url",
