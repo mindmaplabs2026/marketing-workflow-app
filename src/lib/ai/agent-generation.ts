@@ -8,6 +8,7 @@ type BrandAssetFile = {
   assetType: string;
   storagePath: string;
   signedUrl: string;
+  label?: string | null;
 };
 
 type CuratedImageFile = {
@@ -144,7 +145,7 @@ export async function runGenerationAgent(
   const hasUploadedPhotos = input.curatedImages.length > 0 &&
     brief.selectedImages.length > 0;
 
-  const referenceImages: { buffer: Buffer; name: string }[] = [];
+  const referenceImages: { buffer: Buffer; name: string; role: string }[] = [];
 
   // Always include: logo, header, footer (both modes)
   const alwaysInclude = ["logo", "header", "footer"];
@@ -153,14 +154,19 @@ export async function runGenerationAgent(
   const sampleAssets = input.brandAssets.filter((a) => a.assetType === "sample");
   const shuffledSamples = [...sampleAssets].sort(() => Math.random() - 0.5).slice(0, 3);
 
+  let imageIndex = 1;
+
   for (const asset of input.brandAssets) {
     if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
       const buf = await downloadImage(asset.signedUrl);
       if (buf) {
+        const label = asset.label ?? asset.storagePath.split("/").pop() ?? "asset";
         referenceImages.push({
           buffer: buf,
-          name: `brand-${asset.assetType}-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+          name: `image${imageIndex}_${asset.assetType}.png`,
+          role: `IMAGE ${imageIndex}: SCHOOL ${asset.assetType.toUpperCase()} — "${label}"`,
         });
+        imageIndex++;
       }
     }
   }
@@ -170,10 +176,13 @@ export async function runGenerationAgent(
     if (sample.signedUrl) {
       const buf = await downloadImage(sample.signedUrl);
       if (buf) {
+        const label = sample.label ?? sample.storagePath.split("/").pop() ?? "sample";
         referenceImages.push({
           buffer: buf,
-          name: `style-sample-${sample.storagePath.split("/").pop() ?? "sample.png"}`,
+          name: `image${imageIndex}_sample.png`,
+          role: `IMAGE ${imageIndex}: STYLE REFERENCE POSTER — "${label}". Study this poster's layout, typography, and design quality. Match this standard.`,
         });
+        imageIndex++;
       }
     }
   }
@@ -190,8 +199,10 @@ export async function runGenerationAgent(
         if (buf) {
           referenceImages.push({
             buffer: buf,
-            name: imgFilename || "upload.png",
+            name: `image${imageIndex}_photo.png`,
+            role: `IMAGE ${imageIndex}: UPLOADED PHOTO — "${imgFilename}". Include this photo AS-IS in the poster. Do NOT modify or redraw it.`,
           });
+          imageIndex++;
         }
       }
     }
@@ -202,10 +213,13 @@ export async function runGenerationAgent(
       if (styleAssets.includes(asset.assetType) && asset.signedUrl) {
         const buf = await downloadImage(asset.signedUrl);
         if (buf) {
+          const label = asset.label ?? asset.storagePath.split("/").pop() ?? "asset";
           referenceImages.push({
             buffer: buf,
-            name: `brand-${asset.assetType}-${asset.storagePath.split("/").pop() ?? "asset.png"}`,
+            name: `image${imageIndex}_${asset.assetType}.png`,
+            role: `IMAGE ${imageIndex}: ${asset.assetType.toUpperCase()} REFERENCE — "${label}". Use as visual style guide for AI-generated ${asset.assetType}.`,
           });
+          imageIndex++;
         }
       }
     }
@@ -218,7 +232,12 @@ export async function runGenerationAgent(
       ? `\n\nThis is page ${i + 1} of ${pages.length} in a carousel. ${page.description}`
       : "";
 
-    const rawPrompt = buildImagePrompt(input, page, pageContext);
+    // Build image manifest so the model knows exactly what each reference image is
+    const imageManifest = referenceImages.length > 0
+      ? `\n## REFERENCE IMAGE MANIFEST\nYou are receiving ${referenceImages.length} reference images alongside this prompt. Here is what each one is:\n${referenceImages.map((r) => `- ${r.role}`).join("\n")}\n\nYou MUST use these reference images as described above. The logo must appear in the final poster. The header and footer must be replicated. Sample posters show the quality standard to match.`
+      : "";
+
+    const rawPrompt = buildImagePrompt(input, page, pageContext) + imageManifest;
 
     // Prompt enhancer: expand the raw prompt into a highly detailed,
     // production-quality image generation prompt (like ChatGPT does internally)
@@ -456,32 +475,33 @@ export async function refineAndRegenerate(
     max_tokens: 1500,
   });
 
-  const refinedPrompt = refined.choices[0]?.message?.content ?? originalPrompt;
+  let refinedPrompt = refined.choices[0]?.message?.content ?? originalPrompt;
 
   // Regenerate with the refined prompt
   const imageSize = "1024x1536" as const;
   const { brief } = input;
 
-  // Collect reference images (same logic as runGenerationAgent)
+  // Collect reference images with roles (same logic as runGenerationAgent)
   const hasUploadedPhotos = input.curatedImages.length > 0 && brief.selectedImages.length > 0;
-  const referenceImages: { buffer: Buffer; name: string }[] = [];
+  const referenceImages: { buffer: Buffer; name: string; role: string }[] = [];
+  let idx = 1;
 
   const alwaysInclude = ["logo", "header", "footer"];
   for (const asset of input.brandAssets) {
     if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
       const buf = await downloadImage(asset.signedUrl);
       if (buf) {
-        referenceImages.push({ buffer: buf, name: `brand-${asset.assetType}.png` });
+        referenceImages.push({ buffer: buf, name: `image${idx}_${asset.assetType}.png`, role: `IMAGE ${idx}: SCHOOL ${asset.assetType.toUpperCase()}` });
+        idx++;
       }
     }
   }
 
-  // Add samples
   const samples = input.brandAssets.filter((a) => a.assetType === "sample");
   for (const s of samples.sort(() => Math.random() - 0.5).slice(0, 3)) {
     if (s.signedUrl) {
       const buf = await downloadImage(s.signedUrl);
-      if (buf) referenceImages.push({ buffer: buf, name: `style-sample.png` });
+      if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_sample.png`, role: `IMAGE ${idx}: STYLE REFERENCE POSTER` }); idx++; }
     }
   }
 
@@ -493,16 +513,22 @@ export async function refineAndRegenerate(
         [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
       if (isSelected) {
         const buf = await downloadImage(img.signedUrl);
-        if (buf) referenceImages.push({ buffer: buf, name: imgFilename });
+        if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_photo.png`, role: `IMAGE ${idx}: UPLOADED PHOTO` }); idx++; }
       }
     }
   } else {
     for (const asset of input.brandAssets) {
       if (["uniform", "infrastructure"].includes(asset.assetType) && asset.signedUrl) {
         const buf = await downloadImage(asset.signedUrl);
-        if (buf) referenceImages.push({ buffer: buf, name: `brand-${asset.assetType}.png` });
+        if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_${asset.assetType}.png`, role: `IMAGE ${idx}: ${asset.assetType.toUpperCase()} REFERENCE` }); idx++; }
       }
     }
+  }
+
+  // Add manifest to the refined prompt
+  if (referenceImages.length > 0) {
+    const manifest = `\n\nREFERENCE IMAGE MANIFEST:\n${referenceImages.map((r) => `- ${r.role}`).join("\n")}\nUse these reference images as described.`;
+    refinedPrompt += manifest;
   }
 
   let base64: string;
