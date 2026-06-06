@@ -89,59 +89,59 @@ export function AiGenerationStatus({
         AI is generating your posters
       </p>
       <p className="mt-1 text-xs text-zinc-500">
-        This takes about 20-30 minutes. You&apos;ll get a notification when
-        it&apos;s ready.
+        You&apos;ll get a notification when it&apos;s ready.
       </p>
 
-      <div className="mt-4 flex items-center gap-1">
+      <div className="mt-4 flex items-center">
         {STEPS.map((step, i) => {
           const stepOrder = STEP_ORDER[step.key];
           const isActive = stepOrder === currentOrder;
           const isDone = stepOrder < currentOrder;
 
           return (
-            <div key={step.key} className="flex flex-1 flex-col items-center">
-              <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-colors ${
-                  isDone
-                    ? "bg-violet-600 text-white"
-                    : isActive
-                      ? "bg-violet-100 text-violet-700 ring-2 ring-violet-600 dark:bg-violet-900/30 dark:text-violet-300"
-                      : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800"
-                }`}
-              >
-                {isDone ? "✓" : i + 1}
-              </div>
-              <p
-                className={`mt-1.5 text-center text-[10px] leading-tight ${
-                  isActive
-                    ? "font-medium text-violet-700 dark:text-violet-300"
-                    : isDone
-                      ? "text-zinc-600 dark:text-zinc-400"
-                      : "text-zinc-400"
-                }`}
-              >
-                {step.label}
-              </p>
-              {i < STEPS.length - 1 && (
+            <div key={step.key} className="flex flex-1 items-center">
+              {i > 0 && (
                 <div
-                  className={`absolute h-0.5 w-full ${isDone ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"}`}
+                  className={`h-0.5 flex-1 ${isDone ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"}`}
                 />
               )}
+              <div className="flex flex-col items-center">
+                <div
+                  className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium transition-colors ${
+                    isDone
+                      ? "bg-violet-600 text-white"
+                      : isActive
+                        ? "bg-violet-100 text-violet-700 ring-2 ring-violet-600 dark:bg-violet-900/30 dark:text-violet-300"
+                        : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800"
+                  }`}
+                >
+                  {isDone ? "✓" : i + 1}
+                </div>
+                <p
+                  className={`mt-1 text-center text-[10px] leading-tight ${
+                    isActive
+                      ? "font-medium text-violet-700 dark:text-violet-300"
+                      : isDone
+                        ? "text-zinc-600 dark:text-zinc-400"
+                        : "text-zinc-400"
+                  }`}
+                >
+                  {step.label}
+                </p>
+              </div>
             </div>
           );
         })}
       </div>
 
       {status !== "completed" && (
-        <div className="mt-4 flex items-center gap-2">
+        <div className="mt-3 flex items-center gap-2">
           <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-600" />
           <p className="text-xs text-zinc-500">
             {status === "queued" && "Waiting in queue…"}
             {status === "understanding" && "Analyzing your images and theme…"}
-            {status === "creative" &&
-              "Researching design trends and creating briefs…"}
-            {status === "generating" && "Generating poster variations…"}
+            {status === "creative" && "Researching trends and creating brief…"}
+            {status === "generating" && "Generating poster…"}
           </p>
         </div>
       )}

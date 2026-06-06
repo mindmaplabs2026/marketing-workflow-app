@@ -10,11 +10,18 @@ type ChatMessage = {
   created_at: string;
 };
 
-type ChatResponse = {
-  message: string;
-  imagePaths: string[];
-  imageUrl: string | null;
+type SubmitResponse = {
+  status: "processing";
+  userMessageId: string;
   roundsRemaining: number;
+  error?: string;
+};
+
+type PollResponse = {
+  status: "processing" | "complete";
+  message?: string;
+  imageUrl?: string | null;
+  imagePaths?: string[];
   error?: string;
 };
 
@@ -47,6 +54,57 @@ export function VariationChat({
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  async function pollForResponse(messageId: string): Promise<void> {
+    // First poll after 60s, then every 30s
+    await new Promise((r) => setTimeout(r, 60000));
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const res = await fetch(`/api/ai/chat?message_id=${messageId}`);
+        const data = (await res.json()) as PollResponse;
+
+        if (data.status === "complete" && data.message) {
+          const assistantMsg: ChatMessage = {
+            id: `resp-${Date.now()}`,
+            role: "assistant",
+            content: data.message,
+            imageUrls: data.imageUrl ? [data.imageUrl] : [],
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+
+          if (data.imageUrl) {
+            setCurrentUrls((prev) => {
+              const updated = [...prev];
+              if (posterType === "single" || updated.length <= 1) {
+                updated[0] = data.imageUrl!;
+              } else {
+                updated[activePage] = data.imageUrl!;
+              }
+              return updated;
+            });
+          }
+
+          setTimeout(() => {
+            scrollRef.current?.scrollTo({
+              top: scrollRef.current.scrollHeight,
+              behavior: "smooth",
+            });
+          }, 100);
+          return;
+        }
+      } catch {
+        // Network error — keep polling
+      }
+
+      // Wait 30s before next poll
+      await new Promise((r) => setTimeout(r, 30000));
+    }
+
+    // Gave up after ~6 minutes
+    setError("Edit is taking longer than expected. Refresh the page to check.");
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || sending) return;
@@ -69,6 +127,7 @@ export function VariationChat({
     setInput("");
 
     try {
+      // Submit the message — returns immediately
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -78,7 +137,7 @@ export function VariationChat({
         }),
       });
 
-      const data = (await res.json()) as ChatResponse;
+      const data = (await res.json()) as SubmitResponse;
 
       if (!res.ok || data.error) {
         setError(data.error ?? "Something went wrong.");
@@ -86,35 +145,10 @@ export function VariationChat({
         return;
       }
 
-      const assistantMsg: ChatMessage = {
-        id: `resp-${Date.now()}`,
-        role: "assistant",
-        content: data.message,
-        imageUrls: data.imageUrl ? [data.imageUrl] : [],
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
       setRounds(maxRounds - data.roundsRemaining);
 
-      if (data.imageUrl) {
-        setCurrentUrls((prev) => {
-          const updated = [...prev];
-          // For single poster, replace. For carousel, replace active page.
-          if (posterType === "single" || updated.length <= 1) {
-            updated[0] = data.imageUrl!;
-          } else {
-            updated[activePage] = data.imageUrl!;
-          }
-          return updated;
-        });
-      }
-
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({
-          top: scrollRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      }, 100);
+      // Poll for the assistant's response
+      await pollForResponse(data.userMessageId);
     } catch {
       setError("Failed to send message.");
     } finally {

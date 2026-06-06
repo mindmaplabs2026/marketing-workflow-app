@@ -7,6 +7,7 @@ import {
   aiPipelineEvaluate,
   aiPipelineRefine,
 } from "@/lib/inngest/functions/ai-pipeline";
+import { aiChatEdit } from "@/lib/inngest/functions/ai-chat";
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -16,5 +17,6 @@ export const { GET, POST, PUT } = serve({
     aiPipelineGenerateV1,
     aiPipelineEvaluate,
     aiPipelineRefine,
+    aiChatEdit,
   ],
 });
