@@ -24,12 +24,13 @@ export function BrandAssetUpload({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  async function onFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
 
-    if (file.size > MAX_FILE_BYTES) {
-      setError("File is over 25 MB.");
+    const tooBig = files.find((f) => f.size > MAX_FILE_BYTES);
+    if (tooBig) {
+      setError(`${tooBig.name} is over 25 MB.`);
       e.target.value = "";
       return;
     }
@@ -39,29 +40,31 @@ export function BrandAssetUpload({
 
     try {
       const supabase = createClient();
-      const path = `${schoolId}/${assetType}/${Date.now()}-${sanitizeName(file.name)}`;
 
-      const { error: upErr } = await supabase.storage
-        .from("school-assets")
-        .upload(path, file, {
-          contentType: file.type || undefined,
-          upsert: false,
-        });
+      for (const file of files) {
+        const path = `${schoolId}/${assetType}/${Date.now()}-${sanitizeName(file.name)}`;
 
-      if (upErr) {
-        setError(upErr.message);
-        setBusy(false);
-        return;
+        const { error: upErr } = await supabase.storage
+          .from("school-assets")
+          .upload(path, file, {
+            contentType: file.type || undefined,
+            upsert: false,
+          });
+
+        if (upErr) {
+          setError(`${file.name}: ${upErr.message}`);
+          continue;
+        }
+
+        const fd = new FormData();
+        fd.set("school_id", schoolId);
+        fd.set("asset_type", assetType);
+        fd.set("storage_path", path);
+        fd.set("mime_type", file.type || "");
+        fd.set("file_size", String(file.size));
+        fd.set("label", file.name);
+        await attachBrandAsset(fd);
       }
-
-      const fd = new FormData();
-      fd.set("school_id", schoolId);
-      fd.set("asset_type", assetType);
-      fd.set("storage_path", path);
-      fd.set("mime_type", file.type || "");
-      fd.set("file_size", String(file.size));
-      fd.set("label", file.name);
-      await attachBrandAsset(fd);
 
       router.refresh();
     } catch (err) {
@@ -78,7 +81,8 @@ export function BrandAssetUpload({
         ref={fileRef}
         type="file"
         accept="image/*"
-        onChange={onFileSelected}
+        multiple
+        onChange={onFilesSelected}
         className="sr-only"
       />
       <button

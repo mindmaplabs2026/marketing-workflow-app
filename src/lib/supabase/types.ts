@@ -82,18 +82,21 @@ export type Database = {
         Row: {
           id: string;
           name: string;
+          ai_guidelines: string | null;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
         Insert: {
           id?: string;
           name: string;
+          ai_guidelines?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };
         Update: {
           id?: string;
           name?: string;
+          ai_guidelines?: string | null;
           created_at?: Timestamp;
           updated_at?: Timestamp;
         };

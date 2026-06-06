@@ -80,6 +80,21 @@ export async function attachBrandAsset(formData: FormData) {
   revalidatePath(`/admin/schools/${schoolId}/brand-assets`);
 }
 
+export async function updateSchoolGuidelines(formData: FormData) {
+  const schoolId = String(formData.get("school_id") ?? "");
+  const guidelines = String(formData.get("guidelines") ?? "").trim() || null;
+  if (!schoolId) return;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("schools")
+    .update({ ai_guidelines: guidelines })
+    .eq("id", schoolId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/admin/schools/${schoolId}/brand-assets`);
+}
+
 export async function removeBrandAsset(formData: FormData) {
   const assetId = String(formData.get("asset_id") ?? "");
   const schoolId = String(formData.get("school_id") ?? "");

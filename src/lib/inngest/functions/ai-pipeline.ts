@@ -41,7 +41,7 @@ async function fetchContext(requestId: string) {
 
   const { data: school } = await admin
     .from("schools")
-    .select("name")
+    .select("name, ai_guidelines")
     .eq("id", request.school_id)
     .single();
 
@@ -88,6 +88,7 @@ async function fetchContext(requestId: string) {
     description: request.description,
     schoolId: request.school_id,
     schoolName: school?.name ?? "School",
+    schoolGuidelines: school?.ai_guidelines ?? null,
     images,
     brandAssets: brandAssetsWithUrls,
   };
@@ -233,6 +234,7 @@ export const aiPipelineAnalyze = inngest.createFunction(
       brandAssets: ctx2.brandAssets,
       posterType,
       schoolName: ctx2.schoolName,
+      schoolGuidelines: ctx2.schoolGuidelines,
     });
 
     await admin

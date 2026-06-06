@@ -1,10 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/auth";
-import { removeBrandAsset } from "../actions";
+import { removeBrandAsset, updateSchoolGuidelines } from "../actions";
 import { BrandAssetUpload } from "./brand-asset-upload";
 import { ConfirmForm } from "@/components/confirm-form";
 import { BackLink } from "@/components/back-link";
+import { SubmitButton } from "@/components/submit-button";
 import type { BrandAssetType } from "@/lib/supabase/types";
 
 const ASSET_TYPE_LABELS: Record<BrandAssetType, string> = {
@@ -48,7 +49,7 @@ export default async function BrandAssetsPage({
   const supabase = await createClient();
 
   const [schoolRes, assetsRes] = await Promise.all([
-    supabase.from("schools").select("id, name").eq("id", schoolId).single(),
+    supabase.from("schools").select("id, name, ai_guidelines").eq("id", schoolId).single(),
     supabase
       .from("school_brand_assets")
       .select("id, asset_type, storage_path, mime_type, label, created_at")
@@ -92,6 +93,36 @@ export default async function BrandAssetsPage({
           images. These are used by the AI poster generator.
         </p>
       </div>
+
+      {/* School-specific AI guidelines */}
+      <section className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          AI Design Guidelines
+        </h2>
+        <p className="text-xs text-zinc-500">
+          School-specific instructions for the AI creative designer. These are
+          passed to the AI before it starts designing. Include branding rules,
+          language preferences, special requirements, etc.
+        </p>
+        <form action={updateSchoolGuidelines}>
+          <input type="hidden" name="school_id" value={schoolId} />
+          <textarea
+            name="guidelines"
+            rows={5}
+            defaultValue={school.ai_guidelines ?? ""}
+            placeholder={"e.g.\n- Always include both SMC and SMPS logos side by side\n- Use Kannada tagline below school name\n- Primary colors: navy blue (#1B3A5C) and gold (#C4A035)\n- Include affiliation badges (CBSE 830987, IGCSE IA 109)\n- Contact bar at bottom: phone, website, address\n- Include curriculum info: Nursery to Grade X"}
+            className="block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          />
+          <div className="mt-2">
+            <SubmitButton
+              className="rounded-md border border-zinc-300 bg-white px-4 py-1.5 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              pendingLabel="Saving..."
+            >
+              Save guidelines
+            </SubmitButton>
+          </div>
+        </form>
+      </section>
 
       {ASSET_TYPES.map((type) => {
         const items = grouped.get(type) ?? [];

@@ -55,6 +55,7 @@ type Agent2Input = {
   brandAssets: BrandAsset[];
   posterType: "single" | "carousel";
   schoolName: string;
+  schoolGuidelines?: string | null;
 };
 
 const SYSTEM_PROMPT = `You are an expert creative director specializing in school marketing posters for Instagram.
@@ -166,6 +167,8 @@ ${curatedImagesSummary || "(No images uploaded — event-based poster, generate 
 
 ## School Brand Assets
 ${brandAssetSummary || "(No brand assets configured yet)"}
+
+${input.schoolGuidelines ? `## SCHOOL-SPECIFIC GUIDELINES (MUST FOLLOW)\nThese are mandatory instructions from the school admin. Follow them precisely:\n${input.schoolGuidelines}` : ""}
 
 Create 1 creative direction brief. Make it the strongest possible direction for this theme.`;
 
