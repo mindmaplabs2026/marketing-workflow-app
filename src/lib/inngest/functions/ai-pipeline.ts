@@ -156,14 +156,14 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
   // Collect selected images — for carousel, Agent 2 assigns photos at page level,
   // not brief level. We need to gather from both to build the full set.
   const imagePaths = new Set<string>();
-  for (const img of brief.selectedImages) {
-    imagePaths.add(img.path);
+  for (const img of brief.selectedImages ?? []) {
+    if (img?.path) imagePaths.add(img.path);
   }
   // Also collect from page-level selections (carousel)
   if (brief.layout?.pages) {
     for (const page of brief.layout.pages) {
       for (const img of page.selectedImages ?? []) {
-        imagePaths.add(img.path);
+        if (img?.path) imagePaths.add(img.path);
       }
     }
   }
@@ -202,7 +202,8 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
     // Build pool of all available curated images (for filling gaps)
     const allCuratedPaths = understanding.curatedImages
       .map((c) => c.path)
-      .filter((path) => {
+      .filter((path): path is string => {
+        if (!path) return false;
         const fn = path.split("/").pop() ?? "";
         return ctx.images.some((i) =>
           i.path === path || i.path.endsWith(path) || i.path.split("/").pop() === fn
@@ -213,7 +214,7 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
     const assignedPaths = new Set<string>();
     for (const page of brief.layout.pages) {
       for (const img of page.selectedImages ?? []) {
-        assignedPaths.add(img.path);
+        if (img?.path) assignedPaths.add(img.path);
       }
     }
 
@@ -267,7 +268,7 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
       const correctedPaths = new Set<string>();
       for (const page of brief.layout.pages) {
         for (const img of page.selectedImages ?? []) {
-          correctedPaths.add(img.path);
+          if (img?.path) correctedPaths.add(img.path);
         }
       }
       for (const imgPath of correctedPaths) {
