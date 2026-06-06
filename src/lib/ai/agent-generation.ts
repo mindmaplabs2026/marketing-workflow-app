@@ -272,10 +272,10 @@ export async function runGenerationAgent(
     }
   }
 
-  // For carousels, extract per-page vision from the creativeVision field
+  // For carousels, per-page vision comes from page.creativeVision directly.
+  // Top-level creativeVision contains shared visual consistency rules only.
   const briefAny = brief as Record<string, unknown>;
   const fullCreativeVision = (briefAny.creativeVision as string) ?? "";
-  const pageVisions = parsePageVisions(fullCreativeVision, pages.length);
   const isCarousel = brief.layout.type === "carousel";
   const brandRefImages = referenceImages.filter((r) => !r.role.includes("UPLOADED PHOTO"));
 
@@ -327,7 +327,7 @@ export async function runGenerationAgent(
       ? `\n\nReference images provided (${pageReferenceImages.length} total):\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\n${copyInstructions}.`
       : "";
 
-    const rawPrompt = buildImagePrompt(input, page, i, pages.length, pageVisions, { hasLogo, hasHeader, hasFooter });
+    const rawPrompt = buildImagePrompt(input, page, i, pages.length, fullCreativeVision, { hasLogo, hasHeader, hasFooter });
 
     const enhancerSystemPrompt = isCarousel
       ? `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt for ONE PAGE of a carousel.
@@ -461,51 +461,35 @@ Rules:
   };
 }
 
-/**
- * Parses the creativeVision field to extract per-page descriptions for carousels.
- * Looks for "PAGE 1:", "PAGE 2:", etc. and a "VISUAL CONSISTENCY:" section.
- */
-function parsePageVisions(creativeVision: string, pageCount: number): { consistency: string; pages: string[] } {
-  const consistency = creativeVision.match(/VISUAL CONSISTENCY[:\s]*([\s\S]*?)(?=PAGE \d|$)/i)?.[1]?.trim() ?? "";
-  const pages: string[] = [];
-  for (let i = 1; i <= pageCount; i++) {
-    const pattern = new RegExp(`PAGE ${i}[:\\s]*([\\s\\S]*?)(?=PAGE ${i + 1}[:\\s]|$)`, "i");
-    const match = creativeVision.match(pattern);
-    pages.push(match?.[1]?.trim() ?? "");
-  }
-  return { consistency, pages };
-}
-
 function buildImagePrompt(
   input: Agent3Input,
-  page: { description: string; selectedImages: { path: string; placement: string; size: string }[]; textOverlays: { text: string; position: string; style: string }[] } | undefined,
+  page: { description: string; selectedImages: { path: string; placement: string; size: string }[]; textOverlays: { text: string; position: string; style: string }[]; creativeVision?: string; designPrompt?: string } | undefined,
   pageIndex: number,
   totalPages: number,
-  pageVisions: { consistency: string; pages: string[] },
+  topLevelCreativeVision: string,
   assets: { hasLogo: boolean; hasHeader: boolean; hasFooter: boolean } = { hasLogo: true, hasHeader: true, hasFooter: true },
 ): string {
   const { hasLogo, hasHeader, hasFooter } = assets;
   const { brief, understanding, schoolName, curatedImages } = input;
   const isCarousel = brief.layout.type === "carousel" && totalPages > 1;
 
-  // Use creativeVision as primary (rich narrative), fall back to designPrompt
-  const briefAny = brief as Record<string, unknown>;
-  const fullCreativeVision = (briefAny.creativeVision as string) ?? "";
   const designPrompt = brief.designPrompt ?? "";
 
-  // For carousels, use per-page vision; for single, use the full vision
+  // For carousels: per-page creativeVision comes directly from the page object.
+  // Top-level creativeVision contains only shared visual consistency rules.
+  // For single: top-level creativeVision is the full vision.
   let visionSection: string;
   if (isCarousel) {
-    const pageVision = pageVisions.pages[pageIndex] || page?.description || "";
-    const consistencyBlock = pageVisions.consistency
-      ? `## Visual Consistency (shared across ALL ${totalPages} pages)\n${pageVisions.consistency}\n\n`
+    const pageVision = page?.creativeVision || page?.description || "";
+    const consistencyBlock = topLevelCreativeVision
+      ? `## Visual Consistency (shared across ALL ${totalPages} pages)\n${topLevelCreativeVision}\n\n`
       : "";
     visionSection = `${consistencyBlock}## This Page (page ${pageIndex + 1} of ${totalPages})
-${pageVision || page?.description || ""}
+${pageVision}
 
 ${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) => `- "${t.text}" at ${t.position}, ${t.style}`).join("\n")}` : ""}`;
   } else {
-    visionSection = fullCreativeVision || designPrompt;
+    visionSection = topLevelCreativeVision || designPrompt;
   }
 
   // For carousels, prefer page-level selectedImages, fall back to brief-level
