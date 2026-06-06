@@ -218,18 +218,63 @@ Create 1 creative direction brief. Make it the strongest possible direction for 
     }
   }
 
-  const response = await openai.chat.completions.create({
+  // Build input for the Responses API (supports web_search tool)
+  const inputItems: Array<
+    | { role: "developer" | "user"; content: string | Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string; detail: "high" }>; type: "message" }
+  > = [
+    {
+      role: "developer",
+      content: SYSTEM_PROMPT,
+      type: "message",
+    },
+    {
+      role: "user",
+      content: userContent.map((item) => {
+        if (item.type === "text") {
+          return { type: "input_text" as const, text: item.text };
+        }
+        return {
+          type: "input_image" as const,
+          image_url: item.image_url.url,
+          detail: "high" as const,
+        };
+      }),
+      type: "message",
+    },
+  ];
+
+  // Use Responses API with web_search tool so the agent can research
+  // current design trends, color palettes, and visual styles on its own
+  const response = await openai.responses.create({
     model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userContent },
+    input: inputItems,
+    tools: [
+      {
+        type: "web_search",
+        search_context_size: "medium",
+      },
     ],
-    response_format: { type: "json_object" },
-    max_tokens: 8192,
+    instructions: "After researching current design trends for the theme using web search, return ONLY valid JSON matching the schema in the system instructions. Do not include any text outside the JSON.",
+    max_output_tokens: 8192,
   });
 
-  const raw = response.choices[0]?.message?.content;
+  // Extract text content from the response output
+  let raw = "";
+  for (const item of response.output) {
+    if (item.type === "message" && item.content) {
+      for (const part of item.content) {
+        if (part.type === "output_text") {
+          raw += part.text;
+        }
+      }
+    }
+  }
+
   if (!raw) throw new Error("Agent 2: empty response from model");
 
-  return JSON.parse(raw) as CreativeOutput;
+  // Clean up: the model might wrap JSON in markdown code fences
+  const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw.trim();
+
+  return JSON.parse(jsonStr) as CreativeOutput;
 }
