@@ -236,30 +236,28 @@ export async function runGenerationAgent(
     const orderedImages = [...logoImages, ...otherImages];
 
     const imageManifest = referenceImages.length > 0
-      ? `\n## REFERENCE IMAGE MANIFEST\nYou are receiving ${referenceImages.length} reference images alongside this prompt. Here is what each one is:\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\nCRITICAL INSTRUCTIONS FOR REFERENCE IMAGES:\n1. LOGO: The school logo reference image(s) MUST be reproduced EXACTLY — copy every detail, color, shape, icon, and text within the logo precisely. Do NOT redraw or reinterpret the logo.\n2. HEADER: Reproduce the header bar from the reference, including school name and styling.\n3. FOOTER: Reproduce the footer bar from the reference, including contact information.\n4. SAMPLE POSTERS: These show the quality standard and design language to match. Study their layout, typography mixing, and visual richness.\n5. The final poster should look like it was designed by the same designer who made the sample posters.`
+      ? `\n\nReference images provided (${referenceImages.length} total):\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\nCopy the LOGO exactly. Copy the HEADER and FOOTER exactly. Match the SAMPLE POSTERS' design quality.`
       : "";
 
     const rawPrompt = buildImagePrompt(input, page, pageContext) + imageManifest;
 
-    // Prompt enhancer: expand the raw prompt into a highly detailed,
-    // production-quality image generation prompt (like ChatGPT does internally)
+    // Prompt enhancer: expand the creative direction into detailed visual language.
+    // IMPORTANT: it must PRESERVE the reference image manifest and asset instructions exactly.
     const enhanced = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are an expert image prompt engineer. Your job is to take a poster design brief and expand it into a highly detailed, production-quality prompt for gpt-image-2.
+          content: `You are an expert image prompt engineer. Expand the poster brief into a detailed visual prompt.
 
 Rules:
-- Output ONLY the enhanced prompt text, nothing else
-- Be extremely specific about: composition, layout, typography style, color usage, spacing, visual hierarchy, lighting, texture
-- Specify exact positions (top-left, center, bottom-right, etc.)
-- Describe typography: font style (sans-serif/serif), weight, size relative to poster, color, effects (shadow, outline)
-- For Instagram posters: clean design, modern typography, strong visual hierarchy, breathing room, professional marketing quality
-- Minimize text density — a poster should be visually driven, not text-heavy. Use only headline + one short line max
-- Specify: "Instagram social media poster, portrait orientation 1080x1350px, high resolution, print-ready quality, professional graphic design"
-- If there are uploaded photos, say: "Incorporate the provided reference photographs exactly as they are, without any modification, into a collage/featured layout"
-- Describe the poster as a finished design, not a concept`,
+- Output ONLY the enhanced prompt, nothing else
+- PRESERVE all reference image instructions exactly (logo, header, footer, manifest) — do NOT rewrite or remove them
+- Expand the CREATIVE DIRECTION part: add specific details about composition, visual elements, colors, mood, lighting
+- Keep text minimal — headline + one tagline max on the poster
+- Be specific about layout: where the hero visual goes, spacing, visual flow
+- Format: Instagram portrait 1080x1350px, print-ready, professional
+- Do NOT add new text content beyond what's specified in the brief`,
         },
         { role: "user", content: rawPrompt },
       ],
@@ -342,124 +340,30 @@ function buildImagePrompt(
   page: { description: string; selectedImages: { path: string; placement: string; size: string }[]; textOverlays: { text: string; position: string; style: string }[] } | undefined,
   pageContext: string,
 ): string {
-  const { brief, understanding, schoolName, brandAssets, curatedImages } = input;
+  const { brief, schoolName, curatedImages } = input;
 
   const hasUploadedPhotos = curatedImages.length > 0 && brief.selectedImages.length > 0;
 
-  const textOverlays = page?.textOverlays
-    ?.map((t) => `- "${t.text}" at ${t.position} in ${t.style} style`)
-    .join("\n") ?? "";
+  return `Instagram poster for ${schoolName}. Portrait 1080x1350px, print-ready, professional.
 
-  // Brand assets present as reference images
-  const brandRefDescriptions = brandAssets
-    .filter((a) => ["logo", "header", "footer"].includes(a.assetType))
-    .map((a) => `- ${a.assetType}: provided as reference image`)
-    .join("\n");
+Direction: ${brief.direction}
+Theme: ${brief.theme}
+Palette: ${brief.colorPalette.join(", ")}
 
-  const hasSamples = brandAssets.some((a) => a.assetType === "sample");
-  const sampleSection = hasSamples
-    ? `\n## STYLE REFERENCE — Sample posters are provided as reference images.\nMatch the same level of visual quality, layout structure, and design polish as these samples. Study their typography, composition, and branding integration closely.`
-    : "";
+Headline: "${brief.textContent.headline}"
+${brief.textContent.subheadline ? `Tagline: "${brief.textContent.subheadline}"` : ""}
 
-  let photoSection: string;
-  let assetRules: string;
+Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}
+Header: copy from reference image → top of poster. ${brief.headerFooter.headerStyle}
+Footer: copy from reference image → bottom of poster. ${brief.headerFooter.footerStyle}
 
-  if (hasUploadedPhotos) {
-    // MODE A: Teacher uploaded photos — use as-is, do not transform
-    const imageDescriptions = brief.selectedImages
-      .map((img) => {
-        const curated = understanding.curatedImages.find((c) => c.path === img.path);
-        return curated
-          ? `- ${curated.description} (placed: ${img.placement})`
-          : `- Image at ${img.path} (placed: ${img.placement})`;
-      })
-      .join("\n");
+${hasUploadedPhotos ? "Uploaded photos are provided as reference images. Include them AS-IS — do NOT redraw, modify, or replace them." : `No uploaded photos. Generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? " Students MUST wear the school uniform from the reference image." : ""}${brief.schoolAssetUsage.useInfrastructure ? " Use the infrastructure reference for setting." : ""}`}
 
-    photoSection = `## Uploaded Photos (provided as reference images):
-${imageDescriptions}
+${pageContext ? `Page context: ${pageContext}` : ""}
 
-CRITICAL RULES FOR UPLOADED PHOTOS:
-- These are REAL photographs taken by the teacher. They are provided as reference images.
-- You MUST include these photos in the poster EXACTLY as they are — do NOT transform, edit, filter, redraw, or replace them with AI-generated versions.
-- Do NOT add uniforms, accessories, or any modifications to people in these photos.
-- Do NOT alter faces, bodies, backgrounds, or any part of the uploaded photos.
-- Arrange them in the poster layout (collage, grid, featured) but preserve them as-is.
-- You may add borders, frames, or decorative elements AROUND the photos, but never alter the photos themselves.`;
-
-    assetRules = `## School Brand Assets:
-${brandRefDescriptions || "(No brand assets)"}
-
-BRANDING RULES:
-- Use the school's actual LOGO from the reference images at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}.
-- HEADER must appear at the top of EVERY page. Use the provided header and adapt its style to the theme.
-- FOOTER must appear at the bottom of EVERY page. Use the provided footer and adapt its style to the theme.
-- Do NOT use uniform or infrastructure assets — this poster uses real uploaded photos.`;
-
-  } else {
-    // MODE B: No uploaded photos — AI generates everything from scratch
-    const styleAssets = brandAssets
-      .filter((a) => ["uniform", "infrastructure"].includes(a.assetType))
-      .map((a) => `- ${a.assetType}: provided as reference image — use as style/visual guide`)
-      .join("\n");
-
-    photoSection = `## No Uploaded Photos
-This is an event-based poster. Generate ALL imagery from scratch to match the theme.
-${brief.schoolAssetUsage.useUniform ? `- When generating students, they MUST wear the school uniform. A uniform reference image is provided — match it precisely.
-- ${brief.schoolAssetUsage.uniformNotes}` : ""}
-${brief.schoolAssetUsage.useInfrastructure ? `- Use the school infrastructure/campus images as visual reference for the setting.
-- ${brief.schoolAssetUsage.infrastructureNotes}` : ""}`;
-
-    assetRules = `## School Brand Assets:
-${brandRefDescriptions || "(No brand assets)"}
-${styleAssets ? `\n## Style Reference Assets:\n${styleAssets}` : ""}
-
-BRANDING RULES:
-- Use the school's actual LOGO from the reference images at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}.
-- HEADER must appear at the top of EVERY page. Use the provided header and adapt its style to the theme.
-- FOOTER must appear at the bottom of EVERY page. Use the provided footer and adapt its style to the theme.
-- All AI-generated imagery should match the school's visual identity (uniform colors, campus look).`;
-  }
-
-  return `Create a professional Instagram poster for ${schoolName}.
-
-## Creative Direction: ${brief.direction}
-## Theme: ${brief.theme}
-## Color Palette: ${brief.colorPalette.join(", ")}
-
-## Text Content:
-- Headline: "${brief.textContent.headline}"
-- Subheadline: "${brief.textContent.subheadline}"
-${brief.textContent.bodyText ? `- Body: "${brief.textContent.bodyText}"` : ""}
-${brief.textContent.callToAction ? `- CTA: "${brief.textContent.callToAction}"` : ""}
-
-${textOverlays ? `## Text Overlays:\n${textOverlays}` : ""}
-
-${photoSection}
-
-${assetRules}
-
-## LOGO — COPY EXACTLY FROM REFERENCE IMAGE
-Place at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}. Copy the logo EXACTLY as it appears in the reference image. Do NOT redraw, reinterpret, or simplify it.
-
-## HEADER (MANDATORY at top of every page)
-Style: ${brief.headerFooter.headerStyle}
-Copy the header from the reference image exactly as shown.
-
-## FOOTER (MANDATORY at bottom of every page)
-Style: ${brief.headerFooter.footerStyle}
-Copy the footer from the reference image exactly as shown.
-
-${pageContext}
-
-${sampleSection}
-
-## Design Prompt:
 ${brief.designPrompt}
 
-FORMAT: Instagram social media poster, portrait orientation 1080x1350px (4:5 ratio), high resolution, print-ready, professional graphic design.
-STYLE: Clean modern design, strong visual hierarchy, generous whitespace, minimal text (headline + one short tagline MAX). The poster should be VISUAL-DRIVEN, not text-heavy. Think premium magazine ad, not a flyer.
-TYPOGRAPHY: Modern sans-serif, bold headline, clean readable type with good contrast against background. No more than 2 lines of text total.
-QUALITY: Ultra high quality, commercial advertising standard, polished and professional.`;
+Style: visual-driven, minimal text, bold typography, generous whitespace, premium magazine quality. Maximum 2 lines of text on the poster.`;
 }
 
 /**
