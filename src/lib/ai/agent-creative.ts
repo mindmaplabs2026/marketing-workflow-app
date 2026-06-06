@@ -101,9 +101,11 @@ RULES for event-based posters (no uploaded photos):
 - Infrastructure images can be used as setting/background reference.
 
 RULES for school brand assets:
-- Logo MUST appear in every poster. Pick the BEST logo from the available options (some schools have multiple logos). Specify the exact storage_path in selectedAssets.
-- Header MUST appear at the top of every page. Pick ONE header. Specify its exact storage_path.
-- Footer MUST appear at the bottom of every page. Pick ONE footer. Specify its exact storage_path.
+- LOOK at each brand asset image carefully before deciding what to use. Headers often already contain the school logo.
+- If the header image ALREADY contains the logo, do NOT add a separate logo — set "logo" to null in selectedAssets to avoid redundancy (double logo).
+- Only set "logo" to a storage_path if you need a STANDALONE logo placement that isn't already covered by the header.
+- Header: pick ONE header for the top of every page, if available. Set to null if not needed.
+- Footer: pick ONE footer for the bottom of every page, if available. Set to null if not needed.
 - If uniform or infrastructure are needed, pick the most relevant one and specify its storage_path.
 - Pick 2-3 sample posters that are MOST relevant to this theme as style references. Specify their exact storage_paths.
 - IMPORTANT: Use the EXACT storage_path strings from the "School Brand Assets" list above. Do not modify them.
@@ -129,9 +131,9 @@ Return ONLY valid JSON matching this schema:
     "textContent": { "headline": "short punchy headline", "subheadline": "one short tagline", "bodyText": "", "callToAction": "" },
     "selectedImages": [{ "path": "exact filename from curated list", "placement": "description of placement" }],
     "selectedAssets": {
-      "logo": "exact storage_path of the logo to use (pick ONE from the brand assets list)",
-      "header": "exact storage_path of the header to use (pick ONE)",
-      "footer": "exact storage_path of the footer to use (pick ONE)",
+      "logo": "exact storage_path of the logo to use, or null if the header already contains the logo",
+      "header": "exact storage_path of the header to use, or null if not needed",
+      "footer": "exact storage_path of the footer to use, or null if not needed",
       "uniform": "exact storage_path or null if not needed",
       "infrastructure": "exact storage_path or null if not needed",
       "samples": ["storage_path of 2-3 sample posters to use as style reference — pick the most relevant ones for this theme"]

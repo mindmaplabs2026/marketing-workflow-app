@@ -96,8 +96,8 @@ export async function evaluatePoster(
 You will receive REFERENCE IMAGES first (logo, header, footer, sample posters, uploaded photos), then the GENERATED POSTER to evaluate.
 
 Score the poster from 1-10 on these criteria:
-- Logo accuracy: does the logo in the poster match the reference logo exactly? Same shape, colors, text?
-- Header/footer accuracy: do they match the reference header and footer?
+- Logo accuracy (if a logo reference is provided): does the logo in the poster match the reference logo exactly? Same shape, colors, text?
+- Header/footer accuracy (if provided): do they match the reference header and footer? Note: some schools' headers already include the logo, so a separate logo may not be present.
 - Uploaded photo usage: if uploaded photos were provided, are they included as-is (not redrawn)?
 - Style match: does the design quality match the sample poster references?
 - Typography: is text legible, well-sized, not too much text?
@@ -192,11 +192,16 @@ export async function runGenerationAgent(
     imageIndex++;
   }
 
+  // Track which assets Agent 2 actually selected (may be null if redundant)
+  let hasLogo = false;
+  let hasHeader = false;
+  let hasFooter = false;
+
   if (selectedAssets) {
-    // Agent 2 specified exactly which assets to use
-    await addAsset(selectedAssets.logo, "SCHOOL LOGO — Copy this EXACTLY. Do NOT redraw", "logo");
-    await addAsset(selectedAssets.header, "SCHOOL HEADER — Copy this exactly at the top", "header");
-    await addAsset(selectedAssets.footer, "SCHOOL FOOTER — Copy this exactly at the bottom", "footer");
+    // Agent 2 specified exactly which assets to use (null means intentionally skipped)
+    if (selectedAssets.logo) { await addAsset(selectedAssets.logo, "SCHOOL LOGO — Copy this EXACTLY. Do NOT redraw", "logo"); hasLogo = referenceImages.some((r) => r.role.includes("LOGO")); }
+    if (selectedAssets.header) { await addAsset(selectedAssets.header, "SCHOOL HEADER — Copy this exactly at the top", "header"); hasHeader = referenceImages.some((r) => r.role.includes("HEADER")); }
+    if (selectedAssets.footer) { await addAsset(selectedAssets.footer, "SCHOOL FOOTER — Copy this exactly at the bottom", "footer"); hasFooter = referenceImages.some((r) => r.role.includes("FOOTER")); }
     await addAsset(selectedAssets.uniform, "UNIFORM REFERENCE — Match this for any AI-generated students", "uniform");
     await addAsset(selectedAssets.infrastructure, "INFRASTRUCTURE REFERENCE — Use as setting/background guide", "infrastructure");
 
@@ -209,7 +214,12 @@ export async function runGenerationAgent(
     // Use one of each core type.
     for (const assetType of ["logo", "header", "footer"] as const) {
       const asset = input.brandAssets.find((a) => a.assetType === assetType);
-      if (asset) await addAsset(asset.storagePath, `SCHOOL ${assetType.toUpperCase()}`, assetType);
+      if (asset) {
+        await addAsset(asset.storagePath, `SCHOOL ${assetType.toUpperCase()}`, assetType);
+        if (assetType === "logo") hasLogo = true;
+        if (assetType === "header") hasHeader = true;
+        if (assetType === "footer") hasFooter = true;
+      }
     }
     if (brief.schoolAssetUsage.useUniform) {
       const asset = input.brandAssets.find((a) => a.assetType === "uniform");
@@ -261,11 +271,18 @@ export async function runGenerationAgent(
     const otherImages = referenceImages.filter((r) => !r.role.includes("LOGO"));
     const orderedImages = [...logoImages, ...otherImages];
 
+    const copyInstructions = [
+      hasLogo ? "Copy the LOGO exactly" : null,
+      hasHeader ? "Copy the HEADER exactly" : null,
+      hasFooter ? "Copy the FOOTER exactly" : null,
+      "Match the SAMPLE POSTERS' design quality",
+    ].filter(Boolean).join(". ");
+
     const imageManifest = referenceImages.length > 0
-      ? `\n\nReference images provided (${referenceImages.length} total):\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\nCopy the LOGO exactly. Copy the HEADER and FOOTER exactly. Match the SAMPLE POSTERS' design quality.`
+      ? `\n\nReference images provided (${referenceImages.length} total):\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\n${copyInstructions}.`
       : "";
 
-    const rawPrompt = buildImagePrompt(input, page, pageContext);
+    const rawPrompt = buildImagePrompt(input, page, pageContext, { hasLogo, hasHeader, hasFooter });
 
     // Prompt enhancer: expand ONLY the creative direction.
     // The manifest is appended AFTER enhancement so the enhancer can't
@@ -388,7 +405,9 @@ function buildImagePrompt(
   input: Agent3Input,
   page: { description: string; selectedImages: { path: string; placement: string; size: string }[]; textOverlays: { text: string; position: string; style: string }[] } | undefined,
   pageContext: string,
+  assets: { hasLogo: boolean; hasHeader: boolean; hasFooter: boolean } = { hasLogo: true, hasHeader: true, hasFooter: true },
 ): string {
+  const { hasLogo, hasHeader, hasFooter } = assets;
   const { brief, understanding, schoolName, curatedImages } = input;
 
   const hasUploadedPhotos = curatedImages.length > 0 && brief.selectedImages.length > 0;
@@ -429,9 +448,9 @@ Palette: ${brief.colorPalette.join(", ")}
 Headline: "${brief.textContent.headline}"
 ${brief.textContent.subheadline ? `Tagline: "${brief.textContent.subheadline}"` : ""}
 
-Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}
-Header: copy from reference image → top. ${brief.headerFooter.headerStyle}
-Footer: copy from reference image → bottom. ${brief.headerFooter.footerStyle}
+${hasLogo ? `Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}` : ""}
+${hasHeader ? `Header: copy from reference image → top. ${brief.headerFooter.headerStyle}` : ""}
+${hasFooter ? `Footer: copy from reference image → bottom. ${brief.headerFooter.footerStyle}` : ""}
 
 ${photoSection}
 ${pageContext ? `\n${pageContext}` : ""}
