@@ -342,17 +342,22 @@ export async function runGenerationAgent(
 
     const rawPrompt = buildImagePrompt(input, page, i, pages.length, fullCreativeVision, { hasLogo, hasHeader, hasFooter });
 
+    // Count photos assigned to this page for the enhancer
+    const pagePhotoCount = photoRefImages.length;
+
     const enhancerSystemPrompt = isCarousel
       ? `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt for ONE PAGE of a carousel.
 
 Rules:
 - Output ONLY the enhanced prompt, nothing else
 - This is page ${i + 1} of ${pages.length} — focus on THIS page's specific content and layout
-- CRITICAL for carousel consistency: maintain the EXACT same visual style across pages — same background texture/pattern, same border treatment, same typography style, same color application, same header/footer appearance
+- CRITICAL: The header and footer MUST be copied EXACTLY from reference images and reproduced identically on every page — do NOT modify, restyle, or reinterpret them. Preserve their exact appearance.
+- CRITICAL: This page has ${pagePhotoCount} uploaded photos as reference images. Include ALL ${pagePhotoCount} of them. Do NOT replace uploaded photos with AI-generated people or scenes.
+- Maintain the EXACT same visual style across pages — same background, borders, typography, colors
 - Expand with specific visual details: composition, lighting, textures, color gradients, spacing
 - Keep all text content exactly as specified — do NOT add or change text
 - Format: Instagram portrait 1080x1350px, print-ready, professional
-- Preserve all logo, header, footer, and photo placement instructions exactly as given`
+- Preserve all photo count, placement, header, and footer instructions exactly as given`
       : `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt.
 
 Rules:
@@ -529,22 +534,36 @@ ${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) 
       })
       .join("\n");
 
-    photoSection = `## Uploaded Photos (provided as reference images)
+    photoSection = `## Uploaded Photos — ${pageSelectedImages.length} photos provided as reference images
+IMPORTANT: This page has ${pageSelectedImages.length} uploaded photos. Include ALL ${pageSelectedImages.length} of them.
 These are REAL photographs. Include them in the poster EXACTLY as they are.
 Do NOT redraw, modify, filter, or replace them with AI-generated versions.
+Do NOT add AI-generated people or photos — use ONLY the ${pageSelectedImages.length} provided photos.
 ${photoDetails}`;
   } else {
     photoSection = `No uploaded photos for this page — generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? "\nStudents MUST wear the school uniform from the uniform reference image." : ""}${brief.schoolAssetUsage.useInfrastructure ? "\nUse the infrastructure reference image for campus setting." : ""}`;
   }
 
+  // Page-level design prompt from creative agent (contains photo count guidance)
+  const pageDesignPrompt = (page as Record<string, unknown> | undefined)?.designPrompt as string | undefined;
+
   const carouselNote = isCarousel
-    ? `\n\nCRITICAL — CAROUSEL CONSISTENCY: This is page ${pageIndex + 1} of ${totalPages}. Every page in this carousel MUST have the identical: background color/gradient/texture, border/frame treatment, typography font and sizing, header and footer appearance, color application. Only the hero content and text change between pages.`
+    ? `\n\nCRITICAL — CAROUSEL CONSISTENCY: This is page ${pageIndex + 1} of ${totalPages}.
+EVERY page MUST have IDENTICAL:
+- Background: same color, gradient, texture, pattern on ALL pages
+- Header: copy EXACTLY from reference image — same position, size, colors on every page
+- Footer: copy EXACTLY from reference image — same position, size, colors, text, and layout on every page. The footer must be pixel-for-pixel identical across all ${totalPages} pages. Do NOT modify, restyle, or reinterpret the footer.
+- Typography: same font family, same sizes, same colors, same positioning rules
+- Borders/frames: same treatment on all pages
+- Decorative elements: same style on all pages
+Only the hero content (photos, headline text) changes between pages.`
     : "";
 
   return `Instagram poster for ${schoolName}. Portrait 1080x1350px, print-ready, professional.
 
 ## Creative Vision
 ${visionSection}
+${pageDesignPrompt ? `\n## Page Design Brief\n${pageDesignPrompt}` : ""}
 
 ## Technical Details
 Direction: ${brief.direction}
@@ -555,8 +574,8 @@ ${!isCarousel || pageIndex === 0 ? `Headline: "${brief.textContent.headline}"` :
 ${!isCarousel && brief.textContent.subheadline ? `Tagline: "${brief.textContent.subheadline}"` : ""}
 
 ${hasLogo ? `Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}` : ""}
-${hasHeader ? `Header: copy from reference image → top. ${brief.headerFooter.headerStyle}` : ""}
-${hasFooter ? `Footer: copy from reference image → bottom. ${brief.headerFooter.footerStyle}` : ""}
+${hasHeader ? `Header: copy EXACTLY from reference image → top of page. Reproduce the header identically on every page. ${brief.headerFooter.headerStyle}` : ""}
+${hasFooter ? `Footer: copy EXACTLY from reference image → bottom of page. Reproduce the footer identically on every page — same height, colors, text, icons, and layout. ${brief.headerFooter.footerStyle}` : ""}
 
 ${photoSection}
 ${carouselNote}

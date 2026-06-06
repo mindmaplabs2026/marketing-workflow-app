@@ -192,6 +192,103 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
     console.warn(`[Pipeline] Job ${jobId} | Available upload paths: ${ctx.images.map((i) => i.path).join(", ")}`);
   }
 
+  // --- Carousel photo validation + correction ---
+  // Agent 2 should handle photo distribution correctly, but if it fails
+  // the rules (cover >1 photo, middle page <3 photos, closing >1 photo),
+  // we correct it here as a safety net.
+  if (posterType === "carousel" && brief.layout?.pages) {
+    const pageCount = brief.layout.pages.length;
+
+    // Build pool of all available curated images (for filling gaps)
+    const allCuratedPaths = understanding.curatedImages
+      .map((c) => c.path)
+      .filter((path) => {
+        const fn = path.split("/").pop() ?? "";
+        return ctx.images.some((i) =>
+          i.path === path || i.path.endsWith(path) || i.path.split("/").pop() === fn
+        );
+      });
+
+    // Track which photos Agent 2 already assigned
+    const assignedPaths = new Set<string>();
+    for (const page of brief.layout.pages) {
+      for (const img of page.selectedImages ?? []) {
+        assignedPaths.add(img.path);
+      }
+    }
+
+    // Unassigned photos available for filling
+    const unassignedPool = allCuratedPaths.filter((p) => !assignedPaths.has(p));
+    let correctionsMade = false;
+
+    for (let pi = 0; pi < pageCount; pi++) {
+      const page = brief.layout.pages[pi];
+      const photoCount = page.selectedImages?.length ?? 0;
+      const isFirst = pi === 0;
+      const isLast = pi === pageCount - 1;
+      const isMiddle = !isFirst && !isLast;
+
+      if (isFirst && photoCount > 1) {
+        // Cover has too many — trim to 1
+        page.selectedImages = page.selectedImages.slice(0, 1);
+        console.log(`[Pipeline] Job ${jobId} | CORRECTION: Page ${pi + 1} (cover) trimmed from ${photoCount} to 1 photo`);
+        correctionsMade = true;
+      } else if (isLast && photoCount > 1) {
+        // Closing has too many — trim to 1
+        page.selectedImages = page.selectedImages.slice(0, 1);
+        console.log(`[Pipeline] Job ${jobId} | CORRECTION: Page ${pi + 1} (closing) trimmed from ${photoCount} to 1 photo`);
+        correctionsMade = true;
+      } else if (isMiddle && photoCount < 3) {
+        // Middle page has too few — fill from unassigned pool
+        const needed = 3 - photoCount;
+        const toAdd = unassignedPool.splice(0, needed);
+        if (!page.selectedImages) page.selectedImages = [];
+        for (const path of toAdd) {
+          page.selectedImages.push({
+            path,
+            placement: `collage position ${page.selectedImages.length + 1}`,
+            size: "medium",
+          });
+          assignedPaths.add(path);
+        }
+        console.log(`[Pipeline] Job ${jobId} | CORRECTION: Page ${pi + 1} (middle) filled from ${photoCount} to ${page.selectedImages.length} photos (+${toAdd.length} from pool)`);
+        correctionsMade = true;
+      } else if (isMiddle && photoCount > 6) {
+        // Middle page has too many — trim to 6
+        page.selectedImages = page.selectedImages.slice(0, 6);
+        console.log(`[Pipeline] Job ${jobId} | CORRECTION: Page ${pi + 1} (middle) trimmed from ${photoCount} to 6 photos`);
+        correctionsMade = true;
+      }
+    }
+
+    if (correctionsMade) {
+      // Rebuild curatedImages from the corrected pages
+      curatedImages.length = 0;
+      const correctedPaths = new Set<string>();
+      for (const page of brief.layout.pages) {
+        for (const img of page.selectedImages ?? []) {
+          correctedPaths.add(img.path);
+        }
+      }
+      for (const imgPath of correctedPaths) {
+        const fn = imgPath.split("/").pop() ?? "";
+        const match = ctx.images.find((i: UploadedImage) =>
+          i.path === imgPath || i.path.endsWith(imgPath) || i.path.split("/").pop() === fn
+        );
+        if (match) {
+          curatedImages.push({ path: match.path, signedUrl: match.signedUrl });
+        }
+      }
+    }
+
+    // Log final distribution
+    for (const page of brief.layout.pages) {
+      const role = page.pageIndex === 1 ? "cover" : page.pageIndex === pageCount ? "closing" : "middle";
+      console.log(`[Pipeline] Job ${jobId} | Page ${page.pageIndex} (${role}): ${page.selectedImages?.length ?? 0} photos`);
+    }
+    console.log(`[Pipeline] Job ${jobId} | Photos: ${curatedImages.length} assigned, ${unassignedPool.length} unused from ${allCuratedPaths.length} curated`);
+  }
+
   const result = await runGenerationAgent({
     brief,
     understanding,

@@ -92,22 +92,22 @@ export function AiGenerationStatus({
         You&apos;ll get a notification when it&apos;s ready.
       </p>
 
-      <div className="mt-4 flex items-center">
+      <div className="mt-4 flex items-start">
         {STEPS.map((step, i) => {
           const stepOrder = STEP_ORDER[step.key];
           const isActive = stepOrder === currentOrder;
           const isDone = stepOrder < currentOrder;
 
           return (
-            <div key={step.key} className="flex flex-1 items-center">
-              {i > 0 && (
+            <div key={step.key} className="flex flex-1 flex-col items-center" style={{ position: "relative" }}>
+              <div className="flex w-full items-center">
+                {i > 0 && (
+                  <div
+                    className={`h-0.5 flex-1 ${isDone ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"}`}
+                  />
+                )}
                 <div
-                  className={`h-0.5 flex-1 ${isDone ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"}`}
-                />
-              )}
-              <div className="flex flex-col items-center">
-                <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium transition-colors ${
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors ${
                     isDone
                       ? "bg-violet-600 text-white"
                       : isActive
@@ -117,18 +117,23 @@ export function AiGenerationStatus({
                 >
                   {isDone ? "✓" : i + 1}
                 </div>
-                <p
-                  className={`mt-1 text-center text-[10px] leading-tight ${
-                    isActive
-                      ? "font-medium text-violet-700 dark:text-violet-300"
-                      : isDone
-                        ? "text-zinc-600 dark:text-zinc-400"
-                        : "text-zinc-400"
-                  }`}
-                >
-                  {step.label}
-                </p>
+                {i < STEPS.length - 1 && (
+                  <div
+                    className={`h-0.5 flex-1 ${isDone && stepOrder + 1 <= currentOrder ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"}`}
+                  />
+                )}
               </div>
+              <p
+                className={`mt-1 text-center text-[10px] leading-tight ${
+                  isActive
+                    ? "font-medium text-violet-700 dark:text-violet-300"
+                    : isDone
+                      ? "text-zinc-600 dark:text-zinc-400"
+                      : "text-zinc-400"
+                }`}
+              >
+                {step.label}
+              </p>
             </div>
           );
         })}
