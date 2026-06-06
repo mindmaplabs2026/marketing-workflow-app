@@ -1,5 +1,6 @@
 import "server-only";
 import { getOpenAI, withRateLimitRetry } from "./openai-client";
+import type { CostTracker } from "./cost-tracker";
 import type { VariationBrief } from "./agent-creative";
 import type { UnderstandingOutput } from "./agent-understanding";
 import { toFile } from "openai";
@@ -50,6 +51,7 @@ export async function evaluatePoster(
   brief: VariationBrief,
   schoolName: string,
   referenceImages?: { role: string; base64: string }[],
+  costTracker?: CostTracker,
 ): Promise<EvaluationResult> {
   const openai = getOpenAI();
 
@@ -118,6 +120,8 @@ Return ONLY valid JSON:
     max_tokens: 500,
   }));
 
+  costTracker?.addLLMCall("evaluator", "gpt-4o-mini", response.usage);
+
   const raw = response.choices[0]?.message?.content;
   if (!raw) return { score: 5, feedback: "Could not evaluate", passesThreshold: false };
 
@@ -148,6 +152,7 @@ async function downloadImage(url: string): Promise<Buffer | null> {
  */
 export async function runGenerationAgent(
   input: Agent3Input,
+  costTracker?: CostTracker,
 ): Promise<GenerationResult> {
   const openai = getOpenAI();
   const { brief } = input;
@@ -369,6 +374,8 @@ Rules:
       }),
     );
 
+    costTracker?.addLLMCall(`agent3_enhancer_p${i + 1}`, "gpt-4o-mini", enhanced.usage);
+
     const enhancedPrompt = enhanced.choices[0]?.message?.content ?? rawPrompt;
     const prompt = enhancedPrompt + imageManifest;
     console.log(`[Agent3] Page ${i + 1}/${pages.length} prompt enhanced at ${new Date().toISOString()} (${((Date.now() - pageStartTime) / 1000).toFixed(1)}s elapsed)`);
@@ -442,6 +449,8 @@ Rules:
         base64Result = Buffer.from(await res.arrayBuffer()).toString("base64");
       }
     }
+
+    costTracker?.addImageCall(`agent3_image_p${i + 1}`, 1, imageSize);
 
     console.log(`[Agent3] Page ${i + 1}/${pages.length} generation COMPLETE at ${new Date().toISOString()} (${((Date.now() - pageStartTime) / 1000).toFixed(1)}s total)`);
     return { base64: base64Result, prompt };
@@ -564,6 +573,7 @@ export async function refineAndRegenerate(
   feedback: string,
   score: number,
   input: Agent3Input,
+  costTracker?: CostTracker,
 ): Promise<{ base64: string; refinedPrompt: string }> {
   const openai = getOpenAI();
 
@@ -584,6 +594,8 @@ export async function refineAndRegenerate(
       max_tokens: 1500,
     }),
   );
+
+  costTracker?.addLLMCall("refiner_prompt", "gpt-4o-mini", refined.usage);
 
   let refinedPrompt = refined.choices[0]?.message?.content ?? originalPrompt;
 
@@ -692,5 +704,6 @@ export async function refineAndRegenerate(
   }
 
   if (!base64) throw new Error("Refinement: no image returned");
+  costTracker?.addImageCall("refiner_image", 1, imageSize);
   return { base64, refinedPrompt };
 }

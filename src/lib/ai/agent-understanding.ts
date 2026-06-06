@@ -1,5 +1,6 @@
 import "server-only";
 import { getOpenAI, withRateLimitRetry } from "./openai-client";
+import type { CostTracker } from "./cost-tracker";
 
 /** Image metadata passed into Agent 1. */
 export type UploadedImage = {
@@ -51,6 +52,7 @@ const MAX_SHORTLIST = 15;
  */
 export async function runUnderstandingAgent(
   input: Agent1Input,
+  costTracker?: CostTracker,
 ): Promise<UnderstandingOutput> {
   const openai = getOpenAI();
 
@@ -100,6 +102,8 @@ export async function runUnderstandingAgent(
     }),
   );
 
+  costTracker?.addLLMCall("agent1_pass1", "gpt-4o-mini", pass1Response.usage);
+
   const pass1Raw = pass1Response.choices[0]?.message?.content;
   if (!pass1Raw) throw new Error("Agent 1 Pass 1: empty response");
 
@@ -129,19 +133,20 @@ export async function runUnderstandingAgent(
 
   // If no images made the cut, take the first few as fallback
   if (shortlistedImages.length === 0) {
-    return deepAnalysis(openai, input.images.slice(0, MAX_SHORTLIST), contextText);
+    return deepAnalysis(openai, input.images.slice(0, MAX_SHORTLIST), contextText, costTracker);
   }
 
   // ---------------------------------------------------------------
   // Pass 2: Deep analysis at high detail — only shortlisted images
   // ---------------------------------------------------------------
-  return deepAnalysis(openai, shortlistedImages, contextText);
+  return deepAnalysis(openai, shortlistedImages, contextText, costTracker);
 }
 
 async function deepAnalysis(
   openai: ReturnType<typeof getOpenAI>,
   images: UploadedImage[],
   contextText: string,
+  costTracker?: CostTracker,
 ): Promise<UnderstandingOutput> {
   const userContent: Array<
     | { type: "text"; text: string }
@@ -195,6 +200,8 @@ Return ONLY valid JSON matching this schema:
     response_format: { type: "json_object" },
     max_tokens: 4096,
   }));
+
+  costTracker?.addLLMCall("agent1_pass2", "gpt-4o-mini", response.usage);
 
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error("Agent 1: empty response from model");

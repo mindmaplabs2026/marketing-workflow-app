@@ -23,9 +23,11 @@ type Variation = {
 export function AiVariations({
   requestId,
   variations: initialVariations,
+  totalCostUsd,
 }: {
   requestId: string;
   variations: Variation[];
+  totalCostUsd?: number | null;
 }) {
   const router = useRouter();
   const [variations, setVariations] = useState(initialVariations);
@@ -101,9 +103,16 @@ export function AiVariations({
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-          AI generated {variations.length} variation{variations.length !== 1 ? "s" : ""}
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+            AI generated {variations.length} variation{variations.length !== 1 ? "s" : ""}
+          </p>
+          {totalCostUsd != null && totalCostUsd > 0 && (
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+              AI cost: ${totalCostUsd.toFixed(2)}
+            </span>
+          )}
+        </div>
         <p className="text-xs text-zinc-500">
           Review each variation. Click &quot;Chat &amp; Edit&quot; to make
           changes, or accept one to send to your school admin.

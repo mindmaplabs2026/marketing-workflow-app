@@ -4,6 +4,8 @@ import { runUnderstandingAgent } from "@/lib/ai/agent-understanding";
 import { runCreativeAgent } from "@/lib/ai/agent-creative";
 import { runGenerationAgent, evaluatePoster, refineAndRegenerate, QUALITY_THRESHOLD } from "@/lib/ai/agent-generation";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
+import { CostTracker } from "@/lib/ai/cost-tracker";
+import type { CostTracking } from "@/lib/ai/cost-tracker";
 import type { UploadedImage } from "@/lib/ai/agent-understanding";
 import type { UnderstandingOutput } from "@/lib/ai/agent-understanding";
 import type { VariationBrief } from "@/lib/ai/agent-creative";
@@ -96,6 +98,28 @@ async function fetchContext(requestId: string) {
   };
 }
 
+async function appendCosts(jobId: string, newCosts: CostTracking) {
+  const admin = createAdminClient();
+  const { data: job } = await admin
+    .from("ai_generation_jobs")
+    .select("cost_tracking")
+    .eq("id", jobId)
+    .single();
+
+  const existing = (job?.cost_tracking ?? { entries: [], total_usd: 0 }) as CostTracking;
+  const merged: CostTracking = {
+    entries: [...existing.entries, ...newCosts.entries],
+    total_usd: Math.round((existing.total_usd + newCosts.total_usd) * 1_000_000) / 1_000_000,
+  };
+
+  await admin
+    .from("ai_generation_jobs")
+    .update({ cost_tracking: merged as unknown as Record<string, unknown> })
+    .eq("id", jobId);
+
+  console.log(`[Pipeline] Job ${jobId} | Costs: +$${newCosts.total_usd.toFixed(4)} → total $${merged.total_usd.toFixed(4)}`);
+}
+
 async function markFailed(jobId: string, message: string) {
   const admin = createAdminClient();
   await admin
@@ -105,7 +129,7 @@ async function markFailed(jobId: string, message: string) {
   try { await dispatchPendingPushes(); } catch { /* best effort */ }
 }
 
-async function generateOneVariation(jobId: string, requestId: string, posterType: "single" | "carousel", variationIndex: number) {
+async function generateOneVariation(jobId: string, requestId: string, posterType: "single" | "carousel", variationIndex: number, costTracker?: CostTracker) {
   const admin = createAdminClient();
 
   const { data: job } = await admin
@@ -174,7 +198,7 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
     })),
     curatedImages,
     schoolName: ctx.schoolName,
-  });
+  }, costTracker);
 
   const storagePaths: string[] = [];
   for (let i = 0; i < result.imageUrls.length; i++) {
@@ -249,15 +273,17 @@ export const aiPipelineAnalyze = inngest.createFunction(
     const brandAssetsByType = ctx.brandAssets.reduce((acc, a) => { acc[a.assetType] = (acc[a.assetType] ?? 0) + 1; return acc; }, {} as Record<string, number>);
     console.log(`[Pipeline] Job ${jobId} | Agent1 INPUT: ${ctx.images.length} images, ${ctx.brandAssets.length} brand assets (${JSON.stringify(brandAssetsByType)}), title="${ctx.title}", posterType=${posterType}`);
 
+    const costTracker = new CostTracker();
     const understanding = await runUnderstandingAgent({
       title: ctx.title,
       description: ctx.description,
       images: ctx.images,
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       schoolGuidelines: ctx.schoolGuidelines,
-    });
+    }, costTracker);
 
     console.log(`[Pipeline] Job ${jobId} | Agent1 OUTPUT: theme="${understanding.theme}", ${understanding.curatedImages.length} curated images, ${understanding.rejectedImages?.length ?? 0} rejected`);
+    await appendCosts(jobId, costTracker.toJSON());
     if (understanding.curatedImages.length > 0) {
       console.log(`[Pipeline] Job ${jobId} | Agent1 curated: ${understanding.curatedImages.map((c) => `${c.path.split("/").pop()} (rel:${c.relevanceScore})`).join(", ")}`);
     }
@@ -307,13 +333,14 @@ export const aiPipelineCreative = inngest.createFunction(
 
     console.log(`[Pipeline] Job ${jobId} | Agent2 INPUT: ${understanding.curatedImages.length} curated images, posterType=${posterType}, school="${ctx.schoolName}"`);
 
+    const costTracker = new CostTracker();
     const creative = await runCreativeAgent({
       understanding,
       brandAssets: ctx.brandAssets,
       posterType,
       schoolName: ctx.schoolName,
       schoolGuidelines: ctx.schoolGuidelines,
-    });
+    }, costTracker);
 
     // Log Agent 2 output summary
     for (const v of creative.variations) {
@@ -330,6 +357,8 @@ export const aiPipelineCreative = inngest.createFunction(
         console.log(`[Pipeline] Job ${jobId} | Agent2 page ${p.pageIndex}: ${p.selectedImages?.length ?? 0} photos, vision=${p.creativeVision ? `${p.creativeVision.length} chars` : "MISSING"}`);
       }
     }
+
+    await appendCosts(jobId, costTracker.toJSON());
 
     await admin
       .from("ai_generation_jobs")
@@ -367,7 +396,9 @@ export const aiPipelineGenerateV1 = inngest.createFunction(
     // before the prompt enhancer calls in generateOneVariation.
     await new Promise((r) => setTimeout(r, 30_000));
 
-    await generateOneVariation(jobId, requestId, posterType, 0);
+    const costTracker = new CostTracker();
+    await generateOneVariation(jobId, requestId, posterType, 0, costTracker);
+    await appendCosts(jobId, costTracker.toJSON());
 
     // Chain to evaluate
     await inngest.send({
@@ -401,6 +432,7 @@ export const aiPipelineEvaluate = inngest.createFunction(
   async ({ event }: { event: { data: EvaluateData } }) => {
     const { jobId, requestId, posterType, refinementRound } = event.data;
     const admin = createAdminClient();
+    const costTracker = new CostTracker();
 
     // Get the latest variation's storage path
     const { data: variation } = await admin
@@ -493,7 +525,7 @@ export const aiPipelineEvaluate = inngest.createFunction(
       const isCarousel = variation.storage_paths.length > 1;
       const pageLabel = isCarousel ? ` (page ${pi + 1} of ${variation.storage_paths.length})` : "";
 
-      const evaluation = await evaluatePoster(pageBase64, brief, ctx.schoolName + pageLabel, evalReferences);
+      const evaluation = await evaluatePoster(pageBase64, brief, ctx.schoolName + pageLabel, evalReferences, costTracker);
       pageEvaluations.push({ pageIndex: pi, score: evaluation.score, feedback: evaluation.feedback, passed: evaluation.passesThreshold });
 
       if (evaluation.score < worstScore) {
@@ -520,6 +552,7 @@ export const aiPipelineEvaluate = inngest.createFunction(
     for (const pe of pageEvaluations) {
       console.log(`[Pipeline] Job ${jobId} | Page ${pe.pageIndex + 1}: score=${pe.score}, passed=${pe.passed}, feedback="${pe.feedback.slice(0, 120)}"`);
     }
+    await appendCosts(jobId, costTracker.toJSON());
 
     // Log evaluation in the variation's creative brief
     await admin
@@ -586,6 +619,7 @@ export const aiPipelineRefine = inngest.createFunction(
   async ({ event }: { event: { data: RefineData } }) => {
     const { jobId, requestId, posterType, refinementRound, feedback, score, pageIndex } = event.data;
     const admin = createAdminClient();
+    const costTracker = new CostTracker();
 
     // Get the variation (including storage_paths so we can preserve other pages)
     const { data: variation } = await admin
@@ -635,7 +669,7 @@ export const aiPipelineRefine = inngest.createFunction(
       })),
       curatedImages,
       schoolName: ctx.schoolName,
-    });
+    }, costTracker);
 
     // Upload the refined image
     const timestamp = Date.now();
@@ -665,6 +699,8 @@ export const aiPipelineRefine = inngest.createFunction(
         } as unknown as Record<string, unknown>,
       })
       .eq("id", variation.id);
+
+    await appendCosts(jobId, costTracker.toJSON());
 
     // Evaluate the refined version (re-evaluates all pages)
     await inngest.send({

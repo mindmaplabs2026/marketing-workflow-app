@@ -1,6 +1,7 @@
 import "server-only";
 import { getOpenAI, withRateLimitRetry } from "./openai-client";
 import type { UnderstandingOutput } from "./agent-understanding";
+import type { CostTracker } from "./cost-tracker";
 
 /** Layout for a single poster page. */
 export type PageLayout = {
@@ -159,6 +160,7 @@ Return ONLY valid JSON matching this schema:
 
 export async function runCreativeAgent(
   input: Agent2Input,
+  costTracker?: CostTracker,
 ): Promise<CreativeOutput> {
   const openai = getOpenAI();
 
@@ -286,6 +288,8 @@ Create 1 creative direction brief. Make it the strongest possible direction for 
       max_output_tokens: 12000,
     }),
   );
+
+  costTracker?.addLLMCall("agent2_creative", "gpt-4o-mini", response.usage);
 
   // Extract text content from the response output
   let raw = "";

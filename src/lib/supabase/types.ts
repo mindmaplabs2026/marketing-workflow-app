@@ -546,6 +546,7 @@ export type Database = {
           agent1_output: Record<string, unknown> | null;
           agent2_output: Record<string, unknown> | null;
           error_message: string | null;
+          cost_tracking: Record<string, unknown> | null;
           started_at: Timestamp | null;
           completed_at: Timestamp | null;
           created_at: Timestamp;
@@ -559,6 +560,7 @@ export type Database = {
           agent1_output?: Record<string, unknown> | null;
           agent2_output?: Record<string, unknown> | null;
           error_message?: string | null;
+          cost_tracking?: Record<string, unknown> | null;
           started_at?: Timestamp | null;
           completed_at?: Timestamp | null;
           created_at?: Timestamp;
@@ -572,6 +574,7 @@ export type Database = {
           agent1_output?: Record<string, unknown> | null;
           agent2_output?: Record<string, unknown> | null;
           error_message?: string | null;
+          cost_tracking?: Record<string, unknown> | null;
           started_at?: Timestamp | null;
           completed_at?: Timestamp | null;
           created_at?: Timestamp;
