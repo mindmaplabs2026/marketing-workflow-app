@@ -304,6 +304,12 @@ export const aiPipelineGenerateV1 = inngest.createFunction(
   },
   async ({ event }: { event: { data: PipelineData } }) => {
     const { jobId, requestId, posterType } = event.data;
+
+    // Preemptive pause: Agent 1 + Agent 2 consume most of the 200k TPM
+    // quota for gpt-4o-mini. Wait 60s so the rate limit window resets
+    // before the prompt enhancer calls in generateOneVariation.
+    await new Promise((r) => setTimeout(r, 60_000));
+
     await generateOneVariation(jobId, requestId, posterType, 0);
 
     // Chain to evaluate
