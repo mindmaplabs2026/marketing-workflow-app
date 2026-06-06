@@ -248,7 +248,7 @@ export async function runGenerationAgent(
       messages: [
         {
           role: "system",
-          content: `You are an expert image prompt engineer. Your job is to take a poster design brief and expand it into a highly detailed, production-quality prompt for gpt-image-1.
+          content: `You are an expert image prompt engineer. Your job is to take a poster design brief and expand it into a highly detailed, production-quality prompt for gpt-image-2.
 
 Rules:
 - Output ONLY the enhanced prompt text, nothing else
@@ -288,7 +288,7 @@ Rules:
       );
 
       const response = await openai.images.edit({
-        model: "gpt-image-1",
+        model: "gpt-image-2",
         image: referenceFiles,
         prompt,
         n: 1,
@@ -307,7 +307,7 @@ Rules:
       }
     } else {
       const response = await openai.images.generate({
-        model: "gpt-image-1",
+        model: "gpt-image-2",
         prompt,
         n: 1,
         size: imageSize,
@@ -330,7 +330,7 @@ Rules:
 
   return {
     imageUrls,
-    model: "gpt-image-1",
+    model: "gpt-image-2",
     prompts,
     referenceImageCount: referenceImages.length,
     refinementRounds: 0,
@@ -558,7 +558,7 @@ export async function refineAndRegenerate(
       referenceImages.map((img) => toFile(img.buffer, img.name, { type: "image/png" })),
     );
     const response = await openai.images.edit({
-      model: "gpt-image-1", image: files, prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
+      model: "gpt-image-2", image: files, prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
     });
     const item = response.data?.[0];
     base64 = item?.b64_json ?? "";
@@ -567,7 +567,7 @@ export async function refineAndRegenerate(
     }
   } else {
     const response = await openai.images.generate({
-      model: "gpt-image-1", prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
+      model: "gpt-image-2", prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
     });
     const item = response.data?.[0];
     base64 = item?.b64_json ?? "";

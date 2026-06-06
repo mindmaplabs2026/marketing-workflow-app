@@ -139,7 +139,7 @@ The user will describe edits they want. Respond briefly confirming what you'll c
     const editPrompt = `${(brief as { designPrompt?: string }).designPrompt ?? ""}\n\nUser edit request: ${message.trim()}\n\nAssistant plan: ${assistantText}`;
 
     const imageResponse = await openai.images.generate({
-      model: "gpt-image-1",
+      model: "gpt-image-2",
       prompt: editPrompt,
       n: 1,
       size: "1024x1024",
@@ -200,7 +200,7 @@ The user will describe edits they want. Respond briefly confirming what you'll c
       content: assistantText,
       image_paths: [storagePath],
       metadata: {
-        model: "gpt-image-1",
+        model: "gpt-image-2",
         chat_model: "gpt-4o-mini",
         round,
       },
