@@ -175,6 +175,7 @@ export default async function RequestDetailPage({
   }[] = [];
 
   if (req.ai_generated) {
+    // Fetch the latest job (for progress/failure status)
     const { data: jobData } = await supabase
       .from("ai_generation_jobs")
       .select("id, status, error_message")
@@ -184,14 +185,13 @@ export default async function RequestDetailPage({
       .single();
     aiJob = jobData as { id: string; status: AiJobStatus; error_message: string | null } | null;
 
-    if (aiJob?.status === "completed") {
-      const { data: vars } = await supabase
-        .from("ai_variations")
-        .select("id, variation_index, creative_brief, storage_paths, poster_type, is_accepted, chat_rounds_used")
-        .eq("request_id", id)
-        .order("variation_index");
-      aiVariations = (vars ?? []) as typeof aiVariations;
-    }
+    // Fetch ALL variations across all jobs for this request
+    const { data: vars } = await supabase
+      .from("ai_variations")
+      .select("id, variation_index, creative_brief, storage_paths, poster_type, is_accepted, chat_rounds_used")
+      .eq("request_id", id)
+      .order("created_at", { ascending: true });
+    aiVariations = (vars ?? []) as typeof aiVariations;
   }
 
   const [
@@ -559,8 +559,8 @@ export default async function RequestDetailPage({
         </div>
       )}
 
-      {/* AI: variation review (visible to designer + super_admin) */}
-      {req.ai_generated && aiJob?.status === "completed" && aiVariations.length > 0 && (isAssignedDesigner || isSuperAdmin) && (
+      {/* AI: variation review — show ALL variations across all jobs */}
+      {req.ai_generated && aiVariations.length > 0 && (isAssignedDesigner || isSuperAdmin) && (
         <>
           <AiVariations
             requestId={req.id}

@@ -48,7 +48,7 @@ export function AiVariations({
         for (const path of v.storage_paths) {
           const { data } = await supabase.storage
             .from("designs")
-            .createSignedUrl(path, 300);
+            .createSignedUrl(path, 3600);
           if (data?.signedUrl) urls.push(data.signedUrl);
         }
         urlMap.set(v.id, urls);
@@ -102,7 +102,7 @@ export function AiVariations({
     <div className="space-y-4">
       <div>
         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-          AI generated 3 variations
+          AI generated {variations.length} variation{variations.length !== 1 ? "s" : ""}
         </p>
         <p className="text-xs text-zinc-500">
           Review each variation. Click &quot;Chat &amp; Edit&quot; to make
