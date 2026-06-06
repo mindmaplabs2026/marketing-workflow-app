@@ -245,13 +245,13 @@ export async function runGenerationAgent(
   // For carousel, Agent 2 assigns photos at page level (layout.pages[].selectedImages),
   // not brief level. Collect from both to build the complete set.
   const allSelectedPaths = new Set<string>();
-  for (const img of brief.selectedImages) {
-    allSelectedPaths.add(img.path);
+  for (const img of brief.selectedImages ?? []) {
+    if (img?.path) allSelectedPaths.add(img.path);
   }
   if (brief.layout?.pages) {
     for (const p of brief.layout.pages) {
       for (const img of p.selectedImages ?? []) {
-        allSelectedPaths.add(img.path);
+        if (img?.path) allSelectedPaths.add(img.path);
       }
     }
   }
@@ -302,7 +302,9 @@ export async function runGenerationAgent(
     // For carousels: build per-page reference images (brand assets shared, photos per-page)
     const pagePhotoImages: typeof referenceImages = [];
     if (isCarousel && page?.selectedImages?.length) {
-      const pagePhotoPaths = new Set(page.selectedImages.map((s) => s.path));
+      const pagePhotoPaths = new Set(
+        page.selectedImages.map((s) => s?.path).filter((p): p is string => !!p)
+      );
       for (const ref of referenceImages) {
         if (!ref.role.includes("UPLOADED PHOTO") || !ref.sourcePath) continue;
         const refFilename = ref.sourcePath.split("/").pop() ?? "";
@@ -515,11 +517,12 @@ ${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) 
   }
 
   // For carousels, prefer page-level selectedImages, fall back to brief-level
-  const pageSelectedImages = isCarousel && page?.selectedImages?.length
-    ? page.selectedImages.map((img) => ({ path: img.path, placement: img.placement }))
-    : brief.selectedImages.length > 0
+  const pageSelectedImages = (isCarousel && page?.selectedImages?.length
+    ? page.selectedImages.map((img) => ({ path: img?.path ?? "", placement: img?.placement ?? "" }))
+    : (brief.selectedImages ?? []).length > 0
       ? brief.selectedImages
-      : [];
+      : []
+  ).filter((img) => !!img?.path);
 
   const hasUploadedPhotos = curatedImages.length > 0 && pageSelectedImages.length > 0;
 
@@ -530,7 +533,7 @@ ${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) 
       .map((img) => {
         const curated = understanding.curatedImages.find((c) => c.path === img.path);
         const desc = curated?.description ?? "uploaded photo";
-        return `- "${img.path.split("/").pop()}" → placement: ${img.placement}. Content: ${desc}`;
+        return `- "${(img.path ?? "").split("/").pop()}" → placement: ${img.placement}. Content: ${desc}`;
       })
       .join("\n");
 
@@ -659,10 +662,14 @@ export async function refineAndRegenerate(
 
   // Uploaded photos — collect from both brief-level and page-level selections
   const refineSelectedPaths = new Set<string>();
-  for (const img of brief.selectedImages) refineSelectedPaths.add(img.path);
+  for (const img of brief.selectedImages ?? []) {
+    if (img?.path) refineSelectedPaths.add(img.path);
+  }
   if (brief.layout?.pages) {
     for (const p of brief.layout.pages) {
-      for (const img of p.selectedImages ?? []) refineSelectedPaths.add(img.path);
+      for (const img of p.selectedImages ?? []) {
+        if (img?.path) refineSelectedPaths.add(img.path);
+      }
     }
   }
   if (input.curatedImages.length > 0 && refineSelectedPaths.size > 0) {
