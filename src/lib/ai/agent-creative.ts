@@ -40,7 +40,7 @@ export type VariationBrief = {
 
 /** Agent 2 output — stored in ai_generation_jobs.agent2_output. */
 export type CreativeOutput = {
-  variations: [VariationBrief, VariationBrief, VariationBrief];
+  variations: VariationBrief[];
 };
 
 type BrandAsset = {

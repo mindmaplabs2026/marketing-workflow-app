@@ -33,6 +33,7 @@ type Agent1Input = {
   description: string | null;
   images: UploadedImage[];
   brandAssetTypes: string[];
+  schoolGuidelines?: string | null;
 };
 
 const SYSTEM_PROMPT = `You are an expert visual content analyst for school marketing posters.
@@ -66,7 +67,7 @@ export async function runUnderstandingAgent(
   > = [
     {
       type: "text",
-      text: `Title: ${input.title}\n\nDescription: ${input.description ?? "(none provided)"}\n\nNumber of images uploaded: ${input.images.length}\nSchool brand asset types available: ${input.brandAssetTypes.join(", ") || "none"}`,
+      text: `Title: ${input.title}\n\nDescription: ${input.description ?? "(none provided)"}\n\nNumber of images uploaded: ${input.images.length}\nSchool brand asset types available: ${input.brandAssetTypes.join(", ") || "none"}${input.schoolGuidelines ? `\n\nSchool-specific guidelines (consider these when analyzing relevance and selecting images):\n${input.schoolGuidelines}` : ""}`,
     },
   ];
 

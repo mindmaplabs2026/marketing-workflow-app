@@ -218,6 +218,7 @@ export const aiPipelineAnalyze = inngest.createFunction(
       description: ctx.description,
       images: ctx.images,
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
+      schoolGuidelines: ctx.schoolGuidelines,
     });
 
     await admin
