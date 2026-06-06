@@ -82,14 +82,7 @@ DESIGN PROCESS:
    - Portrait orientation (4:5 ratio, 1080x1350px)
    - Premium, polished look — think magazine ad, not school flyer
 
-3. CRITICALLY IMPORTANT — Describe each brand asset visually:
-   - Study each brand asset image carefully (logo, header, footer)
-   - In the designPrompt, describe EXACTLY what the logo looks like in detail: shape, colors, icons, text within the logo, border style
-   - Describe the header: what it contains, colors, layout
-   - Describe the footer: what it contains, contact info format, colors
-   - This description is essential because the image generation model needs to know what to reproduce from the reference images
-
-4. Produce a detailed creative brief covering every element:
+3. Produce a detailed creative brief covering every element:
    - Theme and specific color palette (hex codes)
    - Text content: headline + subheadline ONLY (keep text minimal — posters are visual, not text documents)
    - Which curated images to use (reference by exact filename/path), and where to place them
@@ -134,8 +127,7 @@ Return ONLY valid JSON matching this schema:
     "selectedImages": [{ "path": "exact filename from curated list", "placement": "description of placement" }],
     "layout": { "type": "single|carousel", "pages": [{ "pageIndex": 1, "description": "visual description of this page", "selectedImages": [...], "textOverlays": [{ "text": "...", "position": "...", "style": "..." }] }] },
     "logoPlacement": { "position": "string", "size": "string", "style": "string" },
-    "logoDescription": "string — DETAILED visual description of the school logo: shape, colors, icons, text within it, border style. This is critical for the image model to reproduce it accurately.",
-    "headerFooter": { "headerStyle": "string", "footerStyle": "string", "headerDescription": "string — what the header contains and looks like", "footerDescription": "string — what the footer contains (contact info, website, phone, address)" },
+    "headerFooter": { "headerStyle": "string", "footerStyle": "string" },
     "schoolAssetUsage": { "useUniform": true/false, "uniformNotes": "...", "useInfrastructure": true/false, "infrastructureNotes": "..." },
     "designPrompt": "string — highly detailed prompt describing the exact final poster visual for the image generation model"
   }]

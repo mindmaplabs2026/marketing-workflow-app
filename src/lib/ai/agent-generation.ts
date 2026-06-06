@@ -423,12 +423,6 @@ BRANDING RULES:
 - All AI-generated imagery should match the school's visual identity (uniform colors, campus look).`;
   }
 
-  // Extract detailed asset descriptions from Agent 2's brief (if available)
-  const briefAny = brief as Record<string, unknown>;
-  const logoDescription = (briefAny.logoDescription as string) ?? "";
-  const headerDescription = (brief.headerFooter as Record<string, unknown>).headerDescription as string ?? "";
-  const footerDescription = (brief.headerFooter as Record<string, unknown>).footerDescription as string ?? "";
-
   return `Create a professional Instagram poster for ${schoolName}.
 
 ## Creative Direction: ${brief.direction}
@@ -447,19 +441,16 @@ ${photoSection}
 
 ${assetRules}
 
-## LOGO — REPRODUCE EXACTLY FROM REFERENCE IMAGE
-${logoDescription ? `The logo looks like: ${logoDescription}` : ""}
-Place at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}. Reproduce the logo EXACTLY as it appears in the reference image — every detail, color, icon, and text within it must match precisely. This is the school's official logo and must be pixel-perfect.
+## LOGO — COPY EXACTLY FROM REFERENCE IMAGE
+Place at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}. Copy the logo EXACTLY as it appears in the reference image. Do NOT redraw, reinterpret, or simplify it.
 
 ## HEADER (MANDATORY at top of every page)
 Style: ${brief.headerFooter.headerStyle}
-${headerDescription ? `Contents: ${headerDescription}` : ""}
-Reproduce the header from the reference image. Include the school name exactly as shown.
+Copy the header from the reference image exactly as shown.
 
 ## FOOTER (MANDATORY at bottom of every page)
 Style: ${brief.headerFooter.footerStyle}
-${footerDescription ? `Contents: ${footerDescription}` : ""}
-Reproduce the footer from the reference image with contact information exactly as shown.
+Copy the footer from the reference image exactly as shown.
 
 ${pageContext}
 
