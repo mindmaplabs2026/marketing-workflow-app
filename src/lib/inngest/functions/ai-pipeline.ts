@@ -193,11 +193,11 @@ type FailureEvent = { data: { event: { data: PipelineData }; error: { message?: 
 // ---------------------------------------------------------------
 export const aiPipelineAnalyze = inngest.createFunction(
   {
-    id: "ai-poster-analyze",
+    id: "ai-poster-understand",
     retries: 1,
     triggers: [{ event: "ai/pipeline.started" }],
     onFailure: async ({ event }: { event: FailureEvent }) => {
-      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Analysis failed");
+      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Understanding failed");
     },
   },
   async ({ event }: { event: { data: PipelineData } }) => {
@@ -227,14 +227,47 @@ export const aiPipelineAnalyze = inngest.createFunction(
       })
       .eq("id", jobId);
 
-    // Agent 2: Creative (re-fetch context for fresh signed URLs)
-    const ctx2 = await fetchContext(requestId);
+    // Chain to creative agent (separate function to avoid timeout)
+    await inngest.send({
+      name: "ai/pipeline.creative",
+      data: { jobId, requestId, posterType },
+    });
+  },
+);
+
+// ---------------------------------------------------------------
+// Function 2: Creative direction (Agent 2 with web search)
+// ---------------------------------------------------------------
+export const aiPipelineCreative = inngest.createFunction(
+  {
+    id: "ai-poster-creative",
+    retries: 1,
+    triggers: [{ event: "ai/pipeline.creative" }],
+    onFailure: async ({ event }: { event: FailureEvent }) => {
+      await markFailed(event.data.event.data.jobId, event.data.error.message ?? "Creative failed");
+    },
+  },
+  async ({ event }: { event: { data: PipelineData } }) => {
+    const { jobId, requestId, posterType } = event.data;
+    const admin = createAdminClient();
+
+    // Re-read Agent 1 output from DB
+    const { data: job } = await admin
+      .from("ai_generation_jobs")
+      .select("agent1_output")
+      .eq("id", jobId)
+      .single();
+    if (!job?.agent1_output) throw new Error("Agent 1 output not found");
+
+    const understanding = job.agent1_output as unknown as UnderstandingOutput;
+    const ctx = await fetchContext(requestId);
+
     const creative = await runCreativeAgent({
       understanding,
-      brandAssets: ctx2.brandAssets,
+      brandAssets: ctx.brandAssets,
       posterType,
-      schoolName: ctx2.schoolName,
-      schoolGuidelines: ctx2.schoolGuidelines,
+      schoolName: ctx.schoolName,
+      schoolGuidelines: ctx.schoolGuidelines,
     });
 
     await admin
@@ -245,7 +278,7 @@ export const aiPipelineAnalyze = inngest.createFunction(
       })
       .eq("id", jobId);
 
-    // Chain to variation 1 (V2/V3 disabled during testing)
+    // Chain to variation 1
     await inngest.send({
       name: "ai/pipeline.generate-v1",
       data: { jobId, requestId, posterType },
