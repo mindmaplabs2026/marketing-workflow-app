@@ -408,12 +408,13 @@ export default async function RequestDetailPage({
     req.status === "in_design" && designsList.length > 0;
   // Designer (assigned) or super admin can publish after design is approved.
   const canPublish = awaitingPublish && (isSuperAdmin || isAssignedDesigner);
-  // Designer can trigger AI generation when they've picked up the request
+  // Designer can trigger AI generation when they've picked up the request.
+  // Show the button if no AI job is currently running (queued/understanding/creative/generating).
+  const aiJobRunning = aiJob && !["completed", "failed"].includes(aiJob.status);
   const canTriggerAi =
-    isAssignedDesigner &&
-    !req.ai_generated &&
-    (req.status === "in_design" || req.status === "changes_requested") &&
-    designsList.length === 0;
+    (isAssignedDesigner || isSuperAdmin) &&
+    !aiJobRunning &&
+    (req.status === "in_design" || req.status === "changes_requested");
   const canArchive =
     (isCreator || isReviewer) &&
     req.status !== "archived" &&
@@ -529,9 +530,11 @@ export default async function RequestDetailPage({
         />
       )}
 
-      {/* AI: trigger button for designer */}
-      {canTriggerAi && (
-        <AiGenerateButton requestId={req.id} />
+      {/* AI: trigger / regenerate button for designer */}
+      {canTriggerAi && !aiVariations.some((v) => v.is_accepted) && (
+        req.ai_generated
+          ? <AiRegenerateButton requestId={req.id} currentTitle={req.title} currentDescription={req.description ?? ""} />
+          : <AiGenerateButton requestId={req.id} />
       )}
 
       {/* AI: generation progress (visible to designer + super_admin) */}
@@ -575,9 +578,6 @@ export default async function RequestDetailPage({
             }))}
             totalCostUsd={aiJob?.cost_tracking?.total_usd ?? null}
           />
-          {!aiVariations.some((v) => v.is_accepted) && (
-            <AiRegenerateButton requestId={req.id} label="Not satisfied? Regenerate" currentTitle={req.title} currentDescription={req.description ?? ""} />
-          )}
         </>
       )}
 
