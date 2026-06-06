@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { triggerAiGeneration } from "../actions";
 
 export function AiGenerateButton({ requestId }: { requestId: string }) {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [posterType, setPosterType] = useState<"single" | "carousel">("single");
@@ -18,7 +16,7 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
       setError(result.error);
       setBusy(false);
     } else {
-      router.refresh();
+      window.location.reload();
     }
   }
 

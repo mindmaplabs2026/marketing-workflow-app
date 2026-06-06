@@ -810,15 +810,14 @@ export async function regenerateAi(
 
   const supabase = await createClient();
 
-  // Update title/description if the designer changed them
-  if (title) {
-    const updates: { title: string; description?: string | null } = { title };
-    if (description !== undefined) updates.description = description;
-    await supabase
-      .from("requests")
-      .update(updates)
-      .eq("id", requestId);
-  }
+  // Ensure ai_generated is set + update title/description if changed
+  const updates: { ai_generated: boolean; title?: string; description?: string | null } = { ai_generated: true };
+  if (title) updates.title = title;
+  if (description !== undefined) updates.description = description;
+  await supabase
+    .from("requests")
+    .update(updates)
+    .eq("id", requestId);
 
   // Create a new AI generation job (old one stays for history)
   const { data: job, error: jobErr } = await supabase

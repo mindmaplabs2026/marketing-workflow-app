@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { regenerateAi } from "../actions";
 
 export function AiRegenerateButton({
@@ -15,7 +14,6 @@ export function AiRegenerateButton({
   currentTitle?: string;
   currentDescription?: string;
 }) {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [posterType, setPosterType] = useState<"single" | "carousel">("single");
@@ -35,7 +33,8 @@ export function AiRegenerateButton({
       setError(result.error);
       setBusy(false);
     } else {
-      router.refresh();
+      // Full page reload to ensure progress tracker shows up
+      window.location.reload();
     }
   }
 
