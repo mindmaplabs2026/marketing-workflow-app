@@ -340,7 +340,7 @@ function buildImagePrompt(
   page: { description: string; selectedImages: { path: string; placement: string; size: string }[]; textOverlays: { text: string; position: string; style: string }[] } | undefined,
   pageContext: string,
 ): string {
-  const { brief, schoolName, curatedImages } = input;
+  const { brief, understanding, schoolName, curatedImages } = input;
 
   const hasUploadedPhotos = curatedImages.length > 0 && brief.selectedImages.length > 0;
 
@@ -348,6 +348,25 @@ function buildImagePrompt(
   const briefAny = brief as Record<string, unknown>;
   const creativeVision = (briefAny.creativeVision as string) ?? "";
   const designPrompt = brief.designPrompt ?? "";
+
+  // Build uploaded photo details with descriptions from Agent 1
+  let photoSection = "";
+  if (hasUploadedPhotos) {
+    const photoDetails = brief.selectedImages
+      .map((img) => {
+        const curated = understanding.curatedImages.find((c) => c.path === img.path);
+        const desc = curated?.description ?? "uploaded photo";
+        return `- "${img.path.split("/").pop()}" → placement: ${img.placement}. Content: ${desc}`;
+      })
+      .join("\n");
+
+    photoSection = `## Uploaded Photos (provided as reference images)
+These are REAL photographs. Include them in the poster EXACTLY as they are.
+Do NOT redraw, modify, filter, or replace them with AI-generated versions.
+${photoDetails}`;
+  } else {
+    photoSection = `No uploaded photos — generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? "\nStudents MUST wear the school uniform from the uniform reference image." : ""}${brief.schoolAssetUsage.useInfrastructure ? "\nUse the infrastructure reference image for campus setting." : ""}`;
+  }
 
   return `Instagram poster for ${schoolName}. Portrait 1080x1350px, print-ready, professional.
 
@@ -365,7 +384,7 @@ Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${b
 Header: copy from reference image → top. ${brief.headerFooter.headerStyle}
 Footer: copy from reference image → bottom. ${brief.headerFooter.footerStyle}
 
-${hasUploadedPhotos ? "Uploaded photos provided as reference — include AS-IS, do NOT redraw." : `Generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? " Students MUST wear uniform from reference." : ""}${brief.schoolAssetUsage.useInfrastructure ? " Use infrastructure reference for setting." : ""}`}
+${photoSection}
 ${pageContext ? `\n${pageContext}` : ""}
 
 Maximum 2 lines of text on the poster. Visual-driven, premium quality.`;
