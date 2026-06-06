@@ -795,6 +795,8 @@ export async function triggerAiGeneration(
 export async function regenerateAi(
   requestId: string,
   posterType: "single" | "carousel",
+  title?: string,
+  description?: string | null,
 ): Promise<{ error?: string }> {
   const actor = await loadActor();
   if ("error" in actor) return { error: actor.error };
@@ -807,6 +809,16 @@ export async function regenerateAi(
   }
 
   const supabase = await createClient();
+
+  // Update title/description if the designer changed them
+  if (title) {
+    const updates: { title: string; description?: string | null } = { title };
+    if (description !== undefined) updates.description = description;
+    await supabase
+      .from("requests")
+      .update(updates)
+      .eq("id", requestId);
+  }
 
   // Create a new AI generation job (old one stays for history)
   const { data: job, error: jobErr } = await supabase

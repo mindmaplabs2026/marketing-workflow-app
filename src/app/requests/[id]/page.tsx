@@ -555,7 +555,7 @@ export default async function RequestDetailPage({
               </p>
             )}
           </div>
-          <AiRegenerateButton requestId={req.id} />
+          <AiRegenerateButton requestId={req.id} currentTitle={req.title} currentDescription={req.description ?? ""} />
         </div>
       )}
 
@@ -575,7 +575,7 @@ export default async function RequestDetailPage({
             }))}
           />
           {!aiVariations.some((v) => v.is_accepted) && (
-            <AiRegenerateButton requestId={req.id} label="Not satisfied? Regenerate" />
+            <AiRegenerateButton requestId={req.id} label="Not satisfied? Regenerate" currentTitle={req.title} currentDescription={req.description ?? ""} />
           )}
         </>
       )}
