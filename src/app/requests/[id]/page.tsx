@@ -190,7 +190,7 @@ export default async function RequestDetailPage({
       .from("ai_variations")
       .select("id, variation_index, creative_brief, storage_paths, poster_type, is_accepted, chat_rounds_used")
       .eq("request_id", id)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false });
     aiVariations = (vars ?? []) as typeof aiVariations;
   }
 
