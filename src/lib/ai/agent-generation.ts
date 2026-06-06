@@ -270,6 +270,9 @@ export async function runGenerationAgent(
    * Generate a single page — extracted so carousel pages can run in parallel.
    */
   async function generateOnePage(i: number): Promise<{ base64: string; prompt: string }> {
+    const pageStartTime = Date.now();
+    console.log(`[Agent3] Page ${i + 1}/${pages.length} generation STARTED at ${new Date().toISOString()}`);
+
     const page = pages[i];
 
     // For carousels: build per-page reference images (brand assets shared, photos per-page)
@@ -347,6 +350,7 @@ Rules:
 
     const enhancedPrompt = enhanced.choices[0]?.message?.content ?? rawPrompt;
     const prompt = enhancedPrompt + imageManifest;
+    console.log(`[Agent3] Page ${i + 1}/${pages.length} prompt enhanced at ${new Date().toISOString()} (${((Date.now() - pageStartTime) / 1000).toFixed(1)}s elapsed)`);
 
     const imageSize = "1024x1536" as const;
     let base64Result: string;
@@ -418,13 +422,17 @@ Rules:
       }
     }
 
+    console.log(`[Agent3] Page ${i + 1}/${pages.length} generation COMPLETE at ${new Date().toISOString()} (${((Date.now() - pageStartTime) / 1000).toFixed(1)}s total)`);
     return { base64: base64Result, prompt };
   }
 
   // Generate all pages — parallel for carousel, single for poster
+  console.log(`[Agent3] Starting ${pages.length} page(s) in parallel at ${new Date().toISOString()}`);
+  const allPagesStart = Date.now();
   const pageResults = await Promise.all(
     pages.map((_, i) => generateOnePage(i)),
   );
+  console.log(`[Agent3] All ${pages.length} page(s) complete in ${((Date.now() - allPagesStart) / 1000).toFixed(1)}s`);
 
   for (const result of pageResults) {
     imageUrls.push(`data:image/png;base64,${result.base64}`);
