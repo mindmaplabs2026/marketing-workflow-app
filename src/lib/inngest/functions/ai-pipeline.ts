@@ -140,6 +140,7 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
   }
 
   const curatedImages = [];
+  const unmatchedPaths: string[] = [];
   for (const imagePath of imagePaths) {
     // Match by exact path or by filename (Agent 2 may use truncated paths)
     const imageFilename = imagePath.split("/").pop() ?? "";
@@ -151,7 +152,15 @@ async function generateOneVariation(jobId: string, requestId: string, posterType
     );
     if (match) {
       curatedImages.push({ path: match.path, signedUrl: match.signedUrl });
+    } else {
+      unmatchedPaths.push(imagePath);
     }
+  }
+
+  console.log(`[Pipeline] Job ${jobId} | GenerateV${variationIndex + 1}: ${imagePaths.size} selected paths → ${curatedImages.length} matched, ${unmatchedPaths.length} unmatched`);
+  if (unmatchedPaths.length > 0) {
+    console.warn(`[Pipeline] Job ${jobId} | UNMATCHED photo paths: ${unmatchedPaths.join(", ")}`);
+    console.warn(`[Pipeline] Job ${jobId} | Available upload paths: ${ctx.images.map((i) => i.path).join(", ")}`);
   }
 
   const result = await runGenerationAgent({
@@ -237,6 +246,9 @@ export const aiPipelineAnalyze = inngest.createFunction(
 
     // Agent 1: Understanding
     const ctx = await fetchContext(requestId);
+    const brandAssetsByType = ctx.brandAssets.reduce((acc, a) => { acc[a.assetType] = (acc[a.assetType] ?? 0) + 1; return acc; }, {} as Record<string, number>);
+    console.log(`[Pipeline] Job ${jobId} | Agent1 INPUT: ${ctx.images.length} images, ${ctx.brandAssets.length} brand assets (${JSON.stringify(brandAssetsByType)}), title="${ctx.title}", posterType=${posterType}`);
+
     const understanding = await runUnderstandingAgent({
       title: ctx.title,
       description: ctx.description,
@@ -244,6 +256,11 @@ export const aiPipelineAnalyze = inngest.createFunction(
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       schoolGuidelines: ctx.schoolGuidelines,
     });
+
+    console.log(`[Pipeline] Job ${jobId} | Agent1 OUTPUT: theme="${understanding.theme}", ${understanding.curatedImages.length} curated images, ${understanding.rejectedImages?.length ?? 0} rejected`);
+    if (understanding.curatedImages.length > 0) {
+      console.log(`[Pipeline] Job ${jobId} | Agent1 curated: ${understanding.curatedImages.map((c) => `${c.path.split("/").pop()} (rel:${c.relevanceScore})`).join(", ")}`);
+    }
 
     await admin
       .from("ai_generation_jobs")
@@ -288,6 +305,8 @@ export const aiPipelineCreative = inngest.createFunction(
     const understanding = job.agent1_output as unknown as UnderstandingOutput;
     const ctx = await fetchContext(requestId);
 
+    console.log(`[Pipeline] Job ${jobId} | Agent2 INPUT: ${understanding.curatedImages.length} curated images, posterType=${posterType}, school="${ctx.schoolName}"`);
+
     const creative = await runCreativeAgent({
       understanding,
       brandAssets: ctx.brandAssets,
@@ -295,6 +314,22 @@ export const aiPipelineCreative = inngest.createFunction(
       schoolName: ctx.schoolName,
       schoolGuidelines: ctx.schoolGuidelines,
     });
+
+    // Log Agent 2 output summary
+    for (const v of creative.variations) {
+      const briefAny = v as Record<string, unknown>;
+      const selectedAssets = briefAny.selectedAssets as Record<string, unknown> | undefined;
+      const pageCount = v.layout.pages.length;
+      const briefImages = v.selectedImages.length;
+      const pageImages = v.layout.pages.reduce((sum, p) => sum + (p.selectedImages?.length ?? 0), 0);
+      console.log(`[Pipeline] Job ${jobId} | Agent2 OUTPUT v${v.variationIndex}: direction="${v.direction}", ${pageCount} pages, ${briefImages} brief-level photos, ${pageImages} page-level photos`);
+      if (selectedAssets) {
+        console.log(`[Pipeline] Job ${jobId} | Agent2 assets: logo=${selectedAssets.logo ? "yes" : "null"}, header=${selectedAssets.header ? "yes" : "null"}, footer=${selectedAssets.footer ? "yes" : "null"}, samples=${(selectedAssets.samples as string[] | undefined)?.length ?? 0}`);
+      }
+      for (const p of v.layout.pages) {
+        console.log(`[Pipeline] Job ${jobId} | Agent2 page ${p.pageIndex}: ${p.selectedImages?.length ?? 0} photos, vision=${p.creativeVision ? `${p.creativeVision.length} chars` : "MISSING"}`);
+      }
+    }
 
     await admin
       .from("ai_generation_jobs")
@@ -480,6 +515,11 @@ export const aiPipelineEvaluate = inngest.createFunction(
 
     const allPassed = pageEvaluations.every((e) => e.passed);
     const avgScore = Math.round(pageEvaluations.reduce((s, e) => s + e.score, 0) / pageEvaluations.length * 10) / 10;
+
+    console.log(`[Pipeline] Job ${jobId} | Evaluation round ${refinementRound + 1}: avg=${avgScore}, allPassed=${allPassed}`);
+    for (const pe of pageEvaluations) {
+      console.log(`[Pipeline] Job ${jobId} | Page ${pe.pageIndex + 1}: score=${pe.score}, passed=${pe.passed}, feedback="${pe.feedback.slice(0, 120)}"`);
+    }
 
     // Log evaluation in the variation's creative brief
     await admin

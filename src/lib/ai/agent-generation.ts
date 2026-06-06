@@ -251,6 +251,8 @@ export async function runGenerationAgent(
     }
   }
 
+  console.log(`[Agent3] Reference images: ${allSelectedPaths.size} selected paths, ${input.curatedImages.length} curated available`);
+
   const hasUploadedPhotos = input.curatedImages.length > 0 && allSelectedPaths.size > 0;
   if (hasUploadedPhotos) {
     for (const img of input.curatedImages) {
@@ -271,6 +273,10 @@ export async function runGenerationAgent(
       }
     }
   }
+
+  const photoCount = referenceImages.filter((r) => r.role.includes("UPLOADED PHOTO")).length;
+  const brandCount = referenceImages.filter((r) => !r.role.includes("UPLOADED PHOTO")).length;
+  console.log(`[Agent3] Total reference images: ${referenceImages.length} (${brandCount} brand assets, ${photoCount} photos)`);
 
   // For carousels, per-page vision comes from page.creativeVision directly.
   // Top-level creativeVision contains shared visual consistency rules only.
@@ -311,6 +317,8 @@ export async function runGenerationAgent(
       ? pagePhotoImages
       : referenceImages.filter((r) => r.role.includes("UPLOADED PHOTO"));
     const pageReferenceImages = [...brandRefImages, ...photoRefImages];
+
+    console.log(`[Agent3] Page ${i + 1}: ${brandRefImages.length} brand + ${photoRefImages.length} photos = ${pageReferenceImages.length} refs | vision=${page?.creativeVision ? `${page.creativeVision.length}ch` : "none"}`);
 
     const logoImgs = pageReferenceImages.filter((r) => r.role.includes("LOGO"));
     const otherImgs = pageReferenceImages.filter((r) => !r.role.includes("LOGO"));
