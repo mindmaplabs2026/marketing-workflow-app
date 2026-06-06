@@ -4,6 +4,8 @@ import {
   aiPipelineAnalyze,
   aiPipelineCreative,
   aiPipelineGenerateV1,
+  aiPipelineEvaluate,
+  aiPipelineRefine,
 } from "@/lib/inngest/functions/ai-pipeline";
 
 export const { GET, POST, PUT } = serve({
@@ -12,5 +14,7 @@ export const { GET, POST, PUT } = serve({
     aiPipelineAnalyze,
     aiPipelineCreative,
     aiPipelineGenerateV1,
+    aiPipelineEvaluate,
+    aiPipelineRefine,
   ],
 });

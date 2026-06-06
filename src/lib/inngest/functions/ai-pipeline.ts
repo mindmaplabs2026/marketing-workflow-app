@@ -2,7 +2,7 @@ import { inngest } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runUnderstandingAgent } from "@/lib/ai/agent-understanding";
 import { runCreativeAgent } from "@/lib/ai/agent-creative";
-import { runGenerationAgent } from "@/lib/ai/agent-generation";
+import { runGenerationAgent, evaluatePoster, refineAndRegenerate, QUALITY_THRESHOLD } from "@/lib/ai/agent-generation";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import type { UploadedImage } from "@/lib/ai/agent-understanding";
 import type { UnderstandingOutput } from "@/lib/ai/agent-understanding";
@@ -287,7 +287,7 @@ export const aiPipelineCreative = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------
-// Function 2: Generate variation 1
+// Function 3: Generate variation 1
 // ---------------------------------------------------------------
 export const aiPipelineGenerateV1 = inngest.createFunction(
   {
@@ -302,18 +302,231 @@ export const aiPipelineGenerateV1 = inngest.createFunction(
     const { jobId, requestId, posterType } = event.data;
     await generateOneVariation(jobId, requestId, posterType, 0);
 
-    // Finalize (V2/V3 disabled during testing — only 1 variation)
-    const admin = createAdminClient();
-    await admin
-      .from("ai_generation_jobs")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
-      .eq("id", jobId);
-    await dispatchPendingPushes();
+    // Chain to evaluate
+    await inngest.send({
+      name: "ai/pipeline.evaluate",
+      data: { jobId, requestId, posterType, refinementRound: 0 },
+    });
   },
 );
 
-// V2 and V3 generation functions — disabled during testing.
-// Uncomment and re-register in route.ts when ready for 3 variations.
-//
-// export const aiPipelineGenerateV2 = ...
-// export const aiPipelineGenerateV3 = ...
+// ---------------------------------------------------------------
+// Function 4: Evaluate the generated poster
+// ---------------------------------------------------------------
+type EvaluateData = PipelineData & { refinementRound: number };
+
+export const aiPipelineEvaluate = inngest.createFunction(
+  {
+    id: "ai-poster-evaluate",
+    retries: 1,
+    triggers: [{ event: "ai/pipeline.evaluate" }],
+    onFailure: async ({ event }: { event: { data: { event: { data: EvaluateData }; error: { message?: string } } } }) => {
+      // On eval failure, just finalize with what we have
+      const { jobId } = event.data.event.data;
+      const admin = createAdminClient();
+      await admin
+        .from("ai_generation_jobs")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", jobId);
+      await dispatchPendingPushes();
+    },
+  },
+  async ({ event }: { event: { data: EvaluateData } }) => {
+    const { jobId, requestId, posterType, refinementRound } = event.data;
+    const admin = createAdminClient();
+
+    // Get the latest variation's storage path
+    const { data: variation } = await admin
+      .from("ai_variations")
+      .select("id, storage_paths, creative_brief")
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!variation || variation.storage_paths.length === 0) {
+      // No variation to evaluate — just finalize
+      await admin
+        .from("ai_generation_jobs")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", jobId);
+      await dispatchPendingPushes();
+      return;
+    }
+
+    // Download the generated image to evaluate
+    const latestPath = variation.storage_paths[variation.storage_paths.length - 1];
+    const { data: imageData } = await admin.storage
+      .from("designs")
+      .download(latestPath);
+
+    if (!imageData) {
+      // Can't evaluate — finalize with what we have
+      await admin
+        .from("ai_generation_jobs")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", jobId);
+      await dispatchPendingPushes();
+      return;
+    }
+
+    const imageBase64 = Buffer.from(await imageData.arrayBuffer()).toString("base64");
+    const brief = variation.creative_brief as unknown as VariationBrief;
+
+    // Get school name for evaluation context
+    const { data: request } = await admin
+      .from("requests")
+      .select("school_id")
+      .eq("id", requestId)
+      .single();
+    const { data: school } = await admin
+      .from("schools")
+      .select("name")
+      .eq("id", request?.school_id ?? "")
+      .single();
+
+    const evaluation = await evaluatePoster(imageBase64, brief, school?.name ?? "School");
+
+    // Log evaluation in the variation's creative brief
+    await admin
+      .from("ai_variations")
+      .update({
+        creative_brief: {
+          ...brief,
+          _evaluation: {
+            round: refinementRound + 1,
+            score: evaluation.score,
+            feedback: evaluation.feedback,
+            passed: evaluation.passesThreshold,
+          },
+        } as unknown as Record<string, unknown>,
+      })
+      .eq("id", variation.id);
+
+    if (evaluation.passesThreshold || refinementRound >= 1) {
+      // Good enough or max refinements reached — finalize
+      await admin
+        .from("ai_generation_jobs")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", jobId);
+      await dispatchPendingPushes();
+    } else {
+      // Needs refinement — chain to refine
+      await inngest.send({
+        name: "ai/pipeline.refine",
+        data: {
+          jobId,
+          requestId,
+          posterType,
+          refinementRound: refinementRound + 1,
+          feedback: evaluation.feedback,
+          score: evaluation.score,
+        },
+      });
+    }
+  },
+);
+
+// ---------------------------------------------------------------
+// Function 5: Refine and regenerate
+// ---------------------------------------------------------------
+type RefineData = EvaluateData & { feedback: string; score: number };
+
+export const aiPipelineRefine = inngest.createFunction(
+  {
+    id: "ai-poster-refine",
+    retries: 1,
+    triggers: [{ event: "ai/pipeline.refine" }],
+    onFailure: async ({ event }: { event: { data: { event: { data: RefineData }; error: { message?: string } } } }) => {
+      // On refine failure, finalize with existing image
+      const { jobId } = event.data.event.data;
+      const admin = createAdminClient();
+      await admin
+        .from("ai_generation_jobs")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", jobId);
+      await dispatchPendingPushes();
+    },
+  },
+  async ({ event }: { event: { data: RefineData } }) => {
+    const { jobId, requestId, posterType, refinementRound, feedback, score } = event.data;
+    const admin = createAdminClient();
+
+    // Get the original prompt from the variation
+    const { data: variation } = await admin
+      .from("ai_variations")
+      .select("id, creative_brief")
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!variation) throw new Error("Variation not found for refinement");
+
+    const brief = variation.creative_brief as unknown as VariationBrief & {
+      _generation_log?: { prompts?: string[] };
+    };
+    const originalPrompt = brief._generation_log?.prompts?.[0] ?? brief.designPrompt;
+
+    // Re-read agent outputs and context
+    const { data: job } = await admin
+      .from("ai_generation_jobs")
+      .select("agent1_output, agent2_output")
+      .eq("id", jobId)
+      .single();
+
+    const understanding = job?.agent1_output as unknown as UnderstandingOutput;
+    const ctx = await fetchContext(requestId);
+
+    const curatedImages = [];
+    for (const img of brief.selectedImages) {
+      const match = ctx.images.find((i: UploadedImage) => i.path === img.path);
+      if (match) {
+        curatedImages.push({ path: match.path, signedUrl: match.signedUrl });
+      }
+    }
+
+    const result = await refineAndRegenerate(originalPrompt, feedback, score, {
+      brief,
+      understanding,
+      brandAssets: ctx.brandAssets.map((a) => ({
+        assetType: a.assetType,
+        storagePath: a.storagePath,
+        signedUrl: a.signedUrl,
+      })),
+      curatedImages,
+      schoolName: ctx.schoolName,
+    });
+
+    // Upload the refined image
+    const timestamp = Date.now();
+    const storagePath = `${ctx.schoolId}/${requestId}/ai/${brief.variationIndex}/refined-${timestamp}.png`;
+    const imageBuffer = Buffer.from(result.base64, "base64");
+
+    await admin.storage
+      .from("designs")
+      .upload(storagePath, imageBuffer, { contentType: "image/png", upsert: false });
+
+    // Update variation with the new image
+    await admin
+      .from("ai_variations")
+      .update({
+        storage_paths: [storagePath],
+        creative_brief: {
+          ...brief,
+          _generation_log: {
+            ...brief._generation_log,
+            refinedPrompt: result.refinedPrompt,
+            refinementRound,
+          },
+        } as unknown as Record<string, unknown>,
+      })
+      .eq("id", variation.id);
+
+    // Evaluate the refined version
+    await inngest.send({
+      name: "ai/pipeline.evaluate",
+      data: { jobId, requestId, posterType, refinementRound },
+    });
+  },
+);

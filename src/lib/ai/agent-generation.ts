@@ -31,20 +31,20 @@ export type GenerationResult = {
   refinementRounds: number;
 };
 
-type EvaluationResult = {
+export type EvaluationResult = {
   score: number;
   feedback: string;
   passesThreshold: boolean;
 };
 
-const QUALITY_THRESHOLD = 7; // out of 10
-const MAX_REFINEMENT_ROUNDS = 2;
+export const QUALITY_THRESHOLD = 7; // out of 10
 
 /**
  * Evaluates a generated poster using GPT-4o-mini vision.
  * Returns a score (1-10) and specific feedback for improvement.
+ * Exported so the pipeline can call it from a separate Inngest function.
  */
-async function evaluatePoster(
+export async function evaluatePoster(
   imageBase64: string,
   brief: VariationBrief,
   schoolName: string,
@@ -130,7 +130,6 @@ export async function runGenerationAgent(
 
   const imageUrls: string[] = [];
   const prompts: string[] = [];
-  let totalRefinementRounds = 0;
 
   // Two distinct modes:
   //
@@ -252,101 +251,55 @@ Rules:
     // Instagram portrait: 1024x1536 is the closest API size to 1080x1350 (4:5)
     const imageSize = "1024x1536" as const;
 
-    // Generate → Evaluate → Refine loop
-    let currentPrompt = prompt;
-    let bestBase64: string | null = null;
-    let rounds = 0;
+    // Single-pass generation (evaluate+refine handled in separate Inngest functions)
+    let base64Result: string;
 
-    for (let attempt = 0; attempt <= MAX_REFINEMENT_ROUNDS; attempt++) {
-      // Generate the image
-      let base64Result: string;
+    if (referenceImages.length > 0) {
+      const referenceFiles = await Promise.all(
+        referenceImages.map((img) =>
+          toFile(img.buffer, img.name, { type: "image/png" }),
+        ),
+      );
 
-      if (referenceImages.length > 0) {
-        const referenceFiles = await Promise.all(
-          referenceImages.map((img) =>
-            toFile(img.buffer, img.name, { type: "image/png" }),
-          ),
-        );
-
-        const response = await openai.images.edit({
-          model: "gpt-image-1",
-          image: referenceFiles,
-          prompt: currentPrompt,
-          n: 1,
-          size: imageSize,
-          quality: "high",
-        });
-
-        const item = response.data?.[0];
-        if (!item?.b64_json && !item?.url) {
-          throw new Error(`Agent 3: no image returned for variation ${brief.variationIndex}, page ${i + 1}`);
-        }
-        base64Result = item.b64_json ?? "";
-        if (!base64Result && item.url) {
-          const res = await fetch(item.url);
-          base64Result = Buffer.from(await res.arrayBuffer()).toString("base64");
-        }
-      } else {
-        const response = await openai.images.generate({
-          model: "gpt-image-1",
-          prompt: currentPrompt,
-          n: 1,
-          size: imageSize,
-          quality: "high",
-        });
-
-        const item = response.data?.[0];
-        if (!item?.b64_json && !item?.url) {
-          throw new Error(`Agent 3: no image returned for variation ${brief.variationIndex}, page ${i + 1}`);
-        }
-        base64Result = item.b64_json ?? "";
-        if (!base64Result && item.url) {
-          const res = await fetch(item.url);
-          base64Result = Buffer.from(await res.arrayBuffer()).toString("base64");
-        }
-      }
-
-      bestBase64 = base64Result;
-      rounds = attempt + 1;
-
-      // Skip evaluation on the last allowed attempt — just use what we have
-      if (attempt === MAX_REFINEMENT_ROUNDS) break;
-
-      // Evaluate the generated poster
-      const evaluation = await evaluatePoster(base64Result, brief, input.schoolName);
-      prompts.push(`[Eval round ${attempt + 1}: score=${evaluation.score}/10] ${evaluation.feedback}`);
-
-      if (evaluation.passesThreshold) {
-        // Good enough — use this image
-        break;
-      }
-
-      // Refine: create a new prompt incorporating the feedback
-      const refinedPromptResponse = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert image prompt engineer. You will receive the original poster prompt and quality feedback from an evaluator. Rewrite the prompt to address the feedback while keeping the core design intent. Output ONLY the improved prompt text.`,
-          },
-          {
-            role: "user",
-            content: `Original prompt:\n${currentPrompt}\n\nEvaluator feedback (score: ${evaluation.score}/10):\n${evaluation.feedback}\n\nRewrite the prompt to fix these issues:`,
-          },
-        ],
-        max_tokens: 1500,
+      const response = await openai.images.edit({
+        model: "gpt-image-1",
+        image: referenceFiles,
+        prompt,
+        n: 1,
+        size: imageSize,
+        quality: "high",
       });
 
-      currentPrompt = refinedPromptResponse.choices[0]?.message?.content ?? currentPrompt;
-      prompts.push(`[Refined prompt for round ${attempt + 2}]`);
+      const item = response.data?.[0];
+      if (!item?.b64_json && !item?.url) {
+        throw new Error(`Agent 3: no image returned for variation ${brief.variationIndex}, page ${i + 1}`);
+      }
+      base64Result = item.b64_json ?? "";
+      if (!base64Result && item.url) {
+        const res = await fetch(item.url);
+        base64Result = Buffer.from(await res.arrayBuffer()).toString("base64");
+      }
+    } else {
+      const response = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt,
+        n: 1,
+        size: imageSize,
+        quality: "high",
+      });
+
+      const item = response.data?.[0];
+      if (!item?.b64_json && !item?.url) {
+        throw new Error(`Agent 3: no image returned for variation ${brief.variationIndex}, page ${i + 1}`);
+      }
+      base64Result = item.b64_json ?? "";
+      if (!base64Result && item.url) {
+        const res = await fetch(item.url);
+        base64Result = Buffer.from(await res.arrayBuffer()).toString("base64");
+      }
     }
 
-    if (!bestBase64) {
-      throw new Error(`Agent 3: failed to generate image for variation ${brief.variationIndex}, page ${i + 1}`);
-    }
-
-    imageUrls.push(`data:image/png;base64,${bestBase64}`);
-    totalRefinementRounds += rounds;
+    imageUrls.push(`data:image/png;base64,${base64Result}`);
   }
 
   return {
@@ -354,7 +307,7 @@ Rules:
     model: "gpt-image-1",
     prompts,
     referenceImageCount: referenceImages.length,
-    refinementRounds: totalRefinementRounds,
+    refinementRounds: 0,
   };
 }
 
@@ -473,4 +426,110 @@ FORMAT: Instagram social media poster, portrait orientation 1080x1350px (4:5 rat
 STYLE: Clean modern design, strong visual hierarchy, generous whitespace, minimal text (headline + one short tagline MAX). The poster should be VISUAL-DRIVEN, not text-heavy. Think premium magazine ad, not a flyer.
 TYPOGRAPHY: Modern sans-serif, bold headline, clean readable type with good contrast against background. No more than 2 lines of text total.
 QUALITY: Ultra high quality, commercial advertising standard, polished and professional.`;
+}
+
+/**
+ * Refines a prompt based on evaluator feedback, then regenerates the image.
+ * Used by the evaluate+refine pipeline step.
+ */
+export async function refineAndRegenerate(
+  originalPrompt: string,
+  feedback: string,
+  score: number,
+  input: Agent3Input,
+): Promise<{ base64: string; refinedPrompt: string }> {
+  const openai = getOpenAI();
+
+  // Refine the prompt
+  const refined = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: "You are an expert image prompt engineer. Rewrite the poster prompt to address the evaluator's feedback while keeping the core design intent. Output ONLY the improved prompt text.",
+      },
+      {
+        role: "user",
+        content: `Original prompt:\n${originalPrompt}\n\nEvaluator feedback (score: ${score}/10):\n${feedback}\n\nRewrite the prompt to fix these issues:`,
+      },
+    ],
+    max_tokens: 1500,
+  });
+
+  const refinedPrompt = refined.choices[0]?.message?.content ?? originalPrompt;
+
+  // Regenerate with the refined prompt
+  const imageSize = "1024x1536" as const;
+  const { brief } = input;
+
+  // Collect reference images (same logic as runGenerationAgent)
+  const hasUploadedPhotos = input.curatedImages.length > 0 && brief.selectedImages.length > 0;
+  const referenceImages: { buffer: Buffer; name: string }[] = [];
+
+  const alwaysInclude = ["logo", "header", "footer"];
+  for (const asset of input.brandAssets) {
+    if (alwaysInclude.includes(asset.assetType) && asset.signedUrl) {
+      const buf = await downloadImage(asset.signedUrl);
+      if (buf) {
+        referenceImages.push({ buffer: buf, name: `brand-${asset.assetType}.png` });
+      }
+    }
+  }
+
+  // Add samples
+  const samples = input.brandAssets.filter((a) => a.assetType === "sample");
+  for (const s of samples.sort(() => Math.random() - 0.5).slice(0, 3)) {
+    if (s.signedUrl) {
+      const buf = await downloadImage(s.signedUrl);
+      if (buf) referenceImages.push({ buffer: buf, name: `style-sample.png` });
+    }
+  }
+
+  if (hasUploadedPhotos) {
+    const selectedPaths = new Set(brief.selectedImages.map((s) => s.path));
+    for (const img of input.curatedImages) {
+      const imgFilename = img.path.split("/").pop() ?? "";
+      const isSelected = selectedPaths.has(img.path) ||
+        [...selectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
+      if (isSelected) {
+        const buf = await downloadImage(img.signedUrl);
+        if (buf) referenceImages.push({ buffer: buf, name: imgFilename });
+      }
+    }
+  } else {
+    for (const asset of input.brandAssets) {
+      if (["uniform", "infrastructure"].includes(asset.assetType) && asset.signedUrl) {
+        const buf = await downloadImage(asset.signedUrl);
+        if (buf) referenceImages.push({ buffer: buf, name: `brand-${asset.assetType}.png` });
+      }
+    }
+  }
+
+  let base64: string;
+
+  if (referenceImages.length > 0) {
+    const files = await Promise.all(
+      referenceImages.map((img) => toFile(img.buffer, img.name, { type: "image/png" })),
+    );
+    const response = await openai.images.edit({
+      model: "gpt-image-1", image: files, prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
+    });
+    const item = response.data?.[0];
+    base64 = item?.b64_json ?? "";
+    if (!base64 && item?.url) {
+      base64 = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
+    }
+  } else {
+    const response = await openai.images.generate({
+      model: "gpt-image-1", prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
+    });
+    const item = response.data?.[0];
+    base64 = item?.b64_json ?? "";
+    if (!base64 && item?.url) {
+      base64 = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
+    }
+  }
+
+  if (!base64) throw new Error("Refinement: no image returned");
+  return { base64, refinedPrompt };
 }
