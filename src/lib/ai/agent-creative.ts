@@ -1,5 +1,5 @@
 import "server-only";
-import { getOpenAI } from "./openai-client";
+import { getOpenAI, withRateLimitRetry } from "./openai-client";
 import type { UnderstandingOutput } from "./agent-understanding";
 
 /** Layout for a single poster page. */
@@ -264,18 +264,20 @@ Create 1 creative direction brief. Make it the strongest possible direction for 
 
   // Use Responses API with web_search tool so the agent can research
   // current design trends, color palettes, and visual styles on its own
-  const response = await openai.responses.create({
-    model: "gpt-4o-mini",
-    input: inputItems,
-    tools: [
-      {
-        type: "web_search",
-        search_context_size: "medium",
-      },
-    ],
-    instructions: "After researching current design trends for the theme using web search, return ONLY valid JSON matching the schema in the system instructions. Do not include any text outside the JSON.",
-    max_output_tokens: 8192,
-  });
+  const response = await withRateLimitRetry(() =>
+    openai.responses.create({
+      model: "gpt-4o-mini",
+      input: inputItems,
+      tools: [
+        {
+          type: "web_search",
+          search_context_size: "medium",
+        },
+      ],
+      instructions: "After researching current design trends for the theme using web search, return ONLY valid JSON matching the schema in the system instructions. Do not include any text outside the JSON.",
+      max_output_tokens: 8192,
+    }),
+  );
 
   // Extract text content from the response output
   let raw = "";

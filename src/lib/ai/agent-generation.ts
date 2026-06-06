@@ -1,5 +1,5 @@
 import "server-only";
-import { getOpenAI } from "./openai-client";
+import { getOpenAI, withRateLimitRetry } from "./openai-client";
 import type { VariationBrief } from "./agent-creative";
 import type { UnderstandingOutput } from "./agent-understanding";
 import { toFile } from "openai";
@@ -86,7 +86,7 @@ export async function evaluatePoster(
     image_url: { url: `data:image/png;base64,${imageBase64}`, detail: "high" },
   });
 
-  const response = await openai.chat.completions.create({
+  const response = await withRateLimitRetry(() => openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       {
@@ -116,7 +116,7 @@ Return ONLY valid JSON:
     ],
     response_format: { type: "json_object" },
     max_tokens: 500,
-  });
+  }));
 
   const raw = response.choices[0]?.message?.content;
   if (!raw) return { score: 5, feedback: "Could not evaluate", passesThreshold: false };
@@ -334,14 +334,16 @@ Rules:
 - Format: Instagram portrait 1080x1350px, print-ready, professional
 - Preserve all logo, header, footer, and photo placement instructions exactly as given`;
 
-    const enhanced = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: enhancerSystemPrompt },
-        { role: "user", content: rawPrompt },
-      ],
-      max_tokens: 1500,
-    });
+    const enhanced = await withRateLimitRetry(() =>
+      openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: enhancerSystemPrompt },
+          { role: "user", content: rawPrompt },
+        ],
+        max_tokens: 1500,
+      }),
+    );
 
     const enhancedPrompt = enhanced.choices[0]?.message?.content ?? rawPrompt;
     const prompt = enhancedPrompt + imageManifest;
@@ -551,20 +553,22 @@ export async function refineAndRegenerate(
   const openai = getOpenAI();
 
   // Refine the prompt
-  const refined = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: "You are an expert image prompt engineer. Rewrite the poster prompt to address the evaluator's feedback while keeping the core design intent. Output ONLY the improved prompt text.",
-      },
-      {
-        role: "user",
-        content: `Original prompt:\n${originalPrompt}\n\nEvaluator feedback (score: ${score}/10):\n${feedback}\n\nRewrite the prompt to fix these issues:`,
-      },
-    ],
-    max_tokens: 1500,
-  });
+  const refined = await withRateLimitRetry(() =>
+    openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert image prompt engineer. Rewrite the poster prompt to address the evaluator's feedback while keeping the core design intent. Output ONLY the improved prompt text.",
+        },
+        {
+          role: "user",
+          content: `Original prompt:\n${originalPrompt}\n\nEvaluator feedback (score: ${score}/10):\n${feedback}\n\nRewrite the prompt to fix these issues:`,
+        },
+      ],
+      max_tokens: 1500,
+    }),
+  );
 
   let refinedPrompt = refined.choices[0]?.message?.content ?? originalPrompt;
 

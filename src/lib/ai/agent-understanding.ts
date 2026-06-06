@@ -1,5 +1,5 @@
 import "server-only";
-import { getOpenAI } from "./openai-client";
+import { getOpenAI, withRateLimitRetry } from "./openai-client";
 
 /** Image metadata passed into Agent 1. */
 export type UploadedImage = {
@@ -85,18 +85,20 @@ export async function runUnderstandingAgent(
     });
   }
 
-  const pass1Response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: "You are a quick image scanner for school marketing posters. Rapidly assess each image for relevance and quality. Be decisive — reject blurry, irrelevant, or duplicate images immediately.",
-      },
-      { role: "user", content: pass1Content },
-    ],
-    response_format: { type: "json_object" },
-    max_tokens: 4096,
-  });
+  const pass1Response = await withRateLimitRetry(() =>
+    openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are a quick image scanner for school marketing posters. Rapidly assess each image for relevance and quality. Be decisive — reject blurry, irrelevant, or duplicate images immediately.",
+        },
+        { role: "user", content: pass1Content },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 4096,
+    }),
+  );
 
   const pass1Raw = pass1Response.choices[0]?.message?.content;
   if (!pass1Raw) throw new Error("Agent 1 Pass 1: empty response");
@@ -162,7 +164,7 @@ async function deepAnalysis(
     });
   }
 
-  const response = await openai.chat.completions.create({
+  const response = await withRateLimitRetry(() => openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       {
@@ -192,7 +194,7 @@ Return ONLY valid JSON matching this schema:
     ],
     response_format: { type: "json_object" },
     max_tokens: 4096,
-  });
+  }));
 
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error("Agent 1: empty response from model");
