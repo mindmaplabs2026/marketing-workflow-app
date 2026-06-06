@@ -51,22 +51,28 @@ export default async function VariationChatPage({
     .order("created_at", { ascending: true })
     .returns<ChatMessage[]>();
 
-  // Sign ALL carousel page URLs (not just the last one)
+  // For carousel: sign all page URLs. For single: only the latest version
+  // (chat edits append to storage_paths, so [0] is original, [1+] are edits)
   const posterUrls: string[] = [];
-  for (const path of variation.storage_paths) {
+  const isSingle = (variation.poster_type as string) === "single";
+  const pathsToSign = isSingle
+    ? [variation.storage_paths[variation.storage_paths.length - 1]]
+    : variation.storage_paths;
+  for (const path of pathsToSign) {
+    if (!path) continue;
     const { data } = await supabase.storage
       .from("designs")
-      .createSignedUrl(path, 600);
+      .createSignedUrl(path, 3600);
     if (data?.signedUrl) posterUrls.push(data.signedUrl);
   }
 
-  // Sign image URLs in chat messages
+  // Sign image URLs in chat messages (1hr TTL to avoid expiry during long sessions)
   const messageImageUrls = new Map<string, string>();
   for (const msg of messages ?? []) {
     for (const path of msg.image_paths) {
       const { data } = await supabase.storage
         .from("designs")
-        .createSignedUrl(path, 600);
+        .createSignedUrl(path, 3600);
       if (data?.signedUrl) messageImageUrls.set(path, data.signedUrl);
     }
   }

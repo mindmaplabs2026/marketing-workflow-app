@@ -788,6 +788,49 @@ export async function triggerAiGeneration(
   return {};
 }
 
+/**
+ * Regenerate AI posters — creates a new job for an already-AI-marked request.
+ * Works whether the previous run failed or completed (designer wants a fresh set).
+ */
+export async function regenerateAi(
+  requestId: string,
+  posterType: "single" | "carousel",
+): Promise<{ error?: string }> {
+  const actor = await loadActor();
+  if ("error" in actor) return { error: actor.error };
+
+  const req = await loadRequestForUpdate(requestId);
+  if ("error" in req) return { error: req.error };
+
+  if (actor.role !== "super_admin" && actor.role !== "designer") {
+    return { error: "Only a designer can trigger AI generation." };
+  }
+
+  const supabase = await createClient();
+
+  // Create a new AI generation job (old one stays for history)
+  const { data: job, error: jobErr } = await supabase
+    .from("ai_generation_jobs")
+    .insert({ request_id: requestId })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (jobErr || !job) {
+    return { error: jobErr?.message ?? "Could not create AI job." };
+  }
+
+  await inngest.send({
+    name: "ai/pipeline.started",
+    data: {
+      jobId: job.id,
+      requestId,
+      posterType,
+    },
+  });
+
+  return {};
+}
+
 export async function acceptAiVariation(formData: FormData) {
   const variationId = String(formData.get("variation_id") ?? "");
   const requestId = String(formData.get("request_id") ?? "");

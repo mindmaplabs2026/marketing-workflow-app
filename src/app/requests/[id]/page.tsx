@@ -33,6 +33,7 @@ import { AssetDownloadGrid, type AssetItem } from "@/components/asset-download-g
 import { AiGenerationStatus } from "./ai-generation-status";
 import { AiVariations } from "./ai-variations";
 import { AiGenerateButton } from "./ai-generate-button";
+import { AiRegenerateButton } from "./ai-regenerate-button";
 import type { AiJobStatus } from "@/lib/supabase/types";
 
 type RequestRow = {
@@ -534,27 +535,49 @@ export default async function RequestDetailPage({
       )}
 
       {/* AI: generation progress (visible to designer + super_admin) */}
-      {req.ai_generated && aiJob && aiJob.status !== "completed" && (isAssignedDesigner || isSuperAdmin) && (
+      {req.ai_generated && aiJob && aiJob.status !== "completed" && aiJob.status !== "failed" && (isAssignedDesigner || isSuperAdmin) && (
         <AiGenerationStatus
           jobId={aiJob.id}
           initialStatus={aiJob.status}
         />
       )}
 
+      {/* AI: failed — show error + regenerate button */}
+      {req.ai_generated && aiJob?.status === "failed" && (isAssignedDesigner || isSuperAdmin) && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-900/20">
+            <p className="text-sm font-medium text-red-700 dark:text-red-300">
+              AI generation failed
+            </p>
+            {aiJob.error_message && (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                {aiJob.error_message}
+              </p>
+            )}
+          </div>
+          <AiRegenerateButton requestId={req.id} />
+        </div>
+      )}
+
       {/* AI: variation review (visible to designer + super_admin) */}
       {req.ai_generated && aiJob?.status === "completed" && aiVariations.length > 0 && (isAssignedDesigner || isSuperAdmin) && (
-        <AiVariations
-          requestId={req.id}
-          variations={aiVariations.map((v) => ({
-            ...v,
-            creative_brief: v.creative_brief as {
-              direction?: string;
-              theme?: string;
-              colorPalette?: string[];
-              textContent?: { headline?: string };
-            },
-          }))}
-        />
+        <>
+          <AiVariations
+            requestId={req.id}
+            variations={aiVariations.map((v) => ({
+              ...v,
+              creative_brief: v.creative_brief as {
+                direction?: string;
+                theme?: string;
+                colorPalette?: string[];
+                textContent?: { headline?: string };
+              },
+            }))}
+          />
+          {!aiVariations.some((v) => v.is_accepted) && (
+            <AiRegenerateButton requestId={req.id} label="Not satisfied? Regenerate" />
+          )}
+        </>
       )}
 
       {designsList.length > 0 && role !== "decision_maker" && (

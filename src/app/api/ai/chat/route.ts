@@ -153,7 +153,7 @@ export async function GET(request: Request) {
   if (assistantMsg.image_paths.length > 0) {
     const { data: signedData } = await supabase.storage
       .from("designs")
-      .createSignedUrl(assistantMsg.image_paths[0], 600);
+      .createSignedUrl(assistantMsg.image_paths[0], 3600);
     imageUrl = signedData?.signedUrl ?? null;
   }
 

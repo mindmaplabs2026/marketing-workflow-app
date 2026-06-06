@@ -309,20 +309,32 @@ Rules:
         ...referenceImages.filter((r) => r.role.includes("LOGO")),
         ...referenceImages.filter((r) => !r.role.includes("LOGO")),
       ];
+      // Filter out any invalid buffers before converting to files
+      const validImages = logoFirst.filter((img) => img.buffer && img.buffer.length > 0);
+      if (validImages.length === 0) {
+        throw new Error(`Agent 3: no valid reference images for variation ${brief.variationIndex}`);
+      }
       const referenceFiles = await Promise.all(
-        logoFirst.map((img) =>
+        validImages.map((img) =>
           toFile(img.buffer, img.name, { type: "image/png" }),
         ),
       );
 
-      const response = await openai.images.edit({
-        model: "gpt-image-2",
-        image: referenceFiles,
-        prompt,
-        n: 1,
-        size: imageSize,
-        quality: "high",
-      });
+      let response;
+      try {
+        response = await openai.images.edit({
+          model: "gpt-image-2",
+          image: referenceFiles,
+          prompt,
+          n: 1,
+          size: imageSize,
+          quality: "high",
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`OpenAI images.edit failed for variation ${brief.variationIndex}, page ${i + 1}:`, msg);
+        throw new Error(`Image generation failed: ${msg}`);
+      }
 
       const item = response.data?.[0];
       if (!item?.b64_json && !item?.url) {
@@ -334,13 +346,20 @@ Rules:
         base64Result = Buffer.from(await res.arrayBuffer()).toString("base64");
       }
     } else {
-      const response = await openai.images.generate({
-        model: "gpt-image-2",
-        prompt,
-        n: 1,
-        size: imageSize,
-        quality: "high",
-      });
+      let response;
+      try {
+        response = await openai.images.generate({
+          model: "gpt-image-2",
+          prompt,
+          n: 1,
+          size: imageSize,
+          quality: "high",
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`OpenAI images.generate failed for variation ${brief.variationIndex}, page ${i + 1}:`, msg);
+        throw new Error(`Image generation failed: ${msg}`);
+      }
 
       const item = response.data?.[0];
       if (!item?.b64_json && !item?.url) {
@@ -512,21 +531,36 @@ export async function refineAndRegenerate(
   let base64: string;
 
   if (referenceImages.length > 0) {
+    const validImages = referenceImages.filter((img) => img.buffer && img.buffer.length > 0);
     const files = await Promise.all(
-      referenceImages.map((img) => toFile(img.buffer, img.name, { type: "image/png" })),
+      validImages.map((img) => toFile(img.buffer, img.name, { type: "image/png" })),
     );
-    const response = await openai.images.edit({
-      model: "gpt-image-2", image: files, prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
-    });
+    let response;
+    try {
+      response = await openai.images.edit({
+        model: "gpt-image-2", image: files, prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Refinement images.edit failed:", msg);
+      throw new Error(`Refinement image generation failed: ${msg}`);
+    }
     const item = response.data?.[0];
     base64 = item?.b64_json ?? "";
     if (!base64 && item?.url) {
       base64 = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
     }
   } else {
-    const response = await openai.images.generate({
-      model: "gpt-image-2", prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
-    });
+    let response;
+    try {
+      response = await openai.images.generate({
+        model: "gpt-image-2", prompt: refinedPrompt, n: 1, size: imageSize, quality: "high",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Refinement images.generate failed:", msg);
+      throw new Error(`Refinement image generation failed: ${msg}`);
+    }
     const item = response.data?.[0];
     base64 = item?.b64_json ?? "";
     if (!base64 && item?.url) {
