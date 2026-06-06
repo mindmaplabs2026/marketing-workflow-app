@@ -233,8 +233,13 @@ export async function runGenerationAgent(
       : "";
 
     // Build image manifest so the model knows exactly what each reference image is
+    // Prioritize logo by putting it first and emphasizing it
+    const logoImages = referenceImages.filter((r) => r.role.includes("LOGO"));
+    const otherImages = referenceImages.filter((r) => !r.role.includes("LOGO"));
+    const orderedImages = [...logoImages, ...otherImages];
+
     const imageManifest = referenceImages.length > 0
-      ? `\n## REFERENCE IMAGE MANIFEST\nYou are receiving ${referenceImages.length} reference images alongside this prompt. Here is what each one is:\n${referenceImages.map((r) => `- ${r.role}`).join("\n")}\n\nYou MUST use these reference images as described above. The logo must appear in the final poster. The header and footer must be replicated. Sample posters show the quality standard to match.`
+      ? `\n## REFERENCE IMAGE MANIFEST\nYou are receiving ${referenceImages.length} reference images alongside this prompt. Here is what each one is:\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\nCRITICAL INSTRUCTIONS FOR REFERENCE IMAGES:\n1. LOGO: The school logo reference image(s) MUST be reproduced EXACTLY — copy every detail, color, shape, icon, and text within the logo precisely. Do NOT redraw or reinterpret the logo.\n2. HEADER: Reproduce the header bar from the reference, including school name and styling.\n3. FOOTER: Reproduce the footer bar from the reference, including contact information.\n4. SAMPLE POSTERS: These show the quality standard and design language to match. Study their layout, typography mixing, and visual richness.\n5. The final poster should look like it was designed by the same designer who made the sample posters.`
       : "";
 
     const rawPrompt = buildImagePrompt(input, page, pageContext) + imageManifest;
@@ -274,8 +279,13 @@ Rules:
     let base64Result: string;
 
     if (referenceImages.length > 0) {
+      // Put logo images first — the model gives more weight to earlier reference images
+      const logoFirst = [
+        ...referenceImages.filter((r) => r.role.includes("LOGO")),
+        ...referenceImages.filter((r) => !r.role.includes("LOGO")),
+      ];
       const referenceFiles = await Promise.all(
-        referenceImages.map((img) =>
+        logoFirst.map((img) =>
           toFile(img.buffer, img.name, { type: "image/png" }),
         ),
       );
@@ -413,6 +423,12 @@ BRANDING RULES:
 - All AI-generated imagery should match the school's visual identity (uniform colors, campus look).`;
   }
 
+  // Extract detailed asset descriptions from Agent 2's brief (if available)
+  const briefAny = brief as Record<string, unknown>;
+  const logoDescription = (briefAny.logoDescription as string) ?? "";
+  const headerDescription = (brief.headerFooter as Record<string, unknown>).headerDescription as string ?? "";
+  const footerDescription = (brief.headerFooter as Record<string, unknown>).footerDescription as string ?? "";
+
   return `Create a professional Instagram poster for ${schoolName}.
 
 ## Creative Direction: ${brief.direction}
@@ -431,8 +447,19 @@ ${photoSection}
 
 ${assetRules}
 
-## Header style: ${brief.headerFooter.headerStyle} (MANDATORY on every page)
-## Footer style: ${brief.headerFooter.footerStyle} (MANDATORY on every page)
+## LOGO — REPRODUCE EXACTLY FROM REFERENCE IMAGE
+${logoDescription ? `The logo looks like: ${logoDescription}` : ""}
+Place at ${brief.logoPlacement.position}, ${brief.logoPlacement.size}. Reproduce the logo EXACTLY as it appears in the reference image — every detail, color, icon, and text within it must match precisely. This is the school's official logo and must be pixel-perfect.
+
+## HEADER (MANDATORY at top of every page)
+Style: ${brief.headerFooter.headerStyle}
+${headerDescription ? `Contents: ${headerDescription}` : ""}
+Reproduce the header from the reference image. Include the school name exactly as shown.
+
+## FOOTER (MANDATORY at bottom of every page)
+Style: ${brief.headerFooter.footerStyle}
+${footerDescription ? `Contents: ${footerDescription}` : ""}
+Reproduce the footer from the reference image with contact information exactly as shown.
 
 ${pageContext}
 
