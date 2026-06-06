@@ -44,6 +44,7 @@ export function VariationChat({
   const [currentUrls, setCurrentUrls] = useState(posterUrls);
   const [rounds, setRounds] = useState(roundsUsed);
   const [activePage, setActivePage] = useState(0);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   async function handleSend() {
@@ -123,31 +124,69 @@ export function VariationChat({
 
   return (
     <div className="space-y-4">
+      {/* Fullscreen lightbox */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxUrl(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/20 p-2 text-white hover:bg-white/30"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+          <img
+            src={lightboxUrl}
+            alt="Full preview"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       {/* Poster preview — all pages floating on top */}
       <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <div className={`flex gap-3 ${currentUrls.length === 1 ? "justify-center" : "overflow-x-auto pb-2"}`}>
           {currentUrls.map((url, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setActivePage(i)}
-              className={`relative shrink-0 overflow-hidden rounded-lg transition-all ${
-                activePage === i
-                  ? "ring-2 ring-violet-600 ring-offset-2 dark:ring-offset-zinc-900"
-                  : "opacity-70 hover:opacity-100"
-              } ${currentUrls.length === 1 ? "w-72" : "w-48"}`}
-            >
-              <img
-                src={url}
-                alt={`Page ${i + 1}`}
-                className="aspect-square w-full object-cover"
-              />
+            <div key={i} className="relative shrink-0">
+              {/* Thumbnail — click to select for editing */}
+              <button
+                type="button"
+                onClick={() => setActivePage(i)}
+                className={`overflow-hidden rounded-lg transition-all ${
+                  activePage === i
+                    ? "ring-2 ring-violet-600 ring-offset-2 dark:ring-offset-zinc-900"
+                    : "opacity-70 hover:opacity-100"
+                } ${currentUrls.length === 1 ? "w-80" : "w-52"}`}
+              >
+                <img
+                  src={url}
+                  alt={`Page ${i + 1}`}
+                  className="w-full object-contain"
+                />
+              </button>
+              {/* Expand button */}
+              <button
+                type="button"
+                onClick={() => setLightboxUrl(url)}
+                className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
+                style={{ opacity: 1 }}
+                title="View full size"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                </svg>
+              </button>
               {currentUrls.length > 1 && (
                 <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
                   {i + 1}/{currentUrls.length}
                 </span>
               )}
-            </button>
+            </div>
           ))}
         </div>
 
@@ -203,7 +242,8 @@ export function VariationChat({
                         key={i}
                         src={url}
                         alt="Updated poster"
-                        className="h-28 w-28 rounded-lg border border-zinc-200 object-cover dark:border-zinc-700"
+                        onClick={() => setLightboxUrl(url)}
+                        className="h-40 w-auto cursor-pointer rounded-lg border border-zinc-200 object-contain hover:opacity-80 dark:border-zinc-700"
                       />
                     ))}
                   </div>
