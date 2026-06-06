@@ -99,25 +99,30 @@ async function fetchContext(requestId: string) {
 }
 
 async function appendCosts(jobId: string, newCosts: CostTracking) {
-  const admin = createAdminClient();
-  const { data: job } = await admin
-    .from("ai_generation_jobs")
-    .select("cost_tracking")
-    .eq("id", jobId)
-    .single();
+  try {
+    const admin = createAdminClient();
+    const { data: job } = await admin
+      .from("ai_generation_jobs")
+      .select("cost_tracking")
+      .eq("id", jobId)
+      .single();
 
-  const existing = (job?.cost_tracking ?? { entries: [], total_usd: 0 }) as CostTracking;
-  const merged: CostTracking = {
-    entries: [...existing.entries, ...newCosts.entries],
-    total_usd: Math.round((existing.total_usd + newCosts.total_usd) * 1_000_000) / 1_000_000,
-  };
+    const existing = (job?.cost_tracking ?? { entries: [], total_usd: 0 }) as CostTracking;
+    const merged: CostTracking = {
+      entries: [...existing.entries, ...newCosts.entries],
+      total_usd: Math.round((existing.total_usd + newCosts.total_usd) * 1_000_000) / 1_000_000,
+    };
 
-  await admin
-    .from("ai_generation_jobs")
-    .update({ cost_tracking: merged as unknown as Record<string, unknown> })
-    .eq("id", jobId);
+    await admin
+      .from("ai_generation_jobs")
+      .update({ cost_tracking: merged as unknown as Record<string, unknown> })
+      .eq("id", jobId);
 
-  console.log(`[Pipeline] Job ${jobId} | Costs: +$${newCosts.total_usd.toFixed(4)} → total $${merged.total_usd.toFixed(4)}`);
+    console.log(`[Pipeline] Job ${jobId} | Costs: +$${newCosts.total_usd.toFixed(4)} → total $${merged.total_usd.toFixed(4)}`);
+  } catch (err) {
+    // Don't let cost tracking failures crash the pipeline
+    console.warn(`[Pipeline] Job ${jobId} | Cost tracking failed:`, err instanceof Error ? err.message : err);
+  }
 }
 
 async function markFailed(jobId: string, message: string) {
