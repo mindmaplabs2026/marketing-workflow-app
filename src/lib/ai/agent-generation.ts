@@ -265,32 +265,36 @@ export async function runGenerationAgent(
       ? `\n\nReference images provided (${referenceImages.length} total):\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\nCopy the LOGO exactly. Copy the HEADER and FOOTER exactly. Match the SAMPLE POSTERS' design quality.`
       : "";
 
-    const rawPrompt = buildImagePrompt(input, page, pageContext) + imageManifest;
+    const rawPrompt = buildImagePrompt(input, page, pageContext);
 
-    // Prompt enhancer: expand the creative direction into detailed visual language.
-    // IMPORTANT: it must PRESERVE the reference image manifest and asset instructions exactly.
+    // Prompt enhancer: expand ONLY the creative direction.
+    // The manifest is appended AFTER enhancement so the enhancer can't
+    // rewrite, summarize, or drop reference image instructions.
     const enhanced = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are an expert image prompt engineer. Expand the poster brief into a detailed visual prompt.
+          content: `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt.
 
 Rules:
 - Output ONLY the enhanced prompt, nothing else
-- PRESERVE all reference image instructions exactly (logo, header, footer, manifest) — do NOT rewrite or remove them
-- Expand the CREATIVE DIRECTION part: add specific details about composition, visual elements, colors, mood, lighting
-- Keep text minimal — headline + one tagline max on the poster
-- Be specific about layout: where the hero visual goes, spacing, visual flow
+- Expand the creative vision with specific visual details: composition, lighting, textures, color gradients, spacing, depth, mood
+- Be specific about layout: where elements sit, how the eye flows, what's in the foreground vs background
+- Keep all text content exactly as specified (headline, tagline) — do NOT add or change text
 - Format: Instagram portrait 1080x1350px, print-ready, professional
-- Do NOT add new text content beyond what's specified in the brief`,
+- Preserve all logo, header, footer, and photo placement instructions exactly as given`,
         },
         { role: "user", content: rawPrompt },
       ],
       max_tokens: 1500,
     });
 
-    const prompt = enhanced.choices[0]?.message?.content ?? rawPrompt;
+    const enhancedPrompt = enhanced.choices[0]?.message?.content ?? rawPrompt;
+
+    // Append manifest AFTER enhancement — this is the single source of truth
+    // for reference images and must reach the image model exactly as-is
+    const prompt = enhancedPrompt + imageManifest;
     prompts.push(prompt);
 
     // Instagram portrait: 1024x1536 is the closest API size to 1080x1350 (4:5)
