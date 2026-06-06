@@ -258,17 +258,40 @@ export async function runGenerationAgent(
     }
   }
 
+  // For carousels, extract per-page vision from the creativeVision field
+  const briefAny = brief as Record<string, unknown>;
+  const fullCreativeVision = (briefAny.creativeVision as string) ?? "";
+  const pageVisions = parsePageVisions(fullCreativeVision, pages.length);
+
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i];
     const isCarousel = brief.layout.type === "carousel";
-    const pageContext = isCarousel
-      ? `\n\nThis is page ${i + 1} of ${pages.length} in a carousel. ${page.description}`
-      : "";
 
-    // Build image manifest so the model knows exactly what each reference image is
-    // Prioritize logo by putting it first and emphasizing it
-    const logoImages = referenceImages.filter((r) => r.role.includes("LOGO"));
-    const otherImages = referenceImages.filter((r) => !r.role.includes("LOGO"));
+    // For carousels: build per-page reference images (brand assets shared, photos per-page)
+    const pagePhotoImages: typeof referenceImages = [];
+    if (isCarousel && page?.selectedImages?.length) {
+      // Only include photos assigned to THIS page
+      const pagePhotoPaths = new Set(page.selectedImages.map((s) => s.path));
+      for (const ref of referenceImages) {
+        if (ref.role.includes("UPLOADED PHOTO")) {
+          // Check if this photo's filename matches any page-level selection
+          const refFilename = ref.name.replace(/^image\d+_photo\.png$/, "");
+          const refRole = ref.role;
+          const isForThisPage = [...pagePhotoPaths].some((p) => refRole.includes(p.split("/").pop() ?? "___"));
+          if (isForThisPage) pagePhotoImages.push(ref);
+        }
+      }
+    }
+
+    // Build image manifest — brand assets + page-specific photos (or all photos for single)
+    const brandRefImages = referenceImages.filter((r) => !r.role.includes("UPLOADED PHOTO"));
+    const photoRefImages = isCarousel && page?.selectedImages?.length
+      ? pagePhotoImages
+      : referenceImages.filter((r) => r.role.includes("UPLOADED PHOTO"));
+    const pageReferenceImages = [...brandRefImages, ...photoRefImages];
+
+    const logoImages = pageReferenceImages.filter((r) => r.role.includes("LOGO"));
+    const otherImages = pageReferenceImages.filter((r) => !r.role.includes("LOGO"));
     const orderedImages = [...logoImages, ...otherImages];
 
     const copyInstructions = [
@@ -278,21 +301,27 @@ export async function runGenerationAgent(
       "Match the SAMPLE POSTERS' design quality",
     ].filter(Boolean).join(". ");
 
-    const imageManifest = referenceImages.length > 0
-      ? `\n\nReference images provided (${referenceImages.length} total):\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\n${copyInstructions}.`
+    const imageManifest = pageReferenceImages.length > 0
+      ? `\n\nReference images provided (${pageReferenceImages.length} total):\n${orderedImages.map((r) => `- ${r.role}`).join("\n")}\n\n${copyInstructions}.`
       : "";
 
-    const rawPrompt = buildImagePrompt(input, page, pageContext, { hasLogo, hasHeader, hasFooter });
+    const rawPrompt = buildImagePrompt(input, page, i, pages.length, pageVisions, { hasLogo, hasHeader, hasFooter });
 
     // Prompt enhancer: expand ONLY the creative direction.
     // The manifest is appended AFTER enhancement so the enhancer can't
     // rewrite, summarize, or drop reference image instructions.
-    const enhanced = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt.
+    const enhancerSystemPrompt = isCarousel
+      ? `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt for ONE PAGE of a carousel.
+
+Rules:
+- Output ONLY the enhanced prompt, nothing else
+- This is page ${i + 1} of ${pages.length} — focus on THIS page's specific content and layout
+- CRITICAL for carousel consistency: maintain the EXACT same visual style across pages — same background texture/pattern, same border treatment, same typography style, same color application, same header/footer appearance
+- Expand with specific visual details: composition, lighting, textures, color gradients, spacing
+- Keep all text content exactly as specified — do NOT add or change text
+- Format: Instagram portrait 1080x1350px, print-ready, professional
+- Preserve all logo, header, footer, and photo placement instructions exactly as given`
+      : `You are an expert image prompt engineer. Expand the poster brief into a richly detailed visual prompt.
 
 Rules:
 - Output ONLY the enhanced prompt, nothing else
@@ -300,8 +329,12 @@ Rules:
 - Be specific about layout: where elements sit, how the eye flows, what's in the foreground vs background
 - Keep all text content exactly as specified (headline, tagline) — do NOT add or change text
 - Format: Instagram portrait 1080x1350px, print-ready, professional
-- Preserve all logo, header, footer, and photo placement instructions exactly as given`,
-        },
+- Preserve all logo, header, footer, and photo placement instructions exactly as given`;
+
+    const enhanced = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: enhancerSystemPrompt },
         { role: "user", content: rawPrompt },
       ],
       max_tokens: 1500,
@@ -320,11 +353,11 @@ Rules:
     // Single-pass generation (evaluate+refine handled in separate Inngest functions)
     let base64Result: string;
 
-    if (referenceImages.length > 0) {
+    if (pageReferenceImages.length > 0) {
       // Put logo images first — the model gives more weight to earlier reference images
       const logoFirst = [
-        ...referenceImages.filter((r) => r.role.includes("LOGO")),
-        ...referenceImages.filter((r) => !r.role.includes("LOGO")),
+        ...pageReferenceImages.filter((r) => r.role.includes("LOGO")),
+        ...pageReferenceImages.filter((r) => !r.role.includes("LOGO")),
       ];
       // Filter out any invalid buffers before converting to files
       const validImages = logoFirst.filter((img) => img.buffer && img.buffer.length > 0);
@@ -401,26 +434,64 @@ Rules:
   };
 }
 
+/**
+ * Parses the creativeVision field to extract per-page descriptions for carousels.
+ * Looks for "PAGE 1:", "PAGE 2:", etc. and a "VISUAL CONSISTENCY:" section.
+ */
+function parsePageVisions(creativeVision: string, pageCount: number): { consistency: string; pages: string[] } {
+  const consistency = creativeVision.match(/VISUAL CONSISTENCY[:\s]*([\s\S]*?)(?=PAGE \d|$)/i)?.[1]?.trim() ?? "";
+  const pages: string[] = [];
+  for (let i = 1; i <= pageCount; i++) {
+    const pattern = new RegExp(`PAGE ${i}[:\\s]*([\\s\\S]*?)(?=PAGE ${i + 1}[:\\s]|$)`, "i");
+    const match = creativeVision.match(pattern);
+    pages.push(match?.[1]?.trim() ?? "");
+  }
+  return { consistency, pages };
+}
+
 function buildImagePrompt(
   input: Agent3Input,
   page: { description: string; selectedImages: { path: string; placement: string; size: string }[]; textOverlays: { text: string; position: string; style: string }[] } | undefined,
-  pageContext: string,
+  pageIndex: number,
+  totalPages: number,
+  pageVisions: { consistency: string; pages: string[] },
   assets: { hasLogo: boolean; hasHeader: boolean; hasFooter: boolean } = { hasLogo: true, hasHeader: true, hasFooter: true },
 ): string {
   const { hasLogo, hasHeader, hasFooter } = assets;
   const { brief, understanding, schoolName, curatedImages } = input;
-
-  const hasUploadedPhotos = curatedImages.length > 0 && brief.selectedImages.length > 0;
+  const isCarousel = brief.layout.type === "carousel" && totalPages > 1;
 
   // Use creativeVision as primary (rich narrative), fall back to designPrompt
   const briefAny = brief as Record<string, unknown>;
-  const creativeVision = (briefAny.creativeVision as string) ?? "";
+  const fullCreativeVision = (briefAny.creativeVision as string) ?? "";
   const designPrompt = brief.designPrompt ?? "";
+
+  // For carousels, use per-page vision; for single, use the full vision
+  let visionSection: string;
+  if (isCarousel) {
+    const pageVision = pageVisions.pages[pageIndex] || page?.description || "";
+    const consistencyBlock = pageVisions.consistency
+      ? `## Visual Consistency (shared across ALL ${totalPages} pages)\n${pageVisions.consistency}\n\n`
+      : "";
+    visionSection = `${consistencyBlock}## This Page (page ${pageIndex + 1} of ${totalPages})
+${pageVision || page?.description || ""}
+
+${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) => `- "${t.text}" at ${t.position}, ${t.style}`).join("\n")}` : ""}`;
+  } else {
+    visionSection = fullCreativeVision || designPrompt;
+  }
+
+  // For carousels, use page-level selectedImages; for single, use brief-level
+  const pageSelectedImages = isCarousel && page?.selectedImages?.length
+    ? page.selectedImages.map((img) => ({ path: img.path, placement: img.placement }))
+    : brief.selectedImages;
+
+  const hasUploadedPhotos = curatedImages.length > 0 && pageSelectedImages.length > 0;
 
   // Build uploaded photo details with descriptions from Agent 1
   let photoSection = "";
   if (hasUploadedPhotos) {
-    const photoDetails = brief.selectedImages
+    const photoDetails = pageSelectedImages
       .map((img) => {
         const curated = understanding.curatedImages.find((c) => c.path === img.path);
         const desc = curated?.description ?? "uploaded photo";
@@ -433,27 +504,32 @@ These are REAL photographs. Include them in the poster EXACTLY as they are.
 Do NOT redraw, modify, filter, or replace them with AI-generated versions.
 ${photoDetails}`;
   } else {
-    photoSection = `No uploaded photos — generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? "\nStudents MUST wear the school uniform from the uniform reference image." : ""}${brief.schoolAssetUsage.useInfrastructure ? "\nUse the infrastructure reference image for campus setting." : ""}`;
+    photoSection = `No uploaded photos for this page — generate all imagery from scratch.${brief.schoolAssetUsage.useUniform ? "\nStudents MUST wear the school uniform from the uniform reference image." : ""}${brief.schoolAssetUsage.useInfrastructure ? "\nUse the infrastructure reference image for campus setting." : ""}`;
   }
+
+  const carouselNote = isCarousel
+    ? `\n\nCRITICAL — CAROUSEL CONSISTENCY: This is page ${pageIndex + 1} of ${totalPages}. Every page in this carousel MUST have the identical: background color/gradient/texture, border/frame treatment, typography font and sizing, header and footer appearance, color application. Only the hero content and text change between pages.`
+    : "";
 
   return `Instagram poster for ${schoolName}. Portrait 1080x1350px, print-ready, professional.
 
 ## Creative Vision
-${creativeVision || designPrompt}
+${visionSection}
 
 ## Technical Details
 Direction: ${brief.direction}
 Theme: ${brief.theme}
 Palette: ${brief.colorPalette.join(", ")}
-Headline: "${brief.textContent.headline}"
-${brief.textContent.subheadline ? `Tagline: "${brief.textContent.subheadline}"` : ""}
+${isCarousel ? `Page ${pageIndex + 1} of ${totalPages} carousel` : ""}
+${!isCarousel || pageIndex === 0 ? `Headline: "${brief.textContent.headline}"` : ""}
+${!isCarousel && brief.textContent.subheadline ? `Tagline: "${brief.textContent.subheadline}"` : ""}
 
 ${hasLogo ? `Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}` : ""}
 ${hasHeader ? `Header: copy from reference image → top. ${brief.headerFooter.headerStyle}` : ""}
 ${hasFooter ? `Footer: copy from reference image → bottom. ${brief.headerFooter.footerStyle}` : ""}
 
 ${photoSection}
-${pageContext ? `\n${pageContext}` : ""}
+${carouselNote}
 
 Maximum 2 lines of text on the poster. Visual-driven, premium quality.`;
 }

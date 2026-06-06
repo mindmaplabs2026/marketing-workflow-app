@@ -111,9 +111,11 @@ RULES for school brand assets:
 - IMPORTANT: Use the EXACT storage_path strings from the "School Brand Assets" list above. Do not modify them.
 
 RULES for carousel:
-- All pages share a cohesive visual theme (consistent palette, typography, style).
-- Page 1 = attention-grabbing cover. Last page = call to action.
+- All pages MUST share a cohesive visual identity: same color palette, same typography style, same header/footer treatment, same background texture/pattern family. A viewer swiping through must feel these pages belong together.
+- Page 1 = attention-grabbing cover with the headline. Last page = call to action.
 - Maximum 4-5 images per page in collage layout.
+- IMPORTANT: For carousels, the "creativeVision" field must describe EACH PAGE individually in separate paragraphs, labeled "PAGE 1:", "PAGE 2:", etc. Each page description should be 50-80 words covering layout, visual content, text placement, and mood for that specific page. Also include a brief "VISUAL CONSISTENCY" paragraph at the start describing the shared design language across all pages (typography, colors, borders, background pattern, header/footer style).
+- Each page's "description" in the layout.pages array should be a detailed visual description (not just a title), and page-level selectedImages should specify which uploaded photos go on THAT page (not all photos on every page).
 
 TEXT RULES:
 - HEADLINE: short, punchy, max 6-8 words
@@ -142,7 +144,7 @@ Return ONLY valid JSON matching this schema:
     "logoPlacement": { "position": "string", "size": "string", "style": "string" },
     "headerFooter": { "headerStyle": "string", "footerStyle": "string" },
     "schoolAssetUsage": { "useUniform": true/false, "uniformNotes": "...", "useInfrastructure": true/false, "infrastructureNotes": "..." },
-    "creativeVision": "string — THIS IS THE MOST IMPORTANT FIELD. Write a rich, vivid, detailed creative narrative describing the poster as if you're painting a picture for a designer. Describe the scene top-to-bottom: what the header area looks like, what the hero visual shows (people, setting, lighting, mood, composition, camera angle), how the typography sits in the design, what textures and decorative elements surround the content, how the colors flow, where the eye travels, what the footer area looks like. Include emotional tone, artistic style references, and specific visual details. Think of this as a creative director's verbal walkthrough of the final poster — minimum 150 words.",
+    "creativeVision": "string — THIS IS THE MOST IMPORTANT FIELD. For SINGLE posters: Write a rich, vivid, detailed creative narrative describing the poster top-to-bottom (min 150 words). For CAROUSELS: Start with a 'VISUAL CONSISTENCY:' paragraph describing the shared design language (typography, colors, borders, background pattern, header/footer treatment). Then describe each page as 'PAGE 1:', 'PAGE 2:', etc. (50-80 words each) covering that page's specific layout, hero visual, text placement, and mood. Total min 250 words for carousels.",
     "designPrompt": "string — concise technical prompt for the image model, derived from the creativeVision above"
   }]
 }`;
