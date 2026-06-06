@@ -258,11 +258,18 @@ export async function runGenerationAgent(
 
   console.log(`[Agent3] Reference images: ${allSelectedPaths.size} selected paths, ${input.curatedImages.length} curated available`);
 
-  const hasUploadedPhotos = input.curatedImages.length > 0 && allSelectedPaths.size > 0;
+  // Download uploaded photos as reference images.
+  // If Agent 2 specified which photos to use (allSelectedPaths), filter to those.
+  // If Agent 2 failed to assign paths (all undefined), fall back to ALL curated images.
+  const hasUploadedPhotos = input.curatedImages.length > 0;
   if (hasUploadedPhotos) {
+    const useAll = allSelectedPaths.size === 0; // Agent 2 didn't assign any — use all curated
+    if (useAll) {
+      console.warn(`[Agent3] Agent 2 assigned 0 photo paths — falling back to ALL ${input.curatedImages.length} curated images`);
+    }
     for (const img of input.curatedImages) {
       const imgFilename = img.path.split("/").pop() ?? "";
-      const isSelected = allSelectedPaths.has(img.path) ||
+      const isSelected = useAll || allSelectedPaths.has(img.path) ||
         [...allSelectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(imgFilename));
       if (isSelected) {
         const buf = await downloadImage(img.signedUrl);
@@ -516,13 +523,15 @@ ${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) 
     visionSection = topLevelCreativeVision || designPrompt;
   }
 
-  // For carousels, prefer page-level selectedImages, fall back to brief-level
-  const pageSelectedImages = (isCarousel && page?.selectedImages?.length
-    ? page.selectedImages.map((img) => ({ path: img?.path ?? "", placement: img?.placement ?? "" }))
-    : (brief.selectedImages ?? []).length > 0
-      ? brief.selectedImages
-      : []
-  ).filter((img) => !!img?.path);
+  // For carousels, prefer page-level selectedImages, fall back to brief-level, then to all curated
+  const rawPageImages = isCarousel && page?.selectedImages?.length
+    ? page.selectedImages.filter((img) => !!img?.path)
+    : (brief.selectedImages ?? []).filter((img) => !!img?.path);
+
+  // If Agent 2 didn't assign valid paths to this page, fall back to curated images
+  const pageSelectedImages = rawPageImages.length > 0
+    ? rawPageImages.map((img) => ({ path: img.path, placement: img.placement ?? "" }))
+    : curatedImages.map((img) => ({ path: img.path, placement: "collage" }));
 
   const hasUploadedPhotos = curatedImages.length > 0 && pageSelectedImages.length > 0;
 
@@ -672,10 +681,14 @@ export async function refineAndRegenerate(
       }
     }
   }
-  if (input.curatedImages.length > 0 && refineSelectedPaths.size > 0) {
+  const refineUseAll = input.curatedImages.length > 0 && refineSelectedPaths.size === 0;
+  if (refineUseAll) {
+    console.warn(`[Agent3] Refine: Agent 2 assigned 0 paths — using all ${input.curatedImages.length} curated`);
+  }
+  if (input.curatedImages.length > 0 && (refineSelectedPaths.size > 0 || refineUseAll)) {
     for (const img of input.curatedImages) {
       const fn = img.path.split("/").pop() ?? "";
-      const isSelected = refineSelectedPaths.has(img.path) || [...refineSelectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(fn));
+      const isSelected = refineUseAll || refineSelectedPaths.has(img.path) || [...refineSelectedPaths].some((p) => img.path.endsWith(p) || p.endsWith(fn));
       if (isSelected) {
         const buf = await downloadImage(img.signedUrl);
         if (buf) { referenceImages.push({ buffer: buf, name: `image${idx}_photo.png`, role: `IMAGE ${idx}: UPLOADED PHOTO — "${fn}"` }); idx++; }
