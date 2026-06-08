@@ -481,7 +481,7 @@ export default async function RequestsListPage({
                 <div className="flex items-stretch">
                   <Link
                     href={`/requests/${r.id}`}
-                    className="flex flex-1 flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+                    className="flex min-w-0 flex-1 flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">

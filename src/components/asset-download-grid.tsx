@@ -362,7 +362,7 @@ export function AssetDownloadGrid({
               )}
 
               <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-2 py-1.5 text-[10px] text-zinc-500 dark:border-zinc-800">
-                <span className="truncate" title={item.name}>
+                <span className="min-w-0 flex-1 truncate" title={item.name}>
                   {item.byteSize !== undefined && item.byteSize !== null
                     ? formatBytes(item.byteSize)
                     : item.name}

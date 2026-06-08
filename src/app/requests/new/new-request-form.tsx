@@ -225,7 +225,7 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
                 key={`${f.name}-${i}`}
                 className="flex items-center justify-between rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
               >
-                <span className="truncate text-zinc-700 dark:text-zinc-300">
+                <span className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300">
                   {f.name}
                 </span>
                 <button

@@ -215,7 +215,7 @@ export default async function CalendarItemDetailPage({
             href={`/requests/${linkedRequest.id}`}
             className="mt-2 flex items-center justify-between gap-3 text-sm font-medium text-zinc-900 hover:underline dark:text-zinc-50"
           >
-            <span className="truncate">{linkedRequest.title}</span>
+            <span className="min-w-0 flex-1 truncate">{linkedRequest.title}</span>
             <span
               className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${REQ_STATUS_BADGE_CLASS[linkedRequest.status]}`}
             >

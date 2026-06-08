@@ -320,7 +320,7 @@ export default async function CalendarPage({
                             <span
                               className={`inline-block h-2 w-2 shrink-0 rounded-full ${CAL_STATUS_DOT_CLASS[it.status]}`}
                             />
-                            <span className="truncate">{it.title}</span>
+                            <span className="min-w-0 flex-1 truncate">{it.title}</span>
                           </Link>
                         </li>
                       ))}
