@@ -451,7 +451,7 @@ export default async function RequestDetailPage({
       <ProgressTracker status={req.status} awaitingPublish={awaitingPublish} />
 
       {canReassign && designerOptions.length > 0 && (
-        <form action={reassignDesigner} className="flex items-center gap-2">
+        <form action={reassignDesigner} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="request_id" value={req.id} />
           <span className="text-xs text-zinc-500">Reassign to:</span>
           <select

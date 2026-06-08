@@ -30,7 +30,7 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
         photos. Takes about 5-10 minutes.
       </p>
 
-      <div className="mt-3 flex items-end gap-3">
+      <div className="mt-3 flex flex-wrap items-end gap-3">
         <div>
           <label
             htmlFor="ai_poster_type"

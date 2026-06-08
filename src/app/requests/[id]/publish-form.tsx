@@ -64,13 +64,13 @@ export function PublishForm({ requestId }: { requestId: string }) {
       </p>
       <ul className="space-y-2">
         {rows.map((r, i) => (
-          <li key={i} className="flex gap-2">
+          <li key={i} className="flex flex-wrap items-stretch gap-2">
             <select
               value={r.platform}
               onChange={(e) =>
                 update(i, { platform: e.target.value as SocialPlatform })
               }
-              className="rounded-md border border-zinc-300 bg-white px-2 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              className="w-full rounded-md border border-zinc-300 bg-white px-2 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 sm:w-auto"
             >
               {PLATFORMS.map((p) => (
                 <option key={p} value={p}>
@@ -84,13 +84,13 @@ export function PublishForm({ requestId }: { requestId: string }) {
               placeholder="https://…"
               value={r.url}
               onChange={(e) => update(i, { url: e.target.value })}
-              className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              className="w-full min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 sm:w-auto"
             />
             {rows.length > 1 && (
               <button
                 type="button"
                 onClick={() => removeRow(i)}
-                className="rounded-md px-2 text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
+                className="rounded-md px-2 py-2 text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
               >
                 Remove
               </button>

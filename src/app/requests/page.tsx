@@ -481,7 +481,7 @@ export default async function RequestsListPage({
                 <div className="flex items-stretch">
                   <Link
                     href={`/requests/${r.id}`}
-                    className="flex flex-1 items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                    className="flex flex-1 flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
@@ -494,7 +494,7 @@ export default async function RequestsListPage({
                       </p>
                     </div>
                     <span
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_BADGE_CLASS[r.status]}`}
+                      className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_BADGE_CLASS[r.status]}`}
                     >
                       <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT_CLASS[r.status]}`} />
                       {STATUS_SHORT[r.status]}

@@ -99,7 +99,7 @@ export function BulkApproveSection({
             />
             <Link
               href={`/requests/${r.id}`}
-              className="flex flex-1 items-start justify-between gap-4 transition-colors hover:opacity-80"
+              className="flex flex-1 flex-col gap-1.5 transition-colors hover:opacity-80 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
@@ -112,7 +112,7 @@ export function BulkApproveSection({
                 </p>
               </div>
               <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_BADGE_CLASS[r.status]}`}
+                className={`w-fit shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_BADGE_CLASS[r.status]}`}
               >
                 {STATUS_SHORT[r.status]}
               </span>
@@ -140,7 +140,7 @@ export function BulkApproveSection({
           <li key={r.id} className="flex items-stretch">
             <Link
               href={`/requests/${r.id}`}
-              className="flex flex-1 items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              className="flex flex-1 flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
@@ -153,7 +153,7 @@ export function BulkApproveSection({
                 </p>
               </div>
               <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_BADGE_CLASS[r.status]}`}
+                className={`w-fit shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${STATUS_BADGE_CLASS[r.status]}`}
               >
                 {STATUS_SHORT[r.status]}
               </span>

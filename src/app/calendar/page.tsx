@@ -285,28 +285,52 @@ export default async function CalendarPage({
                   )}
                 </div>
                 <ul className="mt-1.5 space-y-1">
-                  {cellItems.slice(0, 3).map((it) => (
-                    <li key={it.id}>
+                  {/* On mobile (<sm) cells are ~50px wide so event titles
+                      truncate to 3-4 chars — render dots-only there and
+                      show full titles from sm: up. */}
+                  <li className="flex flex-wrap gap-1 sm:hidden">
+                    {cellItems.slice(0, 3).map((it) => (
                       <Link
+                        key={it.id}
                         href={`/calendar/${it.id}`}
-                        className={`flex items-center gap-1.5 truncate rounded px-1.5 py-1 text-[11px] leading-tight transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                          it.status === "cancelled"
-                            ? "text-zinc-400 line-through"
-                            : "text-zinc-700 dark:text-zinc-300"
+                        aria-label={it.title}
+                        className={`inline-block h-2 w-2 rounded-full ${CAL_STATUS_DOT_CLASS[it.status]} ${
+                          it.status === "cancelled" ? "opacity-40" : ""
                         }`}
-                      >
-                        <span
-                          className={`inline-block h-2 w-2 shrink-0 rounded-full ${CAL_STATUS_DOT_CLASS[it.status]}`}
-                        />
-                        <span className="truncate">{it.title}</span>
-                      </Link>
-                    </li>
-                  ))}
-                  {cellItems.length > 3 && (
-                    <li className="px-1.5 text-[11px] font-medium text-violet-600 dark:text-violet-400">
-                      +{cellItems.length - 3} more
-                    </li>
-                  )}
+                      />
+                    ))}
+                    {cellItems.length > 3 && (
+                      <span className="text-[9px] font-medium leading-none text-violet-600 dark:text-violet-400">
+                        +{cellItems.length - 3}
+                      </span>
+                    )}
+                  </li>
+                  <li className="hidden sm:contents">
+                    <ul className="space-y-1">
+                      {cellItems.slice(0, 3).map((it) => (
+                        <li key={it.id}>
+                          <Link
+                            href={`/calendar/${it.id}`}
+                            className={`flex items-center gap-1.5 truncate rounded px-1.5 py-1 text-[11px] leading-tight transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                              it.status === "cancelled"
+                                ? "text-zinc-400 line-through"
+                                : "text-zinc-700 dark:text-zinc-300"
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-2 w-2 shrink-0 rounded-full ${CAL_STATUS_DOT_CLASS[it.status]}`}
+                            />
+                            <span className="truncate">{it.title}</span>
+                          </Link>
+                        </li>
+                      ))}
+                      {cellItems.length > 3 && (
+                        <li className="px-1.5 text-[11px] font-medium text-violet-600 dark:text-violet-400">
+                          +{cellItems.length - 3} more
+                        </li>
+                      )}
+                    </ul>
+                  </li>
                 </ul>
               </div>
             );
@@ -314,7 +338,7 @@ export default async function CalendarPage({
         </div>
       </div>
 
-      <div className="flex items-center gap-4 text-[11px] text-zinc-500">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-zinc-500">
         {role !== "decision_maker" && (
           <span className="flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" /> Drafted

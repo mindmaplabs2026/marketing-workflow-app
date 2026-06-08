@@ -198,7 +198,7 @@ export function VariationChat({
                   activePage === i
                     ? "ring-2 ring-violet-600 ring-offset-2 dark:ring-offset-zinc-900"
                     : "opacity-70 hover:opacity-100"
-                } ${currentUrls.length === 1 ? "w-80" : "w-52"}`}
+                } ${currentUrls.length === 1 ? "w-full max-w-80" : "w-44 sm:w-52"}`}
               >
                 <img
                   src={url}
