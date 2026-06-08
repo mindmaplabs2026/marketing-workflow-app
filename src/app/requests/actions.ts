@@ -385,13 +385,18 @@ export async function attachUpload(formData: FormData) {
   if ("error" in actor) throw new Error(actor.error);
 
   const supabase = await createClient();
-  const { error } = await supabase.from("request_uploads").insert({
-    request_id: requestId,
-    uploaded_by: actor.userId,
-    storage_path: storagePath,
-    mime_type: mimeType || null,
-    file_size: fileSize,
-  });
+  const { error } = await supabase
+    .from("request_uploads")
+    .upsert(
+      {
+        request_id: requestId,
+        uploaded_by: actor.userId,
+        storage_path: storagePath,
+        mime_type: mimeType || null,
+        file_size: fileSize,
+      },
+      { onConflict: "request_id,storage_path", ignoreDuplicates: true },
+    );
   if (error) throw new Error(error.message);
 
   revalidatePath(`/requests/${requestId}`);

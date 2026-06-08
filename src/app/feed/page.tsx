@@ -129,7 +129,12 @@ export default async function FeedPage() {
 
   const schoolById = new Map((schools ?? []).map((s) => [s.id, s.name]));
   const uploadsByRequest = new Map<string, UploadRow[]>();
+  const seenUploadPaths = new Map<string, Set<string>>();
   for (const u of uploads ?? []) {
+    const seen = seenUploadPaths.get(u.request_id) ?? new Set<string>();
+    if (seen.has(u.storage_path)) continue;
+    seen.add(u.storage_path);
+    seenUploadPaths.set(u.request_id, seen);
     const list = uploadsByRequest.get(u.request_id) ?? [];
     list.push(u);
     uploadsByRequest.set(u.request_id, list);
