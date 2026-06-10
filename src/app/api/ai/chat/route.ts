@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { inngest } from "@/lib/inngest/client";
+import { getPosterEngine } from "@/lib/config/engine";
 
 const MAX_CHAT_ROUNDS = 25;
 
@@ -71,7 +72,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Maximum chat rounds reached (25/25)." }, { status: 429 });
   }
 
-  // Store the user message immediately
+  // Store the user message immediately. In server mode we also stamp the page
+  // and a 'queued' status so the worker can claim it (the worker never sees the
+  // Inngest event). In inngest mode status stays null and Inngest processes it.
+  const serverMode = getPosterEngine() === "server";
   const admin = createAdminClient();
   const { data: userMsg, error: insertErr } = await admin
     .from("ai_chat_messages")
@@ -79,6 +83,8 @@ export async function POST(request: Request) {
       variation_id,
       role: "user" as const,
       content: message.trim(),
+      page_index: page_index ?? null,
+      ...(serverMode ? { status: "queued" as const } : {}),
     })
     .select("id")
     .single();
@@ -87,17 +93,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not store message." }, { status: 500 });
   }
 
-  // Fire Inngest event for async processing
-  await inngest.send({
-    name: "ai/chat.edit",
-    data: {
-      userMessageId: userMsg.id,
-      variationId: variation_id,
-      requestId: variation.request_id,
-      message: message.trim(),
-      pageIndex: page_index ?? null,
-    },
-  });
+  // POSTER_ENGINE=inngest: hand off to Inngest. server: the worker polls the
+  // queued user message instead.
+  if (!serverMode) {
+    await inngest.send({
+      name: "ai/chat.edit",
+      data: {
+        userMessageId: userMsg.id,
+        variationId: variation_id,
+        requestId: variation.request_id,
+        message: message.trim(),
+        pageIndex: page_index ?? null,
+      },
+    });
+  }
 
   // Return immediately with the user message ID for polling
   return NextResponse.json({

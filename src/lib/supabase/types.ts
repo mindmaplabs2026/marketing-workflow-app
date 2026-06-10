@@ -542,6 +542,7 @@ export type Database = {
           id: string;
           request_id: string;
           status: AiJobStatus;
+          poster_type: "single" | "carousel";
           inngest_run_id: string | null;
           agent1_output: Record<string, unknown> | null;
           agent2_output: Record<string, unknown> | null;
@@ -556,6 +557,7 @@ export type Database = {
           id?: string;
           request_id: string;
           status?: AiJobStatus;
+          poster_type?: "single" | "carousel";
           inngest_run_id?: string | null;
           agent1_output?: Record<string, unknown> | null;
           agent2_output?: Record<string, unknown> | null;
@@ -570,6 +572,7 @@ export type Database = {
           id?: string;
           request_id?: string;
           status?: AiJobStatus;
+          poster_type?: "single" | "carousel";
           inngest_run_id?: string | null;
           agent1_output?: Record<string, unknown> | null;
           agent2_output?: Record<string, unknown> | null;
@@ -632,6 +635,8 @@ export type Database = {
           content: string;
           image_paths: string[];
           metadata: Record<string, unknown> | null;
+          status: "queued" | "processing" | "done" | "failed" | null;
+          page_index: number | null;
           created_at: Timestamp;
         };
         Insert: {
@@ -641,6 +646,8 @@ export type Database = {
           content: string;
           image_paths?: string[];
           metadata?: Record<string, unknown> | null;
+          status?: "queued" | "processing" | "done" | "failed" | null;
+          page_index?: number | null;
           created_at?: Timestamp;
         };
         Update: {
@@ -650,6 +657,8 @@ export type Database = {
           content?: string;
           image_paths?: string[];
           metadata?: Record<string, unknown> | null;
+          status?: "queued" | "processing" | "done" | "failed" | null;
+          page_index?: number | null;
           created_at?: Timestamp;
         };
         Relationships: [];

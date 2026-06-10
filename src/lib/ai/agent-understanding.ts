@@ -1,5 +1,6 @@
 import "server-only";
-import { getOpenAI, withRateLimitRetry } from "./openai-client";
+import { withRateLimitRetry } from "./openai-client";
+import { getModelClient } from "./model-client";
 import type { CostTracker } from "./cost-tracker";
 
 /** Image metadata passed into Agent 1. */
@@ -54,7 +55,7 @@ export async function runUnderstandingAgent(
   input: Agent1Input,
   costTracker?: CostTracker,
 ): Promise<UnderstandingOutput> {
-  const openai = getOpenAI();
+  const openai = await getModelClient();
 
   const contextText = `Title: ${input.title}\n\nDescription: ${input.description ?? "(none provided)"}\n\nSchool brand asset types available: ${input.brandAssetTypes.join(", ") || "none"}${input.schoolGuidelines ? `\n\nSchool-specific guidelines:\n${input.schoolGuidelines}` : ""}`;
 
@@ -143,7 +144,7 @@ export async function runUnderstandingAgent(
 }
 
 async function deepAnalysis(
-  openai: ReturnType<typeof getOpenAI>,
+  openai: Awaited<ReturnType<typeof getModelClient>>,
   images: UploadedImage[],
   contextText: string,
   costTracker?: CostTracker,

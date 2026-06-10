@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import { inngest } from "@/lib/inngest/client";
+import { getPosterEngine } from "@/lib/config/engine";
 import type {
   UserRole,
   RequestStatus,
@@ -772,7 +773,7 @@ export async function triggerAiGeneration(
   // Create the AI generation job
   const { data: job, error: jobErr } = await supabase
     .from("ai_generation_jobs")
-    .insert({ request_id: requestId })
+    .insert({ request_id: requestId, poster_type: posterType })
     .select("id")
     .single<{ id: string }>();
 
@@ -780,15 +781,15 @@ export async function triggerAiGeneration(
     return { error: jobErr?.message ?? "Could not create AI job." };
   }
 
-  // Send Inngest event to start the pipeline
-  await inngest.send({
-    name: "ai/pipeline.started",
-    data: {
-      jobId: job.id,
-      requestId,
-      posterType,
-    },
-  });
+  // POSTER_ENGINE=inngest (default): dispatch to the Inngest pipeline on Vercel.
+  // POSTER_ENGINE=server: do nothing — the standalone worker polls for this
+  // queued job and runs it. The job row + poster_type carry everything it needs.
+  if (getPosterEngine() === "inngest") {
+    await inngest.send({
+      name: "ai/pipeline.started",
+      data: { jobId: job.id, requestId, posterType },
+    });
+  }
 
   return {};
 }
@@ -827,7 +828,7 @@ export async function regenerateAi(
   // Create a new AI generation job (old one stays for history)
   const { data: job, error: jobErr } = await supabase
     .from("ai_generation_jobs")
-    .insert({ request_id: requestId })
+    .insert({ request_id: requestId, poster_type: posterType })
     .select("id")
     .single<{ id: string }>();
 
@@ -835,14 +836,14 @@ export async function regenerateAi(
     return { error: jobErr?.message ?? "Could not create AI job." };
   }
 
-  await inngest.send({
-    name: "ai/pipeline.started",
-    data: {
-      jobId: job.id,
-      requestId,
-      posterType,
-    },
-  });
+  // Same dispatch rule as triggerAiGeneration: only hand off to Inngest in
+  // the default engine; in server mode the worker polls for the queued job.
+  if (getPosterEngine() === "inngest") {
+    await inngest.send({
+      name: "ai/pipeline.started",
+      data: { jobId: job.id, requestId, posterType },
+    });
+  }
 
   return {};
 }

@@ -1,5 +1,6 @@
 import "server-only";
-import { getOpenAI, withRateLimitRetry } from "./openai-client";
+import { withRateLimitRetry } from "./openai-client";
+import { getModelClient } from "./model-client";
 import type { CostTracker } from "./cost-tracker";
 import type { VariationBrief } from "./agent-creative";
 import type { UnderstandingOutput } from "./agent-understanding";
@@ -53,7 +54,7 @@ export async function evaluatePoster(
   referenceImages?: { role: string; base64: string }[],
   costTracker?: CostTracker,
 ): Promise<EvaluationResult> {
-  const openai = getOpenAI();
+  const openai = await getModelClient();
 
   const userContent: Array<
     | { type: "text"; text: string }
@@ -154,7 +155,7 @@ export async function runGenerationAgent(
   input: Agent3Input,
   costTracker?: CostTracker,
 ): Promise<GenerationResult> {
-  const openai = getOpenAI();
+  const openai = await getModelClient();
   const { brief } = input;
 
   const pages =
@@ -606,7 +607,7 @@ export async function refineAndRegenerate(
   input: Agent3Input,
   costTracker?: CostTracker,
 ): Promise<{ base64: string; refinedPrompt: string }> {
-  const openai = getOpenAI();
+  const openai = await getModelClient();
 
   // Refine the prompt
   const refined = await withRateLimitRetry(() =>

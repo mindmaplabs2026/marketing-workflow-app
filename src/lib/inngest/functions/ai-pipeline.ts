@@ -31,7 +31,7 @@ type PipelineData = {
   posterType: "single" | "carousel";
 };
 
-async function fetchContext(requestId: string) {
+export async function fetchContext(requestId: string) {
   const admin = createAdminClient();
 
   const { data: request, error: reqErr } = await admin
@@ -98,7 +98,7 @@ async function fetchContext(requestId: string) {
   };
 }
 
-async function appendCosts(jobId: string, newCosts: CostTracking) {
+export async function appendCosts(jobId: string, newCosts: CostTracking) {
   try {
     const admin = createAdminClient();
     const { data: job } = await admin
@@ -107,7 +107,13 @@ async function appendCosts(jobId: string, newCosts: CostTracking) {
       .eq("id", jobId)
       .single();
 
-    const existing = (job?.cost_tracking ?? { entries: [], total_usd: 0 }) as CostTracking;
+    // cost_tracking defaults to '{}' in the DB (migration 0022), so guard for a
+    // missing/!array entries field — otherwise the spread throws "not iterable".
+    const raw = job?.cost_tracking as Partial<CostTracking> | null | undefined;
+    const existing: CostTracking =
+      raw && Array.isArray(raw.entries)
+        ? (raw as CostTracking)
+        : { entries: [], total_usd: 0 };
     const merged: CostTracking = {
       entries: [...existing.entries, ...newCosts.entries],
       total_usd: Math.round((existing.total_usd + newCosts.total_usd) * 1_000_000) / 1_000_000,
@@ -125,7 +131,7 @@ async function appendCosts(jobId: string, newCosts: CostTracking) {
   }
 }
 
-async function markFailed(jobId: string, message: string) {
+export async function markFailed(jobId: string, message: string) {
   const admin = createAdminClient();
   await admin
     .from("ai_generation_jobs")
@@ -134,7 +140,7 @@ async function markFailed(jobId: string, message: string) {
   try { await dispatchPendingPushes(); } catch { /* best effort */ }
 }
 
-async function generateOneVariation(jobId: string, requestId: string, posterType: "single" | "carousel", variationIndex: number, costTracker?: CostTracker) {
+export async function generateOneVariation(jobId: string, requestId: string, posterType: "single" | "carousel", variationIndex: number, costTracker?: CostTracker) {
   const admin = createAdminClient();
 
   const { data: job } = await admin
