@@ -90,25 +90,50 @@ function getRealOpenAI(): OpenAI {
 }
 
 /**
- * Wraps the real client so that `.images.edit` / `.images.generate` return a
- * placeholder instead of calling the paid image API. Everything else
- * (`.chat`, `.responses`, …) passes straight through.
+ * Extract { name, buffer } from the OpenAI `image` argument (a File / FileLike,
+ * or an array of them — what the agents build via toFile()).
  */
-function makeCodexStubClient(base: OpenAI): OpenAI {
-  const stubImages = {
-    async edit() {
-      console.warn("[codex-stub] images.edit → placeholder PNG (no real generation yet)");
-      return { data: [{ b64_json: PLACEHOLDER_PNG_BASE64 }] };
+async function filesToRefs(image: unknown): Promise<{ name: string; buffer: Buffer }[]> {
+  const arr = Array.isArray(image) ? image : image != null ? [image] : [];
+  const refs: { name: string; buffer: Buffer }[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const f = arr[i] as { arrayBuffer?: () => Promise<ArrayBuffer>; name?: string };
+    if (f && typeof f.arrayBuffer === "function") {
+      refs.push({ name: f.name ?? `ref${i}.png`, buffer: Buffer.from(await f.arrayBuffer()) });
+    }
+  }
+  return refs;
+}
+
+/**
+ * Wraps the real client so `.images.edit` / `.images.generate` run on Codex's
+ * built-in image tool (ChatGPT subscription) instead of the paid image API.
+ * Text surfaces (`.chat`, `.responses`, …) pass straight through to OpenAI for
+ * now. Set CODEX_STUB=1 to return placeholder images instead (free dry-runs).
+ */
+function makeCodexClient(base: OpenAI): OpenAI {
+  const useStub = process.env.CODEX_STUB === "1";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const codexImages = {
+    async edit(args: { image?: unknown; prompt?: string; size?: string }) {
+      if (useStub) return { data: [{ b64_json: PLACEHOLDER_PNG_BASE64 }] };
+      const { codexImage } = await import("./codex-image");
+      const references = await filesToRefs(args.image);
+      const b64 = await codexImage({ prompt: args.prompt ?? "", references, size: args.size });
+      return { data: [{ b64_json: b64 }] };
     },
-    async generate() {
-      console.warn("[codex-stub] images.generate → placeholder PNG (no real generation yet)");
-      return { data: [{ b64_json: PLACEHOLDER_PNG_BASE64 }] };
+    async generate(args: { prompt?: string; size?: string }) {
+      if (useStub) return { data: [{ b64_json: PLACEHOLDER_PNG_BASE64 }] };
+      const { codexImage } = await import("./codex-image");
+      const b64 = await codexImage({ prompt: args.prompt ?? "", size: args.size });
+      return { data: [{ b64_json: b64 }] };
     },
   };
 
   return new Proxy(base, {
     get(target, prop, receiver) {
-      if (prop === "images") return stubImages;
+      if (prop === "images") return codexImages;
       return Reflect.get(target, prop, receiver);
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,8 +146,10 @@ let cached: OpenAI | null = null;
 export async function getModelClient(): Promise<OpenAI> {
   if (cached) return cached;
   if (getModelEngineKind() === "codex") {
-    cached = makeCodexStubClient(getRealOpenAI());
-    console.log("[model-client] engine: codex (stub — real text, placeholder images)");
+    cached = makeCodexClient(getRealOpenAI());
+    console.log(
+      `[model-client] engine: codex (${process.env.CODEX_STUB === "1" ? "STUB images" : "real Codex images"}, text via OpenAI)`,
+    );
   } else {
     cached = getRealOpenAI();
     console.log("[model-client] engine: openai");

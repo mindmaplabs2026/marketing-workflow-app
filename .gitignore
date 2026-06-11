@@ -42,3 +42,10 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# Codex Poster Bridge — worker scratch + local test artifacts
+.codex-work/
+codex-gen-test.png
+codex-edit-test.png
+codex-pipeline-test.png
+ref-asset.png

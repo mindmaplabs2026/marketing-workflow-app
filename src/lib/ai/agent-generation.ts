@@ -1,6 +1,7 @@
 import "server-only";
 import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
+import { getModelEngineKind } from "../config/engine";
 import type { CostTracker } from "./cost-tracker";
 import type { VariationBrief } from "./agent-creative";
 import type { UnderstandingOutput } from "./agent-understanding";
@@ -471,12 +472,20 @@ Rules:
     return { base64: base64Result, prompt };
   }
 
-  // Generate all pages — parallel for carousel, single for poster
-  console.log(`[Agent3] Starting ${pages.length} page(s) in parallel at ${new Date().toISOString()}`);
+  // Generate all pages. Codex: SEQUENTIAL (parallel codex exec sessions would
+  // overload the box + hit subscription limits). OpenAI API: parallel as before.
+  const sequential = getModelEngineKind() === "codex";
+  console.log(`[Agent3] Starting ${pages.length} page(s) ${sequential ? "sequentially (codex)" : "in parallel"} at ${new Date().toISOString()}`);
   const allPagesStart = Date.now();
-  const pageResults = await Promise.all(
-    pages.map((_, i) => generateOnePage(i)),
-  );
+  let pageResults: { base64: string; prompt: string }[];
+  if (sequential) {
+    pageResults = [];
+    for (let i = 0; i < pages.length; i++) {
+      pageResults.push(await generateOnePage(i));
+    }
+  } else {
+    pageResults = await Promise.all(pages.map((_, i) => generateOnePage(i)));
+  }
   console.log(`[Agent3] All ${pages.length} page(s) complete in ${((Date.now() - allPagesStart) / 1000).toFixed(1)}s`);
 
   for (const result of pageResults) {
