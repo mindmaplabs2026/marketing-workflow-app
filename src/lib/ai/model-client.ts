@@ -105,16 +105,54 @@ async function filesToRefs(image: unknown): Promise<{ name: string; buffer: Buff
   return refs;
 }
 
+/** Build a Codex prompt + image list from OpenAI chat.completions messages. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildFromChatMessages(messages: any[], jsonMode: boolean): { prompt: string; images: { dataUrl?: string }[] } {
+  const texts: string[] = [];
+  const images: { dataUrl?: string }[] = [];
+  for (const m of messages ?? []) {
+    if (typeof m?.content === "string") texts.push(m.content);
+    else if (Array.isArray(m?.content)) {
+      for (const part of m.content) {
+        if (part?.type === "text" && part.text) texts.push(part.text);
+        else if (part?.type === "image_url" && part.image_url?.url) images.push({ dataUrl: part.image_url.url });
+      }
+    }
+  }
+  let prompt = texts.join("\n\n");
+  if (jsonMode) prompt += "\n\nReturn ONLY a single valid JSON object — no prose, no markdown fences, nothing outside the JSON.";
+  return { prompt, images };
+}
+
+/** Build a Codex prompt + image list from OpenAI Responses API input. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildFromResponsesInput(input: any[], instructions?: string): { prompt: string; images: { dataUrl?: string }[] } {
+  const texts: string[] = [];
+  const images: { dataUrl?: string }[] = [];
+  for (const item of input ?? []) {
+    if (typeof item?.content === "string") texts.push(item.content);
+    else if (Array.isArray(item?.content)) {
+      for (const part of item.content) {
+        if (part?.type === "input_text" && part.text) texts.push(part.text);
+        else if (part?.type === "input_image" && part.image_url) images.push({ dataUrl: part.image_url });
+      }
+    }
+  }
+  let prompt = texts.join("\n\n");
+  if (instructions) prompt += "\n\n" + instructions;
+  return { prompt, images };
+}
+
 /**
- * Wraps the real client so `.images.edit` / `.images.generate` run on Codex's
- * built-in image tool (ChatGPT subscription) instead of the paid image API.
- * Text surfaces (`.chat`, `.responses`, …) pass straight through to OpenAI for
- * now. Set CODEX_STUB=1 to return placeholder images instead (free dry-runs).
+ * The Codex client. Images run on Codex's built-in image tool; text + vision
+ * (chat.completions + responses) run on Codex via codexText. It needs NO OpenAI
+ * key — the whole local path is Codex. (CODEX_STUB=1 stubs only the images.)
+ * web_search isn't a Codex tool, so Agent 2's call simply omits it (Codex uses
+ * its own knowledge).
  */
-function makeCodexClient(base: OpenAI): OpenAI {
+function makeCodexClient(): OpenAI {
   const useStub = process.env.CODEX_STUB === "1";
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const codexImages = {
     async edit(args: { image?: unknown; prompt?: string; size?: string }) {
       if (useStub) return { data: [{ b64_json: PLACEHOLDER_PNG_BASE64 }] };
@@ -131,10 +169,36 @@ function makeCodexClient(base: OpenAI): OpenAI {
     },
   };
 
-  return new Proxy(base, {
-    get(target, prop, receiver) {
+  const codexChat = {
+    completions: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async create(params: any) {
+        const jsonMode = params?.response_format?.type === "json_object";
+        const { prompt, images } = buildFromChatMessages(params?.messages ?? [], jsonMode);
+        const { codexText, stripJsonFences } = await import("./codex-text");
+        let text = await codexText({ prompt, images });
+        if (jsonMode) text = stripJsonFences(text);
+        return { choices: [{ message: { role: "assistant", content: text } }], usage: undefined };
+      },
+    },
+  };
+
+  const codexResponses = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async create(params: any) {
+      const { prompt, images } = buildFromResponsesInput(params?.input ?? [], params?.instructions);
+      const { codexText, stripJsonFences } = await import("./codex-text");
+      const text = stripJsonFences(await codexText({ prompt, images }));
+      return { output: [{ type: "message", content: [{ type: "output_text", text }] }], usage: undefined };
+    },
+  };
+
+  return new Proxy({} as OpenAI, {
+    get(_target, prop) {
       if (prop === "images") return codexImages;
-      return Reflect.get(target, prop, receiver);
+      if (prop === "chat") return codexChat;
+      if (prop === "responses") return codexResponses;
+      return undefined;
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) as any as OpenAI;
@@ -146,9 +210,9 @@ let cached: OpenAI | null = null;
 export async function getModelClient(): Promise<OpenAI> {
   if (cached) return cached;
   if (getModelEngineKind() === "codex") {
-    cached = makeCodexClient(getRealOpenAI());
+    cached = makeCodexClient();
     console.log(
-      `[model-client] engine: codex (${process.env.CODEX_STUB === "1" ? "STUB images" : "real Codex images"}, text via OpenAI)`,
+      `[model-client] engine: codex (${process.env.CODEX_STUB === "1" ? "STUB images" : "real Codex images"}, text+vision via Codex — no OpenAI key needed)`,
     );
   } else {
     cached = getRealOpenAI();

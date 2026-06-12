@@ -35,7 +35,7 @@ async function main() {
     title: "[DRY-RUN] Annual Day", description: "Annual day celebration with the school logo on top.",
     status: "in_design",
   }).select("id").single();
-  const { data: job } = await admin.from("ai_generation_jobs").insert({ request_id: req!.id, poster_type: "single" }).select("id").single();
+  const { data: job } = await admin.from("ai_generation_jobs").insert({ request_id: req!.id, poster_type: "single", engine: "local" }).select("id").single();
 
   console.log(`[codex-pipeline] job ${job!.id} queued — waiting for the worker (real Codex, ~3-5 min)…`);
   let status = "queued"; let err: string | null = null;

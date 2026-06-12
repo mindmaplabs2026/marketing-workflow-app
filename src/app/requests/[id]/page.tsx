@@ -530,8 +530,10 @@ export default async function RequestDetailPage({
         />
       )}
 
-      {/* AI: trigger / regenerate button for designer */}
-      {canTriggerAi && !aiVariations.some((v) => v.is_accepted) && (
+      {/* AI: trigger / regenerate button for designer.
+          When the latest job FAILED, the failed-section below renders its own
+          regenerate button, so skip this one to avoid a duplicate. */}
+      {canTriggerAi && !aiVariations.some((v) => v.is_accepted) && aiJob?.status !== "failed" && (
         req.ai_generated
           ? <AiRegenerateButton requestId={req.id} currentTitle={req.title} currentDescription={req.description ?? ""} />
           : <AiGenerateButton requestId={req.id} />

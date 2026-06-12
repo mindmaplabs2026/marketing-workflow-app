@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import { inngest } from "@/lib/inngest/client";
-import { getPosterEngine } from "@/lib/config/engine";
 import type {
   UserRole,
   RequestStatus,
@@ -770,10 +769,10 @@ export async function triggerAiGeneration(
     .update({ ai_generated: true })
     .eq("id", requestId);
 
-  // Create the AI generation job
+  // Create the AI generation job — CLOUD engine (Inngest + OpenAI).
   const { data: job, error: jobErr } = await supabase
     .from("ai_generation_jobs")
-    .insert({ request_id: requestId, poster_type: posterType })
+    .insert({ request_id: requestId, poster_type: posterType, engine: "cloud" })
     .select("id")
     .single<{ id: string }>();
 
@@ -781,16 +780,53 @@ export async function triggerAiGeneration(
     return { error: jobErr?.message ?? "Could not create AI job." };
   }
 
-  // POSTER_ENGINE=inngest (default): dispatch to the Inngest pipeline on Vercel.
-  // POSTER_ENGINE=server: do nothing — the standalone worker polls for this
-  // queued job and runs it. The job row + poster_type carry everything it needs.
-  if (getPosterEngine() === "inngest") {
-    await inngest.send({
-      name: "ai/pipeline.started",
-      data: { jobId: job.id, requestId, posterType },
-    });
+  // Cloud path: always dispatch to the Inngest pipeline on Vercel (OpenAI).
+  await inngest.send({
+    name: "ai/pipeline.started",
+    data: { jobId: job.id, requestId, posterType },
+  });
+
+  return {};
+}
+
+/**
+ * "Generate with Local AI" — creates a LOCAL job (Codex worker). It does NOT
+ * dispatch to Inngest; the always-on worker polls for queued engine='local'
+ * jobs and runs the same 5-agent pipeline through Codex. Same permissions and
+ * flow as triggerAiGeneration — only the engine differs.
+ */
+export async function triggerLocalAiGeneration(
+  requestId: string,
+  posterType: "single" | "carousel",
+): Promise<{ error?: string }> {
+  const actor = await loadActor();
+  if ("error" in actor) return { error: actor.error };
+
+  const req = await loadRequestForUpdate(requestId);
+  if ("error" in req) return { error: req.error };
+
+  if (actor.role !== "super_admin" && actor.role !== "designer") {
+    return { error: "Only a designer can trigger AI generation." };
+  }
+  if (actor.role === "designer" && req.status !== "in_design" && req.status !== "changes_requested") {
+    return { error: "Pick up the request first before assigning to AI." };
   }
 
+  const supabase = await createClient();
+
+  await supabase.from("requests").update({ ai_generated: true }).eq("id", requestId);
+
+  const { data: job, error: jobErr } = await supabase
+    .from("ai_generation_jobs")
+    .insert({ request_id: requestId, poster_type: posterType, engine: "local" })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (jobErr || !job) {
+    return { error: jobErr?.message ?? "Could not create AI job." };
+  }
+
+  // Local path: no Inngest — the always-on worker picks up this queued job.
   return {};
 }
 
@@ -803,6 +839,7 @@ export async function regenerateAi(
   posterType: "single" | "carousel",
   title?: string,
   description?: string | null,
+  engine: "cloud" | "local" = "cloud",
 ): Promise<{ error?: string }> {
   const actor = await loadActor();
   if ("error" in actor) return { error: actor.error };
@@ -828,7 +865,7 @@ export async function regenerateAi(
   // Create a new AI generation job (old one stays for history)
   const { data: job, error: jobErr } = await supabase
     .from("ai_generation_jobs")
-    .insert({ request_id: requestId, poster_type: posterType })
+    .insert({ request_id: requestId, poster_type: posterType, engine })
     .select("id")
     .single<{ id: string }>();
 
@@ -836,9 +873,8 @@ export async function regenerateAi(
     return { error: jobErr?.message ?? "Could not create AI job." };
   }
 
-  // Same dispatch rule as triggerAiGeneration: only hand off to Inngest in
-  // the default engine; in server mode the worker polls for the queued job.
-  if (getPosterEngine() === "inngest") {
+  // Cloud regenerate → Inngest; local regenerate → picked up by the worker.
+  if (engine === "cloud") {
     await inngest.send({
       name: "ai/pipeline.started",
       data: { jobId: job.id, requestId, posterType },

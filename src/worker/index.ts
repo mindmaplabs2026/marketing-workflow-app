@@ -17,7 +17,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runPosterPipeline } from "@/lib/ai/pipeline-core";
 import { runChatEdit } from "@/lib/ai/chat-core";
-import { getPosterEngine, getModelEngineKind } from "@/lib/config/engine";
+import { getModelEngineKind } from "@/lib/config/engine";
 
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 
@@ -40,6 +40,7 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
     .from("ai_generation_jobs")
     .select("id")
     .eq("status", "queued")
+    .eq("engine", "local") // only the "Generate with Local AI" jobs; Inngest owns 'cloud'
     .order("created_at", { ascending: true })
     .limit(1);
 
@@ -123,13 +124,8 @@ async function processChatEdit(edit: ClaimedChatEdit) {
 
 async function loop() {
   console.log(
-    `[Worker] started — POSTER_ENGINE=${getPosterEngine()}, MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms`,
+    `[Worker] started — claiming engine='local' jobs, MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms`,
   );
-  if (getPosterEngine() !== "server") {
-    console.warn(
-      "[Worker] NOTE: POSTER_ENGINE is not 'server'. The app may still dispatch jobs to Inngest; set POSTER_ENGINE=server (Phase 3) so this worker owns them.",
-    );
-  }
 
   while (running) {
     // 1) Generation jobs take priority.
