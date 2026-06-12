@@ -77,7 +77,9 @@ export function AiVariations({
   const accepted = variations.find((v) => v.is_accepted);
 
   if (accepted) {
-    const urls = signedUrls.get(accepted.id) ?? [];
+    const allAcceptedUrls = signedUrls.get(accepted.id) ?? [];
+    // Single posters: chat edits are appended — show only the latest. Carousels: all pages.
+    const urls = accepted.poster_type === "single" ? allAcceptedUrls.slice(-1) : allAcceptedUrls;
     return (
       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-900/20">
         <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
@@ -121,7 +123,10 @@ export function AiVariations({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {variations.map((v) => {
-          const urls = signedUrls.get(v.id) ?? [];
+          const allUrls = signedUrls.get(v.id) ?? [];
+          // Single posters: chat edits are appended (history) — show only the
+          // LATEST version. Carousels: show every page.
+          const urls = v.poster_type === "single" ? allUrls.slice(-1) : allUrls;
           const brief = v.creative_brief;
           const idx = carouselIndex.get(v.id) ?? 0;
 

@@ -906,7 +906,7 @@ export async function acceptAiVariation(formData: FormData) {
   // Load the variation to get its storage paths
   const { data: variation, error: varErr } = await supabase
     .from("ai_variations")
-    .select("id, storage_paths, variation_index")
+    .select("id, storage_paths, variation_index, poster_type")
     .eq("id", variationId)
     .single();
   if (varErr || !variation) throw new Error("Variation not found.");
@@ -921,7 +921,13 @@ export async function acceptAiVariation(formData: FormData) {
   // Copy AI-generated poster(s) into the designs table so the existing
   // review flow works unchanged
   const admin = createAdminClient();
-  for (const path of variation.storage_paths) {
+  // Single poster: chat edits are appended (history), so accept only the LATEST
+  // version. Carousel: every entry is a real page — copy them all.
+  const pathsToCopy =
+    variation.poster_type === "single" && variation.storage_paths.length > 0
+      ? [variation.storage_paths[variation.storage_paths.length - 1]]
+      : variation.storage_paths;
+  for (const path of pathsToCopy) {
     await admin.from("designs").insert({
       request_id: requestId,
       uploaded_by: actor.userId,
