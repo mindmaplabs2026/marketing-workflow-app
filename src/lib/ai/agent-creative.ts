@@ -1,5 +1,6 @@
 import "server-only";
-import { getOpenAI, withRateLimitRetry } from "./openai-client";
+import { withRateLimitRetry } from "./openai-client";
+import { getModelClient } from "./model-client";
 import type { UnderstandingOutput } from "./agent-understanding";
 import type { CostTracker } from "./cost-tracker";
 
@@ -201,7 +202,7 @@ export async function runCreativeAgent(
   input: Agent2Input,
   costTracker?: CostTracker,
 ): Promise<CreativeOutput> {
-  const openai = getOpenAI();
+  const openai = await getModelClient();
 
   const brandAssetSummary = input.brandAssets
     .map(

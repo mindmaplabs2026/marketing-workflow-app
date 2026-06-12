@@ -39,13 +39,22 @@ export async function POST(request: Request) {
 
   const { data: variation, error: varErr } = await supabase
     .from("ai_variations")
-    .select("id, request_id, variation_index, chat_rounds_used")
+    .select("id, request_id, variation_index, chat_rounds_used, job_id")
     .eq("id", variation_id)
     .single();
 
   if (varErr || !variation) {
     return NextResponse.json({ error: "Variation not found." }, { status: 404 });
   }
+
+  // Route the edit to the SAME engine that generated this variation:
+  // local → the worker (Codex); cloud → Inngest (OpenAI).
+  const { data: jobRow } = await supabase
+    .from("ai_generation_jobs")
+    .select("engine")
+    .eq("id", variation.job_id)
+    .single();
+  const isLocal = jobRow?.engine === "local";
 
   // Check permissions
   const { data: req } = await supabase
@@ -71,7 +80,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Maximum chat rounds reached (25/25)." }, { status: 429 });
   }
 
-  // Store the user message immediately
+  // Store the user message immediately. For a LOCAL variation we also stamp the
+  // page + a 'queued' status so the worker can claim it (the worker never sees
+  // the Inngest event). For a CLOUD variation status stays null and Inngest
+  // processes it.
   const admin = createAdminClient();
   const { data: userMsg, error: insertErr } = await admin
     .from("ai_chat_messages")
@@ -79,6 +91,8 @@ export async function POST(request: Request) {
       variation_id,
       role: "user" as const,
       content: message.trim(),
+      page_index: page_index ?? null,
+      ...(isLocal ? { status: "queued" as const } : {}),
     })
     .select("id")
     .single();
@@ -87,17 +101,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not store message." }, { status: 500 });
   }
 
-  // Fire Inngest event for async processing
-  await inngest.send({
-    name: "ai/chat.edit",
-    data: {
-      userMessageId: userMsg.id,
-      variationId: variation_id,
-      requestId: variation.request_id,
-      message: message.trim(),
-      pageIndex: page_index ?? null,
-    },
-  });
+  // Cloud variation → hand off to Inngest. Local variation → the worker polls
+  // the queued user message instead.
+  if (!isLocal) {
+    await inngest.send({
+      name: "ai/chat.edit",
+      data: {
+        userMessageId: userMsg.id,
+        variationId: variation_id,
+        requestId: variation.request_id,
+        message: message.trim(),
+        pageIndex: page_index ?? null,
+      },
+    });
+  }
 
   // Return immediately with the user message ID for polling
   return NextResponse.json({

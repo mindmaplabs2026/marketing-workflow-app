@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "engine:smoke": "tsx scripts/engine-smoke.ts",
+    "model:smoke": "tsx scripts/model-smoke.ts",
+    "worker": "node --env-file=.env.local --conditions=react-server --import tsx src/worker/index.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
@@ -28,6 +31,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.12.3",
+    "server-only": "^0.0.1",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
@@ -39,6 +43,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
+    "tsx": "^4.22.4",
     "typescript": "^5"
   }
 }

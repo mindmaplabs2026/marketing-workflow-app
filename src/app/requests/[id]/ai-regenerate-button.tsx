@@ -5,21 +5,28 @@ import { regenerateAi } from "../actions";
 
 export function AiRegenerateButton({
   requestId,
-  label,
   currentTitle,
   currentDescription,
 }: {
   requestId: string;
-  label?: string;
   currentTitle?: string;
   currentDescription?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [posterType, setPosterType] = useState<"single" | "carousel">("single");
+  const [engine, setEngine] = useState<"cloud" | "local">("cloud");
   const [showOptions, setShowOptions] = useState(false);
   const [title, setTitle] = useState(currentTitle ?? "");
   const [description, setDescription] = useState(currentDescription ?? "");
+
+  const engineLabel = engine === "local" ? "Local AI" : "AI";
+
+  function open(e: "cloud" | "local") {
+    setEngine(e);
+    setError(null);
+    setShowOptions(true);
+  }
 
   async function handleRegenerate() {
     if (!title.trim()) {
@@ -28,7 +35,13 @@ export function AiRegenerateButton({
     }
     setBusy(true);
     setError(null);
-    const result = await regenerateAi(requestId, posterType, title.trim(), description.trim() || null);
+    const result = await regenerateAi(
+      requestId,
+      posterType,
+      title.trim(),
+      description.trim() || null,
+      engine,
+    );
     if (result.error) {
       setError(result.error);
       setBusy(false);
@@ -38,22 +51,33 @@ export function AiRegenerateButton({
     }
   }
 
+  // Collapsed: two buttons, mirroring the generate section.
+  // "Regenerate with AI" → cloud (Inngest + OpenAI); "Regenerate with Local AI" → Codex worker.
   if (!showOptions) {
     return (
-      <button
-        type="button"
-        onClick={() => setShowOptions(true)}
-        className="rounded-md border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
-      >
-        {label ?? "Regenerate with AI"}
-      </button>
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={() => open("cloud")}
+          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-600"
+        >
+          Regenerate with AI
+        </button>
+        <button
+          type="button"
+          onClick={() => open("local")}
+          className="rounded-md border border-violet-600 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 dark:border-violet-500 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
+        >
+          Regenerate with Local AI
+        </button>
+      </div>
     );
   }
 
   return (
     <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-900/40 dark:bg-violet-900/10">
       <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-        Regenerate with AI
+        Regenerate with {engineLabel}
       </p>
       <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
         Update the title or description to guide the AI, then regenerate. Previous results will be kept.
@@ -123,7 +147,7 @@ export function AiRegenerateButton({
             disabled={busy}
             className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
           >
-            {busy ? "Starting..." : "Regenerate"}
+            {busy ? "Starting..." : `Regenerate with ${engineLabel}`}
           </button>
 
           <button
