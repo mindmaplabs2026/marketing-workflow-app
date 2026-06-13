@@ -101,7 +101,7 @@ You will receive REFERENCE IMAGES first (logo, header, footer, sample posters, u
 
 Score the poster from 1-10 on these criteria:
 - Logo accuracy (if a logo reference is provided): does the logo in the poster match the reference logo exactly? Same shape, colors, text?
-- Header/footer accuracy (if provided): do they match the reference header and footer? Note: some schools' headers already include the logo, so a separate logo may not be present.
+- School branding: is the school name, affiliations, and contact information present and readable?
 - Uploaded photo usage: if uploaded photos were provided, are they included as-is (not redrawn)?
 - Style match: does the design quality match the sample poster references?
 - Typography: is text legible, well-sized, not too much text?
@@ -206,9 +206,9 @@ export async function runGenerationAgent(
 
   if (selectedAssets) {
     // Agent 2 specified exactly which assets to use (null means intentionally skipped)
-    if (selectedAssets.logo) { await addAsset(selectedAssets.logo, "SCHOOL LOGO — Copy this EXACTLY. Do NOT redraw", "logo"); hasLogo = referenceImages.some((r) => r.role.includes("LOGO")); }
-    if (selectedAssets.header) { await addAsset(selectedAssets.header, "SCHOOL HEADER — Copy this exactly at the top", "header"); hasHeader = referenceImages.some((r) => r.role.includes("HEADER")); }
-    if (selectedAssets.footer) { await addAsset(selectedAssets.footer, "SCHOOL FOOTER — Copy this exactly at the bottom", "footer"); hasFooter = referenceImages.some((r) => r.role.includes("FOOTER")); }
+    if (selectedAssets.logo) { await addAsset(selectedAssets.logo, "SCHOOL LOGO — Reproduce this logo accurately in the poster", "logo"); hasLogo = referenceImages.some((r) => r.role.includes("LOGO")); }
+    if (selectedAssets.header) { await addAsset(selectedAssets.header, "SCHOOL BRANDING SOURCE — Extract school name, affiliation, and branding text from this image", "header"); hasHeader = referenceImages.some((r) => r.role.includes("BRANDING SOURCE")); }
+    if (selectedAssets.footer) { await addAsset(selectedAssets.footer, "SCHOOL CONTACT SOURCE — Extract contact details (phone, website, address) from this image", "footer"); hasFooter = referenceImages.some((r) => r.role.includes("CONTACT SOURCE")); }
     await addAsset(selectedAssets.uniform, "UNIFORM REFERENCE — Match this for any AI-generated students", "uniform");
     await addAsset(selectedAssets.infrastructure, "INFRASTRUCTURE REFERENCE — Use as setting/background guide", "infrastructure");
 
@@ -341,9 +341,9 @@ export async function runGenerationAgent(
     const orderedImages = [...logoImgs, ...otherImgs];
 
     const copyInstructions = [
-      hasLogo ? "Copy the LOGO exactly" : null,
-      hasHeader ? "Copy the HEADER exactly" : null,
-      hasFooter ? "Copy the FOOTER exactly" : null,
+      hasLogo ? "Reproduce the SCHOOL LOGO accurately" : null,
+      hasHeader ? "Extract school name and branding from the BRANDING SOURCE image" : null,
+      hasFooter ? "Extract contact details from the CONTACT SOURCE image" : null,
       "Match the SAMPLE POSTERS' design quality",
     ].filter(Boolean).join(". ");
 
@@ -472,20 +472,101 @@ Rules:
     return { base64: base64Result, prompt };
   }
 
-  // Generate all pages. Codex: SEQUENTIAL (parallel codex exec sessions would
-  // overload the box + hit subscription limits). OpenAI API: parallel as before.
-  const sequential = getModelEngineKind() === "codex";
-  console.log(`[Agent3] Starting ${pages.length} page(s) ${sequential ? "sequentially (codex)" : "in parallel"} at ${new Date().toISOString()}`);
+  // Generate all pages sequentially. Page 1 is evaluated and optionally refined.
+  // For pages 2+: Codex uses codexCarouselPage (vision-based style matching),
+  // OpenAI adds page 1 as a style reference via -i.
+  const isCodexEngine = getModelEngineKind() === "codex";
+  console.log(`[Agent3] Starting ${pages.length} page(s) sequentially at ${new Date().toISOString()}`);
   const allPagesStart = Date.now();
-  let pageResults: { base64: string; prompt: string }[];
-  if (sequential) {
-    pageResults = [];
-    for (let i = 0; i < pages.length; i++) {
-      pageResults.push(await generateOnePage(i));
-    }
-  } else {
-    pageResults = await Promise.all(pages.map((_, i) => generateOnePage(i)));
+  const pageResults: { base64: string; prompt: string }[] = [];
+  let refinementRounds = 0;
+
+  // --- Page 1 ---
+  let page1Result = await generateOnePage(0);
+
+  // Evaluate page 1 and refine if below threshold
+  const evalRefImages = referenceImages.map((r) => ({
+    role: r.role,
+    base64: r.buffer.toString("base64"),
+  }));
+  const evalResult = await evaluatePoster(
+    page1Result.base64,
+    brief,
+    input.schoolName,
+    evalRefImages,
+    costTracker,
+  );
+  console.log(`[Agent3] Page 1 evaluation: score=${evalResult.score}, passes=${evalResult.passesThreshold}`);
+
+  if (!evalResult.passesThreshold) {
+    console.log(`[Agent3] Page 1 below threshold (${evalResult.score}/${QUALITY_THRESHOLD}), refining...`);
+    const refined = await refineAndRegenerate(
+      page1Result.prompt,
+      evalResult.feedback,
+      evalResult.score,
+      input,
+      costTracker,
+    );
+    page1Result = { base64: refined.base64, prompt: refined.refinedPrompt };
+    refinementRounds++;
   }
+
+  pageResults.push(page1Result);
+
+  // --- Pages 2+ ---
+  for (let i = 1; i < pages.length; i++) {
+    if (isCodexEngine) {
+      const { codexCarouselPage } = await import("./codex-carousel-page");
+      const page1Buf = Buffer.from(page1Result.base64, "base64");
+
+      // Build per-page photo buffers
+      const page = pages[i];
+      const pagePhotoPaths = new Set(
+        (page?.selectedImages ?? []).map((s) => s?.path).filter((p): p is string => !!p)
+      );
+      const pagePhotoBuffers: { name: string; buffer: Buffer }[] = [];
+      for (const ref of referenceImages) {
+        if (!ref.role.includes("UPLOADED PHOTO") || !ref.sourcePath) continue;
+        const refFilename = ref.sourcePath.split("/").pop() ?? "";
+        const isForThisPage = pagePhotoPaths.size === 0 || pagePhotoPaths.has(ref.sourcePath) ||
+          [...pagePhotoPaths].some((p) => ref.sourcePath === p || p.endsWith(refFilename));
+        if (isForThisPage) {
+          pagePhotoBuffers.push({ name: ref.name, buffer: ref.buffer });
+        }
+      }
+
+      // Build brand asset buffers
+      const brandAssetBuffers = brandRefImages.map((r) => ({
+        name: r.name,
+        buffer: r.buffer,
+        role: r.role,
+      }));
+
+      // Build the page prompt
+      const pagePrompt = buildImagePrompt(input, page, i, pages.length, fullCreativeVision, { hasLogo, hasHeader, hasFooter });
+
+      const codexBase64 = await codexCarouselPage({
+        page1Image: page1Buf,
+        pagePhotos: pagePhotoBuffers,
+        brandAssets: brandAssetBuffers,
+        prompt: pagePrompt,
+        pageNumber: i + 1,
+        totalPages: pages.length,
+      });
+      pageResults.push({ base64: codexBase64, prompt: pagePrompt });
+    } else {
+      // OpenAI: page 1 output as additional style reference
+      const page1Buf = Buffer.from(page1Result.base64, "base64");
+      referenceImages.push({
+        buffer: page1Buf,
+        name: `image${referenceImages.length + 1}_page1ref.png`,
+        role: `IMAGE ${referenceImages.length + 1}: PAGE 1 STYLE REFERENCE — Match this exact visual style, background, borders, typography, header and footer`,
+      });
+      const result = await generateOnePage(i);
+      pageResults.push(result);
+    }
+  }
+
   console.log(`[Agent3] All ${pages.length} page(s) complete in ${((Date.now() - allPagesStart) / 1000).toFixed(1)}s`);
 
   for (const result of pageResults) {
@@ -498,7 +579,7 @@ Rules:
     model: "gpt-image-2",
     prompts,
     referenceImageCount: referenceImages.length,
-    refinementRounds: 0,
+    refinementRounds,
   };
 }
 
@@ -569,17 +650,30 @@ ${photoDetails}`;
   // Page-level design prompt from creative agent (contains photo count guidance)
   const pageDesignPrompt = (page as Record<string, unknown> | undefined)?.designPrompt as string | undefined;
 
+  // Extract brandingPlacement from brief if available
+  const brandingPlacement = (brief as Record<string, unknown>).brandingPlacement as {
+    schoolName?: string;
+    contactInfo?: string;
+    affiliations?: string;
+  } | undefined;
+
   const carouselNote = isCarousel
-    ? `\n\nCRITICAL — CAROUSEL CONSISTENCY: This is page ${pageIndex + 1} of ${totalPages}.
+    ? `\n\nCRITICAL — CAROUSEL CONSISTENCY: This is page ${pageIndex + 1} of ${totalPages}.${pageIndex === 0 ? " This is the FIRST page — establish the visual style that all subsequent pages must follow." : ` Match the style of page 1 exactly.`}
 EVERY page MUST have IDENTICAL:
 - Background: same color, gradient, texture, pattern on ALL pages
-- Header: copy EXACTLY from reference image — same position, size, colors on every page
-- Footer: copy EXACTLY from reference image — same position, size, colors, text, and layout on every page. The footer must be pixel-for-pixel identical across all ${totalPages} pages. Do NOT modify, restyle, or reinterpret the footer.
+- School branding: same school name, affiliations, and contact information placement on every page
 - Typography: same font family, same sizes, same colors, same positioning rules
 - Borders/frames: same treatment on all pages
 - Decorative elements: same style on all pages
 Only the hero content (photos, headline text) changes between pages.`
     : "";
+
+  // Build branding instructions from source images instead of rigid copy instructions
+  const brandingInstructions = [
+    hasLogo ? `Logo: reproduce the SCHOOL LOGO accurately → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}` : "",
+    hasHeader ? `School branding: extract school name${brandingPlacement?.affiliations ? ", affiliations" : ""} from the BRANDING SOURCE image and integrate naturally. ${brandingPlacement?.schoolName ?? brief.headerFooter.headerStyle}` : "",
+    hasFooter ? `Contact info: extract contact details (phone, website, address) from the CONTACT SOURCE image and place them cleanly. ${brandingPlacement?.contactInfo ?? brief.headerFooter.footerStyle}` : "",
+  ].filter(Boolean).join("\n");
 
   return `Instagram poster for ${schoolName}. Portrait 1080x1350px, print-ready, professional.
 
@@ -595,9 +689,7 @@ ${isCarousel ? `Page ${pageIndex + 1} of ${totalPages} carousel` : ""}
 ${!isCarousel || pageIndex === 0 ? `Headline: "${brief.textContent.headline}"` : ""}
 ${!isCarousel && brief.textContent.subheadline ? `Tagline: "${brief.textContent.subheadline}"` : ""}
 
-${hasLogo ? `Logo: copy EXACTLY from reference image → ${brief.logoPlacement.position}, ${brief.logoPlacement.size}` : ""}
-${hasHeader ? `Header: copy EXACTLY from reference image → top of page. Reproduce the header identically on every page. ${brief.headerFooter.headerStyle}` : ""}
-${hasFooter ? `Footer: copy EXACTLY from reference image → bottom of page. Reproduce the footer identically on every page — same height, colors, text, icons, and layout. ${brief.headerFooter.footerStyle}` : ""}
+${brandingInstructions}
 
 ${photoSection}
 ${carouselNote}
@@ -666,9 +758,9 @@ export async function refineAndRegenerate(
   }
 
   if (selectedAssets) {
-    await addRefAsset(selectedAssets.logo, "SCHOOL LOGO — Copy EXACTLY", "logo");
-    await addRefAsset(selectedAssets.header, "SCHOOL HEADER", "header");
-    await addRefAsset(selectedAssets.footer, "SCHOOL FOOTER", "footer");
+    await addRefAsset(selectedAssets.logo, "SCHOOL LOGO — Reproduce accurately", "logo");
+    await addRefAsset(selectedAssets.header, "SCHOOL BRANDING SOURCE — Extract school name, affiliation, and branding text", "header");
+    await addRefAsset(selectedAssets.footer, "SCHOOL CONTACT SOURCE — Extract contact details (phone, website, address)", "footer");
     await addRefAsset(selectedAssets.uniform, "UNIFORM REFERENCE", "uniform");
     await addRefAsset(selectedAssets.infrastructure, "INFRASTRUCTURE REFERENCE", "infrastructure");
     for (const sp of selectedAssets.samples ?? []) await addRefAsset(sp, "STYLE REFERENCE POSTER", "sample");
