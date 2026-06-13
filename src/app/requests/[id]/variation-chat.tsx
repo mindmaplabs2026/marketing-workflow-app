@@ -164,30 +164,31 @@ export function VariationChat({
       {/* Fullscreen lightbox */}
       {lightboxUrl && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90"
           onClick={() => setLightboxUrl(null)}
         >
-          <div className="absolute right-4 top-4 flex gap-2">
-            <a
-              href={lightboxUrl}
-              download="poster.png"
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="rounded-full bg-white/20 p-2 text-white hover:bg-white/30"
+          {/* Top bar — safe from notch, large touch targets */}
+          <div className="absolute left-0 right-0 top-0 flex items-center justify-end gap-3 px-4 pb-3 pt-[env(safe-area-inset-top,12px)]">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.open(lightboxUrl, "_blank");
+              }}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:bg-white/40"
               title="Download"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="24" height="24">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
                 <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
                 <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
               </svg>
-            </a>
+            </button>
             <button
               type="button"
               onClick={() => setLightboxUrl(null)}
-              className="rounded-full bg-white/20 p-2 text-white hover:bg-white/30"
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:bg-white/40"
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
             </button>
@@ -195,7 +196,7 @@ export function VariationChat({
           <img
             src={lightboxUrl}
             alt="Full preview"
-            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            className="max-h-[80vh] max-w-[95vw] rounded-lg object-contain"
             onClick={(e) => e.stopPropagation()}
           />
         </div>
