@@ -134,17 +134,39 @@ export async function codexImage(opts: CodexImageOptions): Promise<string> {
       refPaths.push(p);
     }
 
-    const refNote =
-      refPaths.length > 0
-        ? `\n\nYou have been given ${refPaths.length} reference image(s) attached to this message. Use them to COMPOSE the poster: copy any logo, header, and footer EXACTLY as provided (do not redraw or restyle them), and include any provided photos AS-IS.`
-        : "";
+    // Build a detailed manifest so Codex knows what each reference image is
+    let refManifest = "";
+    if (refs.length > 0) {
+      const lines = refs.map((r, idx) => {
+        const role = (r as { role?: string }).role ?? r.name;
+        const filename = refPaths[idx]?.split("/").pop() ?? `ref${idx}.png`;
+        return `- ${filename}: ${role}`;
+      });
+      refManifest = `\n\nREFERENCE IMAGES — ${refs.length} image(s) are attached. Here is what each one is:
+${lines.join("\n")}
 
-    const prompt = `Use your built-in image generation tool to create a single Instagram poster image at ${size} (portrait).${refNote}
+RULES FOR REFERENCE IMAGES:
+- LOGO images: reproduce the logo accurately in the poster — same shape, colors, and text.
+- BRANDING SOURCE: extract school name and affiliation text from it.
+- CONTACT SOURCE: extract phone, website, address from it.
+- UPLOADED PHOTO images: include these photos AS-IS in the poster. Do NOT redraw, replace, or modify them.
+- SAMPLE POSTER images: match this design quality and style.
+- Use ONLY the uploaded photos provided. Do NOT generate additional AI photos that weren't provided.`;
+    }
+
+    const prompt = `Use your built-in image generation tool to create a single Instagram poster image.
+
+CRITICAL SIZE REQUIREMENT: The image MUST be portrait orientation at exactly ${size} pixels (width x height). This is a 4:5 aspect ratio for Instagram. Do NOT generate landscape or square images.${refManifest}
 
 Poster brief:
 ${opts.prompt}
 
-Generate exactly one final poster image with the built-in image tool. Do not write any code or scripts.`;
+Generate exactly one final poster image with the built-in image tool at ${size} portrait size. Do not write any code or scripts.`;
+
+    console.log(`[codex-image] ${refPaths.length} reference images, prompt ${prompt.length} chars`);
+    for (let ri = 0; ri < refs.length; ri++) {
+      console.log(`[codex-image]   ref${ri}: ${refs[ri].name} (${(refs[ri].buffer.length / 1024).toFixed(0)} KB) — ${(refs[ri] as { role?: string }).role ?? "unknown role"}`);
+    }
 
     // Retry once: Codex sessions can occasionally hang/time out transiently.
     let lastErr: unknown;

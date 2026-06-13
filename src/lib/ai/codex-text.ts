@@ -75,6 +75,7 @@ export function stripJsonFences(s: string): string {
 
 /** Run Codex for a text/vision reasoning step and return its final message. */
 export async function codexText(input: CodexTextInput): Promise<string> {
+  console.log(`[codex-text] Starting with ${input.images?.length ?? 0} images, prompt ${input.prompt.length} chars`);
   const timeoutMs = input.timeoutMs ?? Number(process.env.CODEX_TEXT_TIMEOUT_MS ?? 300_000);
   const workDir = path.join(os.tmpdir(), "codex-text", `${process.pid}-${Date.now()}-${Math.round(performance.now())}`);
   await fs.mkdir(workDir, { recursive: true });
@@ -107,8 +108,12 @@ export async function codexText(input: CodexTextInput): Promise<string> {
         const p = path.join(workDir, `img${i}.png`);
         await fs.writeFile(p, buf);
         refPaths.push(p);
+      } else {
+        const src = imgs[i].dataUrl ? imgs[i].dataUrl!.slice(0, 60) + "..." : "(buffer)";
+        console.warn(`[codex-text] Image ${i} skipped (no data) — source: ${src}`);
       }
     }
+    console.log(`[codex-text] ${refPaths.length}/${imgs.length} images downloaded, passing to codex exec`);
 
     let lastErr: unknown;
     for (let attempt = 1; attempt <= 2; attempt++) {

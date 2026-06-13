@@ -93,13 +93,23 @@ function getRealOpenAI(): OpenAI {
  * Extract { name, buffer } from the OpenAI `image` argument (a File / FileLike,
  * or an array of them — what the agents build via toFile()).
  */
-async function filesToRefs(image: unknown): Promise<{ name: string; buffer: Buffer }[]> {
+async function filesToRefs(image: unknown): Promise<{ name: string; buffer: Buffer; role?: string }[]> {
   const arr = Array.isArray(image) ? image : image != null ? [image] : [];
-  const refs: { name: string; buffer: Buffer }[] = [];
+  const refs: { name: string; buffer: Buffer; role?: string }[] = [];
   for (let i = 0; i < arr.length; i++) {
     const f = arr[i] as { arrayBuffer?: () => Promise<ArrayBuffer>; name?: string };
     if (f && typeof f.arrayBuffer === "function") {
-      refs.push({ name: f.name ?? `ref${i}.png`, buffer: Buffer.from(await f.arrayBuffer()) });
+      const name = f.name ?? `ref${i}.png`;
+      let role: string | undefined;
+      if (name.includes("style_reference") || name.includes("page1ref")) role = "CAROUSEL STYLE REFERENCE — page 1 output. Match this exactly.";
+      else if (name.includes("_logo")) role = "SCHOOL LOGO — reproduce accurately";
+      else if (name.includes("_header")) role = "SCHOOL BRANDING SOURCE — extract school name and affiliations";
+      else if (name.includes("_footer")) role = "SCHOOL CONTACT SOURCE — extract phone, website, address";
+      else if (name.includes("_photo")) role = "UPLOADED PHOTO — include AS-IS, do not redraw";
+      else if (name.includes("_sample")) role = "SAMPLE POSTER — match this design quality";
+      else if (name.includes("_uniform")) role = "UNIFORM REFERENCE — match for AI-generated students";
+      else if (name.includes("_infrastructure")) role = "INFRASTRUCTURE REFERENCE — campus setting";
+      refs.push({ name, buffer: Buffer.from(await f.arrayBuffer()), role });
     }
   }
   return refs;
