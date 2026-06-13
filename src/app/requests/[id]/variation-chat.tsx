@@ -55,10 +55,15 @@ export function VariationChat({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   async function pollForResponse(messageId: string): Promise<void> {
-    // First poll after 60s, then every 30s
-    await new Promise((r) => setTimeout(r, 60000));
+    // Reels take 3-5 min to re-render; posters take ~60s
+    const isReel = posterType === "reel";
+    const firstPollMs = isReel ? 120000 : 60000;
+    const intervalMs = isReel ? 60000 : 30000;
+    const maxAttempts = isReel ? 8 : 10;
 
-    for (let attempt = 0; attempt < 10; attempt++) {
+    await new Promise((r) => setTimeout(r, firstPollMs));
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const res = await fetch(`/api/ai/chat?message_id=${messageId}`);
         const data = (await res.json()) as PollResponse;
@@ -99,11 +104,9 @@ export function VariationChat({
         // Network error — keep polling
       }
 
-      // Wait 30s before next poll
-      await new Promise((r) => setTimeout(r, 30000));
+      await new Promise((r) => setTimeout(r, intervalMs));
     }
 
-    // Gave up after ~6 minutes
     setError("Edit is taking longer than expected. Refresh the page to check.");
   }
 
@@ -202,52 +205,65 @@ export function VariationChat({
         </div>
       )}
 
-      {/* Poster preview — all pages floating on top */}
+      {/* Media preview */}
       <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className={`flex gap-3 ${currentUrls.length === 1 ? "justify-center" : "overflow-x-auto pb-2"}`}>
-          {currentUrls.map((url, i) => (
-            <div key={i} className="relative shrink-0">
-              {/* Thumbnail — click to select for editing */}
-              <button
-                type="button"
-                onClick={() => setActivePage(i)}
-                className={`overflow-hidden rounded-lg transition-all ${
-                  activePage === i
-                    ? "ring-2 ring-violet-600 ring-offset-2 dark:ring-offset-zinc-900"
-                    : "opacity-70 hover:opacity-100"
-                } ${currentUrls.length === 1 ? "w-full max-w-80" : "w-44 sm:w-52"}`}
-              >
-                <img
-                  src={url}
-                  alt={`Page ${i + 1}`}
-                  className="w-full object-contain"
-                />
-              </button>
-              {/* Expand button */}
-              <button
-                type="button"
-                onClick={() => setLightboxUrl(url)}
-                className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
-                style={{ opacity: 1 }}
-                title="View full size"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                </svg>
-              </button>
-              {currentUrls.length > 1 && (
-                <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                  {i + 1}/{currentUrls.length}
-                </span>
-              )}
+        {posterType === "reel" ? (
+          /* Reel preview — video player */
+          <div className="flex justify-center">
+            <video
+              controls
+              playsInline
+              className="max-h-[50vh] w-full max-w-80 rounded-lg"
+              src={currentUrls[0]}
+            />
+          </div>
+        ) : (
+          /* Poster/carousel preview — image thumbnails */
+          <>
+            <div className={`flex gap-3 ${currentUrls.length === 1 ? "justify-center" : "overflow-x-auto pb-2"}`}>
+              {currentUrls.map((url, i) => (
+                <div key={i} className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActivePage(i)}
+                    className={`overflow-hidden rounded-lg transition-all ${
+                      activePage === i
+                        ? "ring-2 ring-violet-600 ring-offset-2 dark:ring-offset-zinc-900"
+                        : "opacity-70 hover:opacity-100"
+                    } ${currentUrls.length === 1 ? "w-full max-w-80" : "w-44 sm:w-52"}`}
+                  >
+                    <img
+                      src={url}
+                      alt={`Page ${i + 1}`}
+                      className="w-full object-contain"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxUrl(url)}
+                    className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
+                    style={{ opacity: 1 }}
+                    title="View full size"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                    </svg>
+                  </button>
+                  {currentUrls.length > 1 && (
+                    <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                      {i + 1}/{currentUrls.length}
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        {currentUrls.length > 1 && (
-          <p className="mt-2 text-center text-[10px] text-zinc-400">
-            Click a page to select it for editing
-          </p>
+            {currentUrls.length > 1 && (
+              <p className="mt-2 text-center text-[10px] text-zinc-400">
+                Click a page to select it for editing
+              </p>
+            )}
+          </>
         )}
 
         <div className="mt-2 flex items-center justify-between">
@@ -292,13 +308,23 @@ export function VariationChat({
                 {msg.imageUrls.length > 0 && (
                   <div className="mt-2 flex gap-2">
                     {msg.imageUrls.map((url, i) => (
-                      <img
-                        key={i}
-                        src={url}
-                        alt="Updated poster"
-                        onClick={() => setLightboxUrl(url)}
-                        className="h-40 w-auto cursor-pointer rounded-lg border border-zinc-200 object-contain hover:opacity-80 dark:border-zinc-700"
-                      />
+                      posterType === "reel" ? (
+                        <video
+                          key={i}
+                          controls
+                          playsInline
+                          className="h-40 w-auto rounded-lg border border-zinc-200 dark:border-zinc-700"
+                          src={url}
+                        />
+                      ) : (
+                        <img
+                          key={i}
+                          src={url}
+                          alt="Updated poster"
+                          onClick={() => setLightboxUrl(url)}
+                          className="h-40 w-auto cursor-pointer rounded-lg border border-zinc-200 object-contain hover:opacity-80 dark:border-zinc-700"
+                        />
+                      )
                     ))}
                   </div>
                 )}
@@ -331,6 +357,15 @@ export function VariationChat({
           </div>
         )}
 
+        {/* Reel re-render notice */}
+        {posterType === "reel" && canChat && rounds < maxRounds && (
+          <div className="px-4">
+            <p className="text-[10px] text-amber-600 dark:text-amber-400">
+              Reel edits require re-rendering the video (3-5 minutes per edit).
+            </p>
+          </div>
+        )}
+
         {/* Input */}
         {canChat && rounds < maxRounds ? (
           <div className="flex gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
@@ -345,7 +380,9 @@ export function VariationChat({
                 }
               }}
               placeholder={
-                currentUrls.length > 1
+                posterType === "reel"
+                  ? "Describe the change (e.g., speed up transitions, change music mood)..."
+                  : currentUrls.length > 1
                   ? `Describe changes for page ${activePage + 1}...`
                   : "Describe the change you want..."
               }

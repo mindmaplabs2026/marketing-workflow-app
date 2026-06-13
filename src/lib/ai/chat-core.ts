@@ -29,12 +29,18 @@ export async function runChatEdit({ variationId, message, pageIndex }: ChatEditI
 
   const { data: variation } = await admin
     .from("ai_variations")
-    .select("id, request_id, variation_index, storage_paths, poster_type, chat_rounds_used")
+    .select("id, request_id, variation_index, storage_paths, poster_type, chat_rounds_used, creative_brief")
     .eq("id", variationId)
     .single();
 
   if (!variation) throw new Error("Variation not found");
   const requestId = variation.request_id;
+
+  // Route reel edits to the reel-specific chat path
+  if (variation.poster_type === "reel") {
+    await runReelChatEdit(variation, message);
+    return;
+  }
   console.log(`[chat-edit] Variation v${variation.variation_index}, ${variation.poster_type}, ${variation.storage_paths.length} pages, round ${variation.chat_rounds_used + 1}/25`);
 
   // Determine which page to edit.
@@ -170,4 +176,169 @@ Keep EVERYTHING else exactly the same — same layout, same images, same colors,
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`[chat-edit] ── DONE ── round ${round}/25, ${isSingle ? "appended" : `replaced page ${editIndex + 1}`}, ${elapsed}s total`);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// REEL CHAT EDIT — modifies the Remotion composition code and re-renders
+// ─────────────────────────────────────────────────────────────────────
+
+async function runReelChatEdit(
+  variation: {
+    id: string;
+    request_id: string;
+    variation_index: number;
+    storage_paths: string[];
+    poster_type: string;
+    chat_rounds_used: number;
+    creative_brief: unknown;
+  },
+  message: string,
+): Promise<void> {
+  const startTime = Date.now();
+  const admin = createAdminClient();
+  const openai = await getModelClient();
+  const requestId = variation.request_id;
+
+  console.log(`[reel-chat] ── START ── variation=${variation.id}, message="${message.slice(0, 80)}"`);
+
+  // Extract composition code and script from creative_brief
+  const brief = variation.creative_brief as Record<string, unknown>;
+  const compositionCode = (brief._compositionCode as string) ?? "";
+  if (!compositionCode) throw new Error("No composition code found in variation brief");
+
+  // Step 1: Get text confirmation of the edit
+  const { data: history } = await admin
+    .from("ai_chat_messages")
+    .select("role, content")
+    .eq("variation_id", variation.id)
+    .order("created_at", { ascending: true });
+
+  const chatMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    {
+      role: "system",
+      content: "You are a video reel editing assistant. The user wants changes to their Instagram Reel. Respond briefly confirming what you'll change. Keep it to 1-2 sentences. Note: changes require re-rendering the video (3-5 minutes).",
+    },
+  ];
+  for (const msg of history ?? []) {
+    chatMessages.push({ role: msg.role as "user" | "assistant", content: msg.content });
+  }
+  chatMessages.push({ role: "user", content: message });
+
+  const chatResponse = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: chatMessages,
+    max_tokens: 200,
+  });
+  const assistantText = chatResponse.choices[0]?.message?.content ?? "Re-rendering your reel with the requested changes...";
+  console.log(`[reel-chat] Confirmation: "${assistantText}"`);
+
+  // Step 2: Ask Codex to modify the composition code
+  const { refineReelComposition } = await import("./agent-composition");
+  const refined = await refineReelComposition({
+    originalCode: compositionCode,
+    feedback: `User requested edit: "${message}"`,
+    weaknesses: [message],
+    script: brief as unknown as import("./agent-creative-reel").ReelScript,
+    mediaManifest: new Map(), // not needed for code refinement
+    hasLogo: compositionCode.includes("logo"),
+    hasMusic: compositionCode.includes("music") || compositionCode.includes("track.mp3"),
+  });
+
+  console.log(`[reel-chat] Got refined composition: ${refined.reelTsx.length} chars`);
+
+  // Step 3: Re-download media files for re-render
+  // Get all media paths from the original variation's scenes
+  const scenes = (brief.scenes as Array<{ mediaPath: string }>) ?? [];
+  const { data: reqData } = await admin
+    .from("requests")
+    .select("school_id")
+    .eq("id", requestId)
+    .single();
+  const schoolId = reqData?.school_id ?? "unknown";
+
+  const mediaFiles = new Map<string, Buffer>();
+  for (const scene of scenes) {
+    if (!scene.mediaPath) continue;
+    const filename = scene.mediaPath.split("/").pop() ?? "media.bin";
+    // Download from Supabase
+    const { data: fileData } = await admin.storage.from("request-uploads").download(scene.mediaPath);
+    if (fileData) {
+      mediaFiles.set(filename, Buffer.from(await fileData.arrayBuffer()));
+    }
+  }
+
+  // Re-download logo if present
+  const { data: brandAssets } = await admin
+    .from("school_brand_assets")
+    .select("asset_type, storage_path")
+    .eq("school_id", schoolId)
+    .eq("asset_type", "logo")
+    .limit(1);
+  if (brandAssets?.[0]) {
+    const { data: logoData } = await admin.storage.from("school-assets").download(brandAssets[0].storage_path);
+    if (logoData) {
+      mediaFiles.set("logo.png", Buffer.from(await logoData.arrayBuffer()));
+    }
+  }
+
+  // Re-download music if the original had it
+  const musicSource = brief._musicSource as string | undefined;
+  let musicBuffer: Buffer | undefined;
+  // Music was embedded in the original render — we need to find it
+  // For now, we'll generate a silent track if we can't recover the original
+  // The music agent's output isn't persisted separately, so chat edits
+  // that don't change the music will get a silent fallback
+  // TODO: persist trimmed music in storage for chat edit re-use
+
+  console.log(`[reel-chat] Re-rendering with ${mediaFiles.size} media files`);
+
+  // Step 4: Re-render
+  const { renderReel } = await import("@/lib/remotion/render");
+  const renderResult = await renderReel({
+    reelTsx: refined.reelTsx,
+    dataTsx: refined.dataTsx,
+    mediaFiles,
+    musicFile: musicBuffer ? { name: "track.mp3", buffer: musicBuffer } : undefined,
+  });
+
+  console.log(`[reel-chat] Rendered in ${renderResult.renderTimeSec.toFixed(1)}s`);
+
+  // Step 5: Upload the new reel
+  const round = variation.chat_rounds_used + 1;
+  const timestamp = Date.now();
+  const storagePath = `${schoolId}/${requestId}/ai/${variation.variation_index}/edits/${round}-reel-${timestamp}.mp4`;
+  const fsPromises = await import("node:fs").then((m) => m.promises);
+  const mp4Buffer = await fsPromises.readFile(renderResult.outputPath);
+
+  await admin.storage.from("designs").upload(storagePath, mp4Buffer, {
+    contentType: "video/mp4",
+    upsert: false,
+  });
+
+  // Store assistant message
+  await admin.from("ai_chat_messages").insert({
+    variation_id: variation.id,
+    role: "assistant",
+    content: assistantText,
+    image_paths: [storagePath],
+    metadata: { model: "codex-composition", round },
+  });
+
+  // Update variation — replace the reel path
+  await admin
+    .from("ai_variations")
+    .update({
+      chat_rounds_used: round,
+      storage_paths: [storagePath],
+      creative_brief: {
+        ...brief,
+        _compositionCode: refined.reelTsx,
+      } as unknown as Record<string, unknown>,
+    })
+    .eq("id", variation.id);
+
+  await renderResult.cleanup();
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[reel-chat] ── DONE ── round ${round}/25, ${elapsed}s total`);
 }
