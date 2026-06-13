@@ -88,8 +88,8 @@ async function evaluateLatestVariation(
 
   if (selectedAssets) {
     await addEvalRef(selectedAssets.logo, "SCHOOL LOGO — verify this matches exactly");
-    await addEvalRef(selectedAssets.header, "SCHOOL HEADER — verify this is reproduced");
-    await addEvalRef(selectedAssets.footer, "SCHOOL FOOTER — verify this is reproduced");
+    await addEvalRef(selectedAssets.header, "SCHOOL BRANDING SOURCE — verify school name and branding info is present");
+    await addEvalRef(selectedAssets.footer, "SCHOOL CONTACT SOURCE — verify contact details are present");
     if (selectedAssets.samples?.[0]) {
       await addEvalRef(selectedAssets.samples[0], "STYLE REFERENCE — poster should match this quality level");
     }
@@ -139,6 +139,9 @@ async function evaluateLatestVariation(
   const allPassed = pageEvaluations.every((e) => e.passed);
   const avgScore = Math.round(pageEvaluations.reduce((s, e) => s + e.score, 0) / pageEvaluations.length * 10) / 10;
   console.log(`[Worker] Job ${jobId} | Evaluation round ${refinementRound + 1}: avg=${avgScore}, allPassed=${allPassed}`);
+  for (const pe of pageEvaluations) {
+    console.log(`[Worker] Job ${jobId} |   Page ${pe.pageIndex + 1}: score=${pe.score}, passed=${pe.passed}, feedback="${pe.feedback.slice(0, 120)}"`);
+  }
 
   await admin
     .from("ai_variations")
@@ -259,12 +262,16 @@ export async function runPosterPipeline(
 
   try {
     // --- Agent 1: Understanding ---
+    console.log(`[Worker] Job ${jobId} | ── Agent 1: Understanding ──`);
     await admin
       .from("ai_generation_jobs")
       .update({ status: "understanding", started_at: new Date().toISOString() })
       .eq("id", jobId);
 
     const ctx = await fetchContext(requestId);
+    const brandAssetsByType = ctx.brandAssets.reduce((acc, a) => { acc[a.assetType] = (acc[a.assetType] ?? 0) + 1; return acc; }, {} as Record<string, number>);
+    console.log(`[Worker] Job ${jobId} | Agent1 INPUT: ${ctx.images.length} images, ${ctx.brandAssets.length} brand assets (${JSON.stringify(brandAssetsByType)}), title="${ctx.title}"`);
+
     const a1Costs = new CostTracker();
     const understanding = await runUnderstandingAgent({
       title: ctx.title,
@@ -275,12 +282,18 @@ export async function runPosterPipeline(
     }, a1Costs);
     await appendCosts(jobId, a1Costs.toJSON());
 
+    console.log(`[Worker] Job ${jobId} | Agent1 OUTPUT: theme="${understanding.theme}", ${understanding.curatedImages.length} curated, ${understanding.rejectedImages?.length ?? 0} rejected`);
+    console.log(`[Worker] Job ${jobId} | Agent1 curated: ${understanding.curatedImages.map((c) => `${c.path.split("/").pop()} (rel:${c.relevanceScore})`).join(", ") || "(none)"}`);
+
     await admin
       .from("ai_generation_jobs")
       .update({ status: "creative", agent1_output: understanding as unknown as Record<string, unknown> })
       .eq("id", jobId);
 
     // --- Agent 2: Creative direction ---
+    console.log(`[Worker] Job ${jobId} | ── Agent 2: Creative Direction ──`);
+    console.log(`[Worker] Job ${jobId} | Agent2 INPUT: ${understanding.curatedImages.length} curated images, posterType=${posterType}, school="${ctx.schoolName}"`);
+
     const a2Costs = new CostTracker();
     const creative = await runCreativeAgent({
       understanding,
@@ -291,17 +304,45 @@ export async function runPosterPipeline(
     }, a2Costs);
     await appendCosts(jobId, a2Costs.toJSON());
 
+    // Log Agent 2 output in detail
+    for (const v of creative.variations) {
+      const briefAny = v as Record<string, unknown>;
+      const selectedAssets = briefAny.selectedAssets as Record<string, unknown> | undefined;
+      const pageCount = v.layout.pages.length;
+      const briefImages = (v.selectedImages ?? []).length;
+      const pageImages = v.layout.pages.reduce((sum, p) => sum + (p.selectedImages?.length ?? 0), 0);
+      console.log(`[Worker] Job ${jobId} | Agent2 OUTPUT v${v.variationIndex}: direction="${v.direction}", ${pageCount} pages, ${briefImages} brief-level photos, ${pageImages} page-level photos`);
+      console.log(`[Worker] Job ${jobId} | Agent2 headline: "${v.textContent.headline}"`);
+      console.log(`[Worker] Job ${jobId} | Agent2 palette: ${v.colorPalette.join(", ")}`);
+      if (selectedAssets) {
+        console.log(`[Worker] Job ${jobId} | Agent2 assets: logo=${selectedAssets.logo ? "yes" : "null"}, header=${selectedAssets.header ? "yes" : "null"}, footer=${selectedAssets.footer ? "yes" : "null"}, samples=${(selectedAssets.samples as string[] | undefined)?.length ?? 0}`);
+      }
+      const vision = (briefAny.creativeVision as string) ?? "";
+      if (vision) {
+        console.log(`[Worker] Job ${jobId} | Agent2 creativeVision (${vision.length} chars):`);
+        const lines = vision.split("\n");
+        for (const line of lines) {
+          if (line.trim()) console.log(`[Worker] Job ${jobId} |   ${line.trim()}`);
+        }
+      }
+      for (const p of v.layout.pages) {
+        const pageVision = p.creativeVision ?? "";
+        console.log(`[Worker] Job ${jobId} | Agent2 page ${p.pageIndex}: ${p.selectedImages?.length ?? 0} photos, vision=${pageVision ? `${pageVision.length}ch` : "MISSING"}, desc="${(p.description ?? "").slice(0, 100)}"`);
+      }
+    }
+
     await admin
       .from("ai_generation_jobs")
       .update({ status: "generating", agent2_output: creative as unknown as Record<string, unknown> })
       .eq("id", jobId);
 
     // --- Agent 3: Generation (variation 0, same as the live pipeline) ---
+    console.log(`[Worker] Job ${jobId} | ── Agent 3: Image Generation ──`);
     const a3Costs = new CostTracker();
     await generateOneVariation(jobId, requestId, posterType, 0, a3Costs);
     await appendCosts(jobId, a3Costs.toJSON());
 
-    // --- Agents 4 & 5: Evaluate, then refine the worst page at most once ---
+    console.log(`[Worker] Job ${jobId} | ── Agent 4: Evaluation ──`);
     // Resilience: the poster is already generated. A failure in evaluate/refine
     // must NOT throw the poster away — finalize with what we have. This mirrors
     // the live Inngest pipeline, whose evaluate/refine onFailure handlers mark
@@ -315,7 +356,12 @@ export async function runPosterPipeline(
         console.warn(`[Worker] Job ${jobId} | evaluate failed (${err instanceof Error ? err.message : err}) — finalizing with current poster`);
         break;
       }
-      if (decision.finalize) break;
+      if (decision.finalize) {
+        console.log(`[Worker] Job ${jobId} | Evaluation passed — finalizing`);
+        break;
+      }
+      console.log(`[Worker] Job ${jobId} | ── Agent 5: Refinement (round ${round + 1}) ──`);
+      console.log(`[Worker] Job ${jobId} | Worst page: ${decision.worst.pageIndex + 1}, score: ${decision.worst.score}, feedback: "${decision.worst.feedback.slice(0, 150)}"`);
       try {
         await refineLatestVariation(jobId, requestId, decision.worst, round + 1);
       } catch (err) {
