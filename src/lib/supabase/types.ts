@@ -56,6 +56,7 @@ export type AiJobStatus =
   | "queued"
   | "understanding"
   | "creative"
+  | "music"
   | "generating"
   | "completed"
   | "failed";
