@@ -20,6 +20,9 @@ export type CostEntry = {
   output_tokens?: number;
   images?: number;
   image_size?: string;
+  render_duration_sec?: number;
+  render_time_sec?: number;
+  music_source?: string;
   cost_usd: number;
 };
 
@@ -77,6 +80,35 @@ export class CostTracker {
       images: imageCount,
       image_size: size,
       cost_usd: cost,
+    });
+  }
+
+  /**
+   * Track a Remotion render call (local, no API cost — tracks wall time for monitoring).
+   */
+  addRenderCall(
+    stage: string,
+    durationSec: number,
+    renderTimeSec: number,
+  ): void {
+    this.entries.push({
+      stage,
+      model: "remotion-local",
+      render_duration_sec: durationSec,
+      render_time_sec: renderTimeSec,
+      cost_usd: 0, // free tier — no API cost
+    });
+  }
+
+  /**
+   * Track a music discovery call (Pixabay or local library).
+   */
+  addMusicCall(stage: string, source: string): void {
+    this.entries.push({
+      stage,
+      model: source,
+      music_source: source,
+      cost_usd: 0, // royalty-free
     });
   }
 
