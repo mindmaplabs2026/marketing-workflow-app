@@ -89,12 +89,26 @@ export function AiVariations({
         {urls.length > 0 && (
           <div className="mt-3 flex gap-2 overflow-x-auto">
             {urls.map((url, i) => (
-              <img
-                key={i}
-                src={url}
-                alt={`Accepted poster page ${i + 1}`}
-                className="h-40 w-40 rounded-md border border-emerald-200 object-cover dark:border-emerald-900/50"
-              />
+              <div key={i} className="relative shrink-0">
+                <img
+                  src={url}
+                  alt={`Accepted poster page ${i + 1}`}
+                  className="h-40 w-40 rounded-md border border-emerald-200 object-cover dark:border-emerald-900/50"
+                />
+                <a
+                  href={url}
+                  download={`accepted-v${accepted.variation_index}-page-${i + 1}.png`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                  title="Download"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                    <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                    <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                  </svg>
+                </a>
+              </div>
             ))}
           </div>
         )}
@@ -144,6 +158,19 @@ export function AiVariations({
                       alt={`Variation ${v.variation_index}`}
                       className="h-full w-full object-cover"
                     />
+                    <a
+                      href={urls[idx]}
+                      download={`variation-${v.variation_index}-page-${idx + 1}.png`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                      title="Download"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                        <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                        <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                      </svg>
+                    </a>
                     {urls.length > 1 && (
                       <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
                         {urls.map((_, i) => (
