@@ -38,7 +38,7 @@ export function VariationChat({
   variationId: string;
   requestId: string;
   posterUrls: string[];
-  posterType: "single" | "carousel";
+  posterType: "single" | "carousel" | "reel";
   initialMessages: ChatMessage[];
   roundsUsed: number;
   maxRounds: number;

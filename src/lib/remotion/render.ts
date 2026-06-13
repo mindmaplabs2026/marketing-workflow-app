@@ -154,9 +154,13 @@ function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const renderScript = path.join(REMOTION_RENDERER_DIR, "render.ts");
 
-    const child = spawn("node", ["--import", "tsx", renderScript, workDir], {
+    // Use shell mode with a command string — prevents Turbopack from
+    // analyzing spawn arguments and treating "--import" as a module specifier.
+    const cmd = `node --import tsx "${renderScript}" "${workDir}"`;
+    const child = spawn(cmd, [], {
       cwd: REMOTION_RENDERER_DIR,
       env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
+      shell: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
 

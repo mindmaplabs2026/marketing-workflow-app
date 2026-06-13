@@ -30,12 +30,11 @@ import {
   markFailed,
   generateOneVariation,
 } from "@/lib/inngest/functions/ai-pipeline";
-import { runReelCreativeAgent } from "./agent-creative-reel";
+// Reel-specific imports are dynamic to avoid Turbopack tracing into
+// Node-only modules (child_process, @remotion/*) during the Vercel build.
+// These modules are only loaded when runReelPipeline() is called by the
+// local worker — never on Vercel.
 import type { ReelScript } from "./agent-creative-reel";
-import { findAndTrimMusic } from "./agent-music";
-import { generateComposition, refineReelComposition } from "./agent-composition";
-import { evaluateReel } from "./agent-reel-evaluator";
-import { renderReel } from "@/lib/remotion/render";
 
 type PosterType = "single" | "carousel";
 
@@ -405,6 +404,14 @@ export async function runReelPipeline(
   jobId: string,
   requestId: string,
 ): Promise<void> {
+  // Dynamic imports — these modules use child_process/spawn which Turbopack
+  // cannot statically analyze. They only run on the local worker, never Vercel.
+  const { runReelCreativeAgent } = await import("./agent-creative-reel");
+  const { findAndTrimMusic } = await import("./agent-music");
+  const { generateComposition, refineReelComposition } = await import("./agent-composition");
+  const { evaluateReel } = await import("./agent-reel-evaluator");
+  const { renderReel } = await import("@/lib/remotion/render");
+
   const admin = createAdminClient();
   console.log(`[Worker] Reel Job ${jobId} | START (request ${requestId})`);
 

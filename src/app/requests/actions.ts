@@ -909,18 +909,15 @@ export async function regenerateAi(
   // Create a new AI generation job (old one stays for history)
   // Reels are always local — override engine
   const effectiveEngine = posterType === "reel" ? "local" : engine;
-  const insertData: Record<string, unknown> = {
-    request_id: requestId,
-    poster_type: posterType,
-    engine: effectiveEngine,
-  };
-  if (posterType === "reel" && reelDurationSec) {
-    insertData.reel_duration_sec = reelDurationSec;
-  }
 
   const { data: job, error: jobErr } = await supabase
     .from("ai_generation_jobs")
-    .insert(insertData)
+    .insert({
+      request_id: requestId,
+      poster_type: posterType,
+      engine: effectiveEngine,
+      reel_duration_sec: posterType === "reel" ? (reelDurationSec ?? 60) : null,
+    })
     .select("id")
     .single<{ id: string }>();
 

@@ -15,7 +15,7 @@ type Variation = {
     textContent?: { headline?: string };
   };
   storage_paths: string[];
-  poster_type: "single" | "carousel";
+  poster_type: "single" | "carousel" | "reel";
   is_accepted: boolean;
   chat_rounds_used: number;
 };
