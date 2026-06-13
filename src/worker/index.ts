@@ -15,9 +15,10 @@
  *   --import tsx            runs the TypeScript directly
  */
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runPosterPipeline } from "@/lib/ai/pipeline-core";
+import { runPosterPipeline, runReelPipeline } from "@/lib/ai/pipeline-core";
 import { runChatEdit } from "@/lib/ai/chat-core";
 import { getModelEngineKind } from "@/lib/config/engine";
+import { checkFfmpegAvailable } from "@/lib/ai/agent-music";
 
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 
@@ -123,9 +124,14 @@ async function processChatEdit(edit: ClaimedChatEdit) {
 }
 
 async function loop() {
+  // Startup checks
+  const hasFfmpeg = await checkFfmpegAvailable();
   console.log(
-    `[Worker] started — claiming engine='local' jobs, MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms`,
+    `[Worker] started — engine='local', MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms, ffmpeg=${hasFfmpeg ? "yes" : "NOT FOUND (reel generation will fail)"}`,
   );
+  if (!hasFfmpeg) {
+    console.warn("[Worker] WARNING: ffmpeg is required for reel generation (music trimming + keyframe extraction). Install with: brew install ffmpeg");
+  }
 
   while (running) {
     // 1) Generation jobs take priority.
@@ -137,8 +143,12 @@ async function loop() {
     }
     if (job) {
       busy = true;
-      const posterType = job.poster_type === "carousel" ? "carousel" : "single";
-      await runPosterPipeline(job.id, job.request_id, posterType);
+      if (job.poster_type === "reel") {
+        await runReelPipeline(job.id, job.request_id);
+      } else {
+        const posterType = job.poster_type === "carousel" ? "carousel" : "single";
+        await runPosterPipeline(job.id, job.request_id, posterType);
+      }
       busy = false;
       continue;
     }
@@ -175,6 +185,30 @@ function shutdown(signal: string) {
     }
   }, 500);
 }
+
+// Periodic cleanup of orphaned temp dirs (runs every 30 minutes)
+async function cleanupOrphanedTempDirs() {
+  const tmpBase = await import("node:os").then((os) => os.tmpdir());
+  const fsPromises = await import("node:fs").then((f) => f.promises);
+  const pathMod = await import("node:path");
+
+  for (const prefix of ["remotion-render", "reel-music", "codex-composition", "codex-refine", "reel-eval"]) {
+    const dir = pathMod.join(tmpBase, prefix);
+    try {
+      const entries = await fsPromises.readdir(dir).catch(() => []);
+      for (const entry of entries) {
+        const fullPath = pathMod.join(dir, entry);
+        const stat = await fsPromises.stat(fullPath).catch(() => null);
+        if (stat && Date.now() - stat.mtimeMs > 30 * 60_000) {
+          await fsPromises.rm(fullPath, { recursive: true, force: true }).catch(() => {});
+          console.log(`[Worker] Cleaned orphaned temp dir: ${fullPath}`);
+        }
+      }
+    } catch { /* skip */ }
+  }
+}
+
+setInterval(cleanupOrphanedTempDirs, 30 * 60_000); // every 30 min
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));

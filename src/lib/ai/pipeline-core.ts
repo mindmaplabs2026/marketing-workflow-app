@@ -30,6 +30,12 @@ import {
   markFailed,
   generateOneVariation,
 } from "@/lib/inngest/functions/ai-pipeline";
+import { runReelCreativeAgent } from "./agent-creative-reel";
+import type { ReelScript } from "./agent-creative-reel";
+import { findAndTrimMusic } from "./agent-music";
+import { generateComposition, refineReelComposition } from "./agent-composition";
+import { evaluateReel } from "./agent-reel-evaluator";
+import { renderReel } from "@/lib/remotion/render";
 
 type PosterType = "single" | "carousel";
 
@@ -382,6 +388,292 @@ export async function runPosterPipeline(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Worker] Job ${jobId} | FAILED: ${message}`);
+    await markFailed(jobId, message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// REEL PIPELINE — parallel sibling to the poster pipeline.
+// understand → creative reel script → music → composition → render → evaluate
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Run the entire reel pipeline for one job: AI-generated Remotion composition
+ * rendered to MP4. Creates one variation per run (can be extended to 3).
+ */
+export async function runReelPipeline(
+  jobId: string,
+  requestId: string,
+): Promise<void> {
+  const admin = createAdminClient();
+  console.log(`[Worker] Reel Job ${jobId} | START (request ${requestId})`);
+
+  try {
+    // --- Agent 1: Understanding (reused as-is) ---
+    console.log(`[Worker] Reel ${jobId} | ── Agent 1: Understanding ──`);
+    await admin
+      .from("ai_generation_jobs")
+      .update({ status: "understanding", started_at: new Date().toISOString() })
+      .eq("id", jobId);
+
+    const ctx = await fetchContext(requestId);
+    console.log(`[Worker] Reel ${jobId} | ${ctx.images.length} uploads, ${ctx.brandAssets.length} brand assets, title="${ctx.title}"`);
+
+    const a1Costs = new CostTracker();
+    const understanding = await runUnderstandingAgent({
+      title: ctx.title,
+      description: ctx.description,
+      images: ctx.images,
+      brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
+      schoolGuidelines: ctx.schoolGuidelines,
+    }, a1Costs);
+    await appendCosts(jobId, a1Costs.toJSON());
+
+    console.log(`[Worker] Reel ${jobId} | Agent1: theme="${understanding.theme}", ${understanding.curatedImages.length} curated`);
+
+    await admin
+      .from("ai_generation_jobs")
+      .update({ status: "creative", agent1_output: understanding as unknown as Record<string, unknown> })
+      .eq("id", jobId);
+
+    // --- Agent 2: Reel Script ---
+    console.log(`[Worker] Reel ${jobId} | ── Agent 2: Reel Script ──`);
+    const { data: jobRow } = await admin
+      .from("ai_generation_jobs")
+      .select("reel_duration_sec")
+      .eq("id", jobId)
+      .single();
+    const requestedDuration = (jobRow?.reel_duration_sec as number | null) ?? 60;
+
+    const a2Costs = new CostTracker();
+    const reelCreative = await runReelCreativeAgent({
+      understanding,
+      brandAssets: ctx.brandAssets.map((a) => ({
+        assetType: a.assetType,
+        storagePath: a.storagePath,
+        signedUrl: a.signedUrl,
+        label: a.label,
+      })),
+      requestedDurationSec: requestedDuration,
+      schoolName: ctx.schoolName,
+      schoolGuidelines: ctx.schoolGuidelines,
+    }, a2Costs);
+    await appendCosts(jobId, a2Costs.toJSON());
+
+    await admin
+      .from("ai_generation_jobs")
+      .update({ status: "music", agent2_output: reelCreative as unknown as Record<string, unknown> })
+      .eq("id", jobId);
+
+    // Process each variation (typically 3, but run sequentially to avoid OOM)
+    for (const script of reelCreative.variations) {
+      console.log(`[Worker] Reel ${jobId} | ── Variation ${script.variationIndex} ──`);
+
+      // --- Music Discovery ---
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Finding music: [${script.musicMood.join(", ")}] ${script.musicTempo}`);
+      const music = await findAndTrimMusic({
+        musicMood: script.musicMood,
+        musicTempo: script.musicTempo,
+        durationSec: script.durationSec,
+      });
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Music: ${music.source}, ${(music.buffer.length / 1024).toFixed(0)} KB`);
+
+      // Update status to generating for the first variation
+      if (script.variationIndex === 1) {
+        await admin
+          .from("ai_generation_jobs")
+          .update({ status: "generating" })
+          .eq("id", jobId);
+      }
+
+      // --- Download media from Supabase to local buffers ---
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Downloading ${script.scenes.length} media files`);
+      const mediaFiles = new Map<string, Buffer>();
+      const mediaManifest = new Map<string, { type: "image" | "video"; description: string }>();
+
+      for (const scene of script.scenes) {
+        const match = ctx.images.find((img: UploadedImage) => img.path === scene.mediaPath);
+        if (!match?.signedUrl) {
+          console.warn(`[Worker] Reel ${jobId} | Media not found: ${scene.mediaPath}`);
+          continue;
+        }
+        try {
+          const res = await fetch(match.signedUrl);
+          if (!res.ok) continue;
+          const buf = Buffer.from(await res.arrayBuffer());
+          const filename = scene.mediaPath.split("/").pop() ?? `media-${scene.index}.bin`;
+          mediaFiles.set(filename, buf);
+          const curatedInfo = understanding.curatedImages.find((c) => c.path === scene.mediaPath);
+          mediaManifest.set(filename, {
+            type: scene.mediaType,
+            description: curatedInfo?.description ?? "uploaded media",
+          });
+        } catch {
+          console.warn(`[Worker] Reel ${jobId} | Failed to download: ${scene.mediaPath}`);
+        }
+      }
+
+      // Download logo if available
+      let hasLogo = false;
+      const logoAsset = ctx.brandAssets.find((a) => a.assetType === "logo");
+      if (logoAsset?.signedUrl) {
+        try {
+          const res = await fetch(logoAsset.signedUrl);
+          if (res.ok) {
+            mediaFiles.set("logo.png", Buffer.from(await res.arrayBuffer()));
+            hasLogo = true;
+          }
+        } catch { /* skip */ }
+      }
+
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — ${mediaFiles.size} media files downloaded, logo=${hasLogo}`);
+
+      // --- Composition Generator (Codex writes Reel.tsx) ---
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Generating Remotion composition`);
+      const composition = await generateComposition({
+        script,
+        mediaManifest,
+        hasLogo,
+        hasMusic: music.buffer.length > 0,
+      });
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Composition: ${composition.reelTsx.length} chars Reel.tsx`);
+
+      // --- Remotion Render ---
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendering MP4`);
+      const renderResult = await renderReel({
+        reelTsx: composition.reelTsx,
+        dataTsx: composition.dataTsx,
+        mediaFiles,
+        musicFile: music.buffer.length > 0
+          ? { name: "track.mp3", buffer: music.buffer }
+          : undefined,
+      });
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendered in ${renderResult.renderTimeSec.toFixed(1)}s`);
+
+      // Track render + music costs
+      const renderCosts = new CostTracker();
+      renderCosts.addRenderCall(`reel-render-v${script.variationIndex}`, script.durationSec, renderResult.renderTimeSec);
+      renderCosts.addMusicCall(`reel-music-v${script.variationIndex}`, music.source);
+      await appendCosts(jobId, renderCosts.toJSON());
+
+      // --- Upload to Supabase Storage ---
+      const timestamp = Date.now();
+      const storagePath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-${timestamp}.mp4`;
+      const mp4Buffer = await import("node:fs").then((fs) => fs.promises.readFile(renderResult.outputPath));
+
+      await admin.storage
+        .from("designs")
+        .upload(storagePath, mp4Buffer, { contentType: "video/mp4", upsert: false });
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Uploaded: ${storagePath} (${(mp4Buffer.length / 1024 / 1024).toFixed(1)} MB)`);
+
+      // --- Create variation record ---
+      await admin.from("ai_variations").insert({
+        job_id: jobId,
+        request_id: requestId,
+        variation_index: script.variationIndex,
+        creative_brief: {
+          ...script,
+          _compositionCode: composition.reelTsx,
+          _musicSource: music.source,
+        } as unknown as Record<string, unknown>,
+        storage_paths: [storagePath],
+        poster_type: "reel",
+      });
+
+      // --- Evaluate + Refine ---
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Evaluating`);
+      let currentOutputPath = renderResult.outputPath;
+      let currentCleanup = renderResult.cleanup;
+      let currentComposition = composition;
+
+      try {
+        const evalCosts = new CostTracker();
+        const evaluation = await evaluateReel({
+          mp4Path: currentOutputPath,
+          schoolName: ctx.schoolName,
+          reelDirection: script.direction,
+          costTracker: evalCosts,
+        });
+        await appendCosts(jobId, evalCosts.toJSON());
+        console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score: ${evaluation.score}/10`);
+
+        // Refine if score < 7 (max 1 refinement round)
+        if (evaluation.score < 7) {
+          console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score below 7, refining composition`);
+          try {
+            const refined = await refineReelComposition({
+              originalCode: currentComposition.reelTsx,
+              feedback: evaluation.feedback,
+              weaknesses: evaluation.weaknesses,
+              script,
+              mediaManifest,
+              hasLogo,
+              hasMusic: music.buffer.length > 0,
+            });
+
+            // Re-render with refined code
+            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Re-rendering with refined composition`);
+            const refinedRender = await renderReel({
+              reelTsx: refined.reelTsx,
+              dataTsx: refined.dataTsx,
+              mediaFiles,
+              musicFile: music.buffer.length > 0
+                ? { name: "track.mp3", buffer: music.buffer }
+                : undefined,
+            });
+
+            // Upload refined version, replacing the original
+            const refinedTimestamp = Date.now();
+            const refinedPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-refined-${refinedTimestamp}.mp4`;
+            const refinedBuffer = await import("node:fs").then((f) => f.promises.readFile(refinedRender.outputPath));
+
+            await admin.storage
+              .from("designs")
+              .upload(refinedPath, refinedBuffer, { contentType: "video/mp4", upsert: false });
+
+            // Update variation with refined path and code
+            await admin.from("ai_variations")
+              .update({
+                storage_paths: [refinedPath],
+                creative_brief: {
+                  ...script,
+                  _compositionCode: refined.reelTsx,
+                  _musicSource: music.source,
+                  _refinement: { originalScore: evaluation.score, feedback: evaluation.feedback },
+                } as unknown as Record<string, unknown>,
+              })
+              .eq("job_id", jobId)
+              .eq("variation_index", script.variationIndex);
+
+            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined and re-uploaded: ${refinedPath}`);
+
+            // Cleanup old render, switch to new
+            await currentCleanup();
+            currentOutputPath = refinedRender.outputPath;
+            currentCleanup = refinedRender.cleanup;
+          } catch (refineErr) {
+            console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refinement failed (keeping original): ${refineErr instanceof Error ? refineErr.message : refineErr}`);
+          }
+        }
+      } catch (err) {
+        console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Eval failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+      }
+
+      // Cleanup render temp dir
+      await currentCleanup();
+    }
+
+    // --- Finalize ---
+    await admin
+      .from("ai_generation_jobs")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("id", jobId);
+    try { await dispatchPendingPushes(); } catch { /* best effort */ }
+
+    console.log(`[Worker] Reel ${jobId} | COMPLETED`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Worker] Reel ${jobId} | FAILED: ${message}`);
     await markFailed(jobId, message);
   }
 }
