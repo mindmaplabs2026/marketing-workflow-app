@@ -163,7 +163,7 @@ export default async function RequestDetailPage({
   if (!req) notFound();
 
   // Fetch AI generation data if this is an AI-generated request
-  let aiJob: { id: string; status: AiJobStatus; error_message: string | null; cost_tracking: { total_usd: number } | null } | null = null;
+  let aiJob: { id: string; status: AiJobStatus; error_message: string | null; cost_tracking: { total_usd: number } | null; poster_type: string | null } | null = null;
   let aiVariations: {
     id: string;
     variation_index: number;
@@ -178,12 +178,12 @@ export default async function RequestDetailPage({
     // Fetch the latest job (for progress/failure status)
     const { data: jobData } = await supabase
       .from("ai_generation_jobs")
-      .select("id, status, error_message, cost_tracking")
+      .select("id, status, error_message, cost_tracking, poster_type")
       .eq("request_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
-    aiJob = jobData as { id: string; status: AiJobStatus; error_message: string | null; cost_tracking: { total_usd: number } | null } | null;
+    aiJob = jobData as { id: string; status: AiJobStatus; error_message: string | null; cost_tracking: { total_usd: number } | null; poster_type: string | null } | null;
 
     // Fetch ALL variations across all jobs for this request
     const { data: vars } = await supabase
@@ -544,6 +544,7 @@ export default async function RequestDetailPage({
         <AiGenerationStatus
           jobId={aiJob.id}
           initialStatus={aiJob.status}
+          posterType={aiJob.poster_type}
         />
       )}
 

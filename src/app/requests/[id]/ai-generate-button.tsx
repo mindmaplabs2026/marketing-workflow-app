@@ -2,19 +2,36 @@
 
 import { useState } from "react";
 import { triggerAiGeneration, triggerLocalAiGeneration } from "../actions";
+import { triggerLocalReelGeneration } from "../actions";
+
+const REEL_DURATIONS = [
+  { value: 30, label: "30 seconds" },
+  { value: 60, label: "1 minute" },
+  { value: 90, label: "1.5 minutes" },
+  { value: 120, label: "2 minutes" },
+  { value: 180, label: "3 minutes" },
+  { value: 300, label: "5 minutes" },
+];
 
 export function AiGenerateButton({ requestId }: { requestId: string }) {
-  const [busy, setBusy] = useState<null | "cloud" | "local">(null);
+  const [busy, setBusy] = useState<null | "cloud" | "local" | "reel">(null);
   const [error, setError] = useState<string | null>(null);
-  const [posterType, setPosterType] = useState<"single" | "carousel">("single");
+  const [outputType, setOutputType] = useState<"single" | "carousel" | "reel">("single");
+  const [reelDuration, setReelDuration] = useState(60);
 
-  async function run(engine: "cloud" | "local") {
+  async function run(engine: "cloud" | "local" | "reel") {
     setBusy(engine);
     setError(null);
-    const result =
-      engine === "local"
-        ? await triggerLocalAiGeneration(requestId, posterType)
-        : await triggerAiGeneration(requestId, posterType);
+
+    let result: { error?: string };
+    if (engine === "reel") {
+      result = await triggerLocalReelGeneration(requestId, reelDuration);
+    } else if (engine === "local") {
+      result = await triggerLocalAiGeneration(requestId, outputType as "single" | "carousel");
+    } else {
+      result = await triggerAiGeneration(requestId, outputType as "single" | "carousel");
+    }
+
     if (result.error) {
       setError(result.error);
       setBusy(null);
@@ -29,50 +46,100 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
         Assign to AI
       </p>
       <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-        AI will generate a poster based on the request details and uploaded
-        photos. Takes about 5-10 minutes.
+        AI will generate content based on the request details and uploaded
+        media. Takes about 5-10 minutes.
       </p>
 
       <div className="mt-3 flex flex-wrap items-end gap-3">
+        {/* Output type selector */}
         <div>
           <label
-            htmlFor="ai_poster_type"
+            htmlFor="ai_output_type"
             className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
           >
-            Poster type
+            Output type
           </label>
           <select
-            id="ai_poster_type"
-            value={posterType}
+            id="ai_output_type"
+            value={outputType}
             onChange={(e) =>
-              setPosterType(e.target.value as "single" | "carousel")
+              setOutputType(e.target.value as "single" | "carousel" | "reel")
             }
             disabled={busy !== null}
             className="mt-1 block rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
           >
             <option value="single">Single poster</option>
             <option value="carousel">Carousel (3-5 pages)</option>
+            <option value="reel">Reel (video)</option>
           </select>
         </div>
 
-        <button
-          type="button"
-          onClick={() => run("cloud")}
-          disabled={busy !== null}
-          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
-        >
-          {busy === "cloud" ? "Starting…" : "Generate with AI"}
-        </button>
+        {/* Duration picker — only visible for reels */}
+        {outputType === "reel" && (
+          <div>
+            <label
+              htmlFor="ai_reel_duration"
+              className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+            >
+              Preferred duration
+            </label>
+            <select
+              id="ai_reel_duration"
+              value={reelDuration}
+              onChange={(e) => setReelDuration(Number(e.target.value))}
+              disabled={busy !== null}
+              className="mt-1 block rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+            >
+              {REEL_DURATIONS.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        <button
-          type="button"
-          onClick={() => run("local")}
-          disabled={busy !== null}
-          className="rounded-md border border-violet-600 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
-        >
-          {busy === "local" ? "Starting…" : "Generate with Local AI"}
-        </button>
+        {/* Poster buttons (cloud + local) — hidden for reels */}
+        {outputType !== "reel" && (
+          <>
+            <button
+              type="button"
+              onClick={() => run("cloud")}
+              disabled={busy !== null}
+              className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
+            >
+              {busy === "cloud" ? "Starting..." : "Generate with AI"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => run("local")}
+              disabled={busy !== null}
+              className="rounded-md border border-violet-600 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
+            >
+              {busy === "local" ? "Starting..." : "Generate with Local AI"}
+            </button>
+          </>
+        )}
+
+        {/* Reel button — only for reels (always local) */}
+        {outputType === "reel" && (
+          <button
+            type="button"
+            onClick={() => run("reel")}
+            disabled={busy !== null}
+            className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
+          >
+            {busy === "reel" ? "Starting..." : "Generate Reel"}
+          </button>
+        )}
       </div>
+
+      {outputType === "reel" && (
+        <p className="mt-2 text-[10px] text-zinc-400">
+          Reels are rendered locally. Duration will be capped based on uploaded content.
+        </p>
+      )}
 
       {error && (
         <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>

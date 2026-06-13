@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { AiJobStatus } from "@/lib/supabase/types";
 
-const STEPS: { key: AiJobStatus; label: string }[] = [
+const POSTER_STEPS: { key: AiJobStatus; label: string }[] = [
   { key: "queued", label: "Queued" },
   { key: "understanding", label: "Analyzing images" },
   { key: "creative", label: "Creative direction" },
@@ -12,26 +12,60 @@ const STEPS: { key: AiJobStatus; label: string }[] = [
   { key: "completed", label: "Complete" },
 ];
 
-const STEP_ORDER: Record<AiJobStatus, number> = {
-  queued: 0,
-  understanding: 1,
-  creative: 2,
-  generating: 3,
-  completed: 4,
-  failed: -1,
+const REEL_STEPS: { key: AiJobStatus; label: string }[] = [
+  { key: "queued", label: "Queued" },
+  { key: "understanding", label: "Analyzing media" },
+  { key: "creative", label: "Writing reel script" },
+  { key: "music", label: "Finding music" },
+  { key: "generating", label: "Rendering video" },
+  { key: "completed", label: "Complete" },
+];
+
+function buildStepOrder(steps: { key: AiJobStatus }[]): Record<AiJobStatus, number> {
+  const order: Partial<Record<AiJobStatus, number>> = { failed: -1 };
+  steps.forEach((s, i) => { order[s.key] = i; });
+  return order as Record<AiJobStatus, number>;
+}
+
+const STATUS_MESSAGES: Record<string, Record<AiJobStatus, string>> = {
+  poster: {
+    queued: "Waiting in queue\u2026",
+    understanding: "Analyzing your images and theme\u2026",
+    creative: "Researching trends and creating brief\u2026",
+    music: "",
+    generating: "Generating poster\u2026",
+    completed: "",
+    failed: "",
+  },
+  reel: {
+    queued: "Waiting in queue\u2026",
+    understanding: "Analyzing your photos and videos\u2026",
+    creative: "Designing the reel\u2026",
+    music: "Finding the right background music\u2026",
+    generating: "Rendering video (this takes a few minutes)\u2026",
+    completed: "",
+    failed: "",
+  },
 };
 
 export function AiGenerationStatus({
   jobId,
   initialStatus,
+  posterType,
   onComplete,
 }: {
   jobId: string;
   initialStatus: AiJobStatus;
+  posterType?: string | null;
   onComplete?: () => void;
 }) {
   const [status, setStatus] = useState<AiJobStatus>(initialStatus);
   const [error, setError] = useState<string | null>(null);
+
+  const isReel = posterType === "reel";
+  const STEPS = isReel ? REEL_STEPS : POSTER_STEPS;
+  const STEP_ORDER = buildStepOrder(STEPS);
+  const messages = isReel ? STATUS_MESSAGES.reel : STATUS_MESSAGES.poster;
 
   useEffect(() => {
     const supabase = createClient();
@@ -81,12 +115,12 @@ export function AiGenerationStatus({
     );
   }
 
-  const currentOrder = STEP_ORDER[status];
+  const currentOrder = STEP_ORDER[status] ?? 0;
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-        AI is generating your posters
+        {isReel ? "AI is generating your reel" : "AI is generating your posters"}
       </p>
       <p className="mt-1 text-xs text-zinc-500">
         You&apos;ll get a notification when it&apos;s ready.
@@ -115,7 +149,7 @@ export function AiGenerationStatus({
                         : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800"
                   }`}
                 >
-                  {isDone ? "✓" : i + 1}
+                  {isDone ? "\u2713" : i + 1}
                 </div>
                 {i < STEPS.length - 1 && (
                   <div
@@ -139,15 +173,10 @@ export function AiGenerationStatus({
         })}
       </div>
 
-      {status !== "completed" && (
+      {status !== "completed" && messages[status] && (
         <div className="mt-3 flex items-center gap-2">
           <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-600" />
-          <p className="text-xs text-zinc-500">
-            {status === "queued" && "Waiting in queue…"}
-            {status === "understanding" && "Analyzing your images and theme…"}
-            {status === "creative" && "Researching trends and creating brief…"}
-            {status === "generating" && "Generating poster…"}
-          </p>
+          <p className="text-xs text-zinc-500">{messages[status]}</p>
         </div>
       )}
     </div>

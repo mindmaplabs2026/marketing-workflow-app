@@ -149,18 +149,30 @@ export function AiVariations({
               key={v.id}
               className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
             >
-              {/* Image preview */}
-              <div className="relative aspect-square bg-zinc-100 dark:bg-zinc-800">
+              {/* Media preview */}
+              <div className={`relative ${v.poster_type === "reel" ? "aspect-[9/16]" : "aspect-square"} bg-zinc-100 dark:bg-zinc-800`}>
                 {urls.length > 0 ? (
                   <>
-                    <img
-                      src={urls[idx]}
-                      alt={`Variation ${v.variation_index}`}
-                      className="h-full w-full object-cover"
-                    />
+                    {v.poster_type === "reel" ? (
+                      <video
+                        controls
+                        playsInline
+                        className="h-full w-full rounded-t-lg object-cover"
+                        src={urls[0]}
+                      />
+                    ) : (
+                      <img
+                        src={urls[idx]}
+                        alt={`Variation ${v.variation_index}`}
+                        className="h-full w-full object-cover"
+                      />
+                    )}
                     <a
-                      href={urls[idx]}
-                      download={`variation-${v.variation_index}-page-${idx + 1}.png`}
+                      href={urls[v.poster_type === "reel" ? 0 : idx]}
+                      download={v.poster_type === "reel"
+                        ? `variation-${v.variation_index}-reel.mp4`
+                        : `variation-${v.variation_index}-page-${idx + 1}.png`
+                      }
                       target="_blank"
                       rel="noreferrer"
                       className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
@@ -171,7 +183,7 @@ export function AiVariations({
                         <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
                       </svg>
                     </a>
-                    {urls.length > 1 && (
+                    {v.poster_type !== "reel" && urls.length > 1 && (
                       <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
                         {urls.map((_, i) => (
                           <button
@@ -221,7 +233,9 @@ export function AiVariations({
                   </div>
                 )}
                 <p className="text-[10px] text-zinc-400">
-                  {v.poster_type === "carousel"
+                  {v.poster_type === "reel"
+                    ? "Video reel"
+                    : v.poster_type === "carousel"
                     ? `${v.storage_paths.length} pages`
                     : "Single poster"}
                   {v.chat_rounds_used > 0 &&
