@@ -879,10 +879,11 @@ export async function triggerLocalReelGeneration(
  */
 export async function regenerateAi(
   requestId: string,
-  posterType: "single" | "carousel",
+  posterType: "single" | "carousel" | "reel",
   title?: string,
   description?: string | null,
   engine: "cloud" | "local" = "cloud",
+  reelDurationSec?: number,
 ): Promise<{ error?: string }> {
   const actor = await loadActor();
   if ("error" in actor) return { error: actor.error };
@@ -906,9 +907,20 @@ export async function regenerateAi(
     .eq("id", requestId);
 
   // Create a new AI generation job (old one stays for history)
+  // Reels are always local — override engine
+  const effectiveEngine = posterType === "reel" ? "local" : engine;
+  const insertData: Record<string, unknown> = {
+    request_id: requestId,
+    poster_type: posterType,
+    engine: effectiveEngine,
+  };
+  if (posterType === "reel" && reelDurationSec) {
+    insertData.reel_duration_sec = reelDurationSec;
+  }
+
   const { data: job, error: jobErr } = await supabase
     .from("ai_generation_jobs")
-    .insert({ request_id: requestId, poster_type: posterType, engine })
+    .insert(insertData)
     .select("id")
     .single<{ id: string }>();
 
@@ -916,8 +928,8 @@ export async function regenerateAi(
     return { error: jobErr?.message ?? "Could not create AI job." };
   }
 
-  // Cloud regenerate → Inngest; local regenerate → picked up by the worker.
-  if (engine === "cloud") {
+  // Cloud regenerate → Inngest; local/reel regenerate → picked up by the worker.
+  if (effectiveEngine === "cloud") {
     await inngest.send({
       name: "ai/pipeline.started",
       data: { jobId: job.id, requestId, posterType },

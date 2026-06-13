@@ -3,6 +3,15 @@
 import { useState } from "react";
 import { regenerateAi } from "../actions";
 
+const REEL_DURATIONS = [
+  { value: 30, label: "30 seconds" },
+  { value: 60, label: "1 minute" },
+  { value: 90, label: "1.5 minutes" },
+  { value: 120, label: "2 minutes" },
+  { value: 180, label: "3 minutes" },
+  { value: 300, label: "5 minutes" },
+];
+
 export function AiRegenerateButton({
   requestId,
   currentTitle,
@@ -14,16 +23,27 @@ export function AiRegenerateButton({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [posterType, setPosterType] = useState<"single" | "carousel">("single");
+  const [outputType, setOutputType] = useState<"single" | "carousel" | "reel">("single");
+  const [reelDuration, setReelDuration] = useState(60);
   const [engine, setEngine] = useState<"cloud" | "local">("cloud");
   const [showOptions, setShowOptions] = useState(false);
   const [title, setTitle] = useState(currentTitle ?? "");
   const [description, setDescription] = useState(currentDescription ?? "");
 
-  const engineLabel = engine === "local" ? "Local AI" : "AI";
+  const engineLabel = outputType === "reel"
+    ? "Local AI (Reel)"
+    : engine === "local"
+    ? "Local AI"
+    : "AI";
 
-  function open(e: "cloud" | "local") {
-    setEngine(e);
+  function open(e: "cloud" | "local" | "reel") {
+    if (e === "reel") {
+      setEngine("local");
+      setOutputType("reel");
+    } else {
+      setEngine(e);
+      if (outputType === "reel") setOutputType("single");
+    }
     setError(null);
     setShowOptions(true);
   }
@@ -37,22 +57,20 @@ export function AiRegenerateButton({
     setError(null);
     const result = await regenerateAi(
       requestId,
-      posterType,
+      outputType,
       title.trim(),
       description.trim() || null,
-      engine,
+      outputType === "reel" ? "local" : engine,
+      outputType === "reel" ? reelDuration : undefined,
     );
     if (result.error) {
       setError(result.error);
       setBusy(false);
     } else {
-      // Full page reload to ensure progress tracker shows up
       window.location.reload();
     }
   }
 
-  // Collapsed: two buttons, mirroring the generate section.
-  // "Regenerate with AI" → cloud (Inngest + OpenAI); "Regenerate with Local AI" → Codex worker.
   if (!showOptions) {
     return (
       <div className="flex flex-wrap gap-3">
@@ -70,6 +88,13 @@ export function AiRegenerateButton({
         >
           Regenerate with Local AI
         </button>
+        <button
+          type="button"
+          onClick={() => open("reel")}
+          className="rounded-md border border-violet-600 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 dark:border-violet-500 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
+        >
+          Generate Reel
+        </button>
       </div>
     );
   }
@@ -80,7 +105,9 @@ export function AiRegenerateButton({
         Regenerate with {engineLabel}
       </p>
       <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-        Update the title or description to guide the AI, then regenerate. Previous results will be kept.
+        {outputType === "reel"
+          ? "Generate an Instagram Reel video from the uploaded media. Previous results will be kept."
+          : "Update the title or description to guide the AI, then regenerate. Previous results will be kept."}
       </p>
 
       <div className="mt-3 space-y-3">
@@ -119,27 +146,54 @@ export function AiRegenerateButton({
           />
         </div>
 
-        <div className="flex items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          {/* Output type selector */}
           <div>
             <label
-              htmlFor="regen_poster_type"
+              htmlFor="regen_output_type"
               className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
             >
-              Poster type
+              Output type
             </label>
             <select
-              id="regen_poster_type"
-              value={posterType}
+              id="regen_output_type"
+              value={outputType}
               onChange={(e) =>
-                setPosterType(e.target.value as "single" | "carousel")
+                setOutputType(e.target.value as "single" | "carousel" | "reel")
               }
               disabled={busy}
               className="mt-1 block rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
             >
               <option value="single">Single poster</option>
               <option value="carousel">Carousel (3-5 pages)</option>
+              <option value="reel">Reel (video)</option>
             </select>
           </div>
+
+          {/* Duration picker — only for reels */}
+          {outputType === "reel" && (
+            <div>
+              <label
+                htmlFor="regen_reel_duration"
+                className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+              >
+                Preferred duration
+              </label>
+              <select
+                id="regen_reel_duration"
+                value={reelDuration}
+                onChange={(e) => setReelDuration(Number(e.target.value))}
+                disabled={busy}
+                className="mt-1 block rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              >
+                {REEL_DURATIONS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             type="button"
@@ -147,7 +201,7 @@ export function AiRegenerateButton({
             disabled={busy}
             className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
           >
-            {busy ? "Starting..." : `Regenerate with ${engineLabel}`}
+            {busy ? "Starting..." : outputType === "reel" ? "Generate Reel" : `Regenerate with ${engineLabel}`}
           </button>
 
           <button
@@ -159,6 +213,12 @@ export function AiRegenerateButton({
             Cancel
           </button>
         </div>
+
+        {outputType === "reel" && (
+          <p className="text-[10px] text-zinc-400">
+            Reels are rendered locally. Duration will be capped based on uploaded content.
+          </p>
+        )}
       </div>
 
       {error && (
