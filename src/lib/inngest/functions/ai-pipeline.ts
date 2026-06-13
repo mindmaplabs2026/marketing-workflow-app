@@ -216,17 +216,35 @@ export async function generateOneVariation(jobId: string, requestId: string, pos
         );
       });
 
-    // Track which photos Agent 2 already assigned
-    const assignedPaths = new Set<string>();
+    // --- Step 1: Remove duplicate photos across pages ---
+    const seenPaths = new Set<string>();
+    const seenFilenames = new Set<string>();
+    let dupsRemoved = 0;
     for (const page of brief.layout.pages) {
-      for (const img of page.selectedImages ?? []) {
-        if (img?.path) assignedPaths.add(img.path);
+      if (!page.selectedImages) continue;
+      const deduped = page.selectedImages.filter((img) => {
+        if (!img?.path) return false;
+        const filename = img.path.split("/").pop() ?? img.path;
+        if (seenPaths.has(img.path) || seenFilenames.has(filename)) {
+          dupsRemoved++;
+          return false;
+        }
+        seenPaths.add(img.path);
+        seenFilenames.add(filename);
+        return true;
+      });
+      if (deduped.length !== page.selectedImages.length) {
+        page.selectedImages = deduped;
       }
     }
+    if (dupsRemoved > 0) {
+      console.log(`[Pipeline] Job ${jobId} | CORRECTION: Removed ${dupsRemoved} duplicate photo(s) across pages`);
+    }
 
-    // Unassigned photos available for filling
+    // --- Step 2: Enforce page-level photo limits ---
+    const assignedPaths = new Set<string>(seenPaths);
     const unassignedPool = allCuratedPaths.filter((p) => !assignedPaths.has(p));
-    let correctionsMade = false;
+    let correctionsMade = dupsRemoved > 0;
 
     for (let pi = 0; pi < pageCount; pi++) {
       const page = brief.layout.pages[pi];
@@ -590,8 +608,8 @@ export const aiPipelineEvaluate = inngest.createFunction(
 
     if (selectedAssets) {
       await addEvalRef(selectedAssets.logo, "SCHOOL LOGO — verify this matches exactly");
-      await addEvalRef(selectedAssets.header, "SCHOOL HEADER — verify this is reproduced");
-      await addEvalRef(selectedAssets.footer, "SCHOOL FOOTER — verify this is reproduced");
+      await addEvalRef(selectedAssets.header, "SCHOOL BRANDING SOURCE — verify school name and branding info is present");
+      await addEvalRef(selectedAssets.footer, "SCHOOL CONTACT SOURCE — verify contact details are present");
       if (selectedAssets.samples?.[0]) {
         await addEvalRef(selectedAssets.samples[0], "STYLE REFERENCE — poster should match this quality level");
       }
