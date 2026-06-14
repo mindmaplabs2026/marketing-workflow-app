@@ -85,18 +85,21 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       await fs.writeFile(path.join(workDir, "data.ts"), input.dataTsx);
     }
 
-    // 3. Write media files into public/ — Remotion's mandatory static dir.
-    //    staticFile("media/logo.png") → serves from public/media/logo.png
-    const mediaDir = path.join(workDir, "public", "media");
+    // 3. Write media files into remotion-renderer/public/ — Remotion resolves
+    //    staticFile() relative to the project's public/ folder, not the workDir.
+    //    Worker is single-threaded, so no concurrent access conflicts.
+    const publicDir = path.join(REMOTION_RENDERER_DIR, "public");
+    const mediaDir = path.join(publicDir, "media");
+    const musicDir = path.join(publicDir, "music");
     await fs.mkdir(mediaDir, { recursive: true });
+    await fs.mkdir(musicDir, { recursive: true });
+
     for (const [name, buffer] of input.mediaFiles) {
       await fs.writeFile(path.join(mediaDir, name), buffer);
     }
 
-    // 4. Write music file into public/
+    // 4. Write music file into remotion-renderer/public/music/
     if (input.musicFile) {
-      const musicDir = path.join(workDir, "public", "music");
-      await fs.mkdir(musicDir, { recursive: true });
       await fs.writeFile(
         path.join(musicDir, input.musicFile.name),
         input.musicFile.buffer,
@@ -138,15 +141,28 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       `[remotion-render] Success in ${renderTimeSec.toFixed(1)}s — ${outputPath}`,
     );
 
+    const cleanupPublic = async () => {
+      // Remove media + music from remotion-renderer/public/ to avoid stale files
+      await fs.rm(mediaDir, { recursive: true, force: true }).catch(() => {});
+      await fs.rm(musicDir, { recursive: true, force: true }).catch(() => {});
+    };
+
     return {
       outputPath,
       workDir,
       renderTimeSec,
-      cleanup: () => fs.rm(workDir, { recursive: true, force: true }),
+      cleanup: async () => {
+        await fs.rm(workDir, { recursive: true, force: true });
+        await cleanupPublic();
+      },
     };
   } catch (err) {
-    // Cleanup on failure
+    // Cleanup on failure — both workDir and public assets
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+    const pubMedia = path.join(REMOTION_RENDERER_DIR, "public", "media");
+    const pubMusic = path.join(REMOTION_RENDERER_DIR, "public", "music");
+    await fs.rm(pubMedia, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(pubMusic, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
 }
