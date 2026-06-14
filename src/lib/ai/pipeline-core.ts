@@ -448,11 +448,32 @@ export async function runReelPipeline(
           const res = await fetch(vid.signedUrl);
           if (!res.ok) continue;
           const vidBuffer = Buffer.from(await res.arrayBuffer());
-          const vidPath = pathMod.join(thumbDir, `vid-${vid.path.split("/").pop()}`);
+          const vidFilename = vid.path.split("/").pop() ?? "video.mp4";
+          const vidPath = pathMod.join(thumbDir, `vid-${vidFilename}`);
           await fsPromises.writeFile(vidPath, vidBuffer);
 
-          // Extract 2 keyframes from the video
-          const thumbPath = pathMod.join(thumbDir, `thumb-${vid.path.split("/").pop()}.jpg`);
+          // Get video duration with ffprobe
+          let durationSec = 0;
+          try {
+            const durationStr = await new Promise<string>((resolve, reject) => {
+              const child = spawnProc("ffprobe", [
+                "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", vidPath,
+              ], { stdio: ["ignore", "pipe", "pipe"] });
+              let out = "";
+              child.stdout.on("data", (d) => (out += d.toString()));
+              child.stderr.on("data", () => {});
+              child.on("close", (code) => code === 0 ? resolve(out.trim()) : reject(new Error(`ffprobe exit ${code}`)));
+              child.on("error", reject);
+              setTimeout(() => { child.kill(); reject(new Error("ffprobe timeout")); }, 10000);
+            });
+            durationSec = Math.round(parseFloat(durationStr) * 10) / 10;
+          } catch {
+            console.warn(`[Worker] Reel ${jobId} | Could not get duration for ${vidFilename}`);
+          }
+
+          // Extract 2 keyframes from the video (one at 1/3 and 2/3 through)
+          const thumbPath = pathMod.join(thumbDir, `thumb-${vidFilename}.jpg`);
           await new Promise<void>((resolve, reject) => {
             const child = spawnProc("ffmpeg", [
               "-i", vidPath, "-vf", "fps=1/3", "-frames:v", "2", "-q:v", "5", "-y", thumbPath,
@@ -474,11 +495,13 @@ export async function runReelPipeline(
               signedUrl: dataUrl,
               mimeType: "image/jpeg",
               fileSize: thumbBuffer.length,
+              mediaType: "video",
+              durationSec,
             });
-            console.log(`[Worker] Reel ${jobId} | Extracted thumbnail for ${vid.path.split("/").pop()}`);
+            console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: ${durationSec}s, thumbnail extracted`);
           }
         } catch (err) {
-          console.warn(`[Worker] Reel ${jobId} | Failed to extract thumbnail for ${vid.path.split("/").pop()}: ${err instanceof Error ? err.message : err}`);
+          console.warn(`[Worker] Reel ${jobId} | Failed to process video ${vid.path.split("/").pop()}: ${err instanceof Error ? err.message : err}`);
         }
       }
 
@@ -486,8 +509,11 @@ export async function runReelPipeline(
       await fsPromises.rm(thumbDir, { recursive: true, force: true }).catch(() => {});
     }
 
-    // Agent 1 gets: all images + video thumbnails (for vision analysis)
-    const agent1Images = [...imageUploads, ...videoThumbnails];
+    // Tag image uploads with mediaType for consistency
+    const taggedImages = imageUploads.map((img) => ({ ...img, mediaType: "image" as const }));
+
+    // Agent 1 gets: all images (tagged) + video thumbnails (tagged with duration)
+    const agent1Images = [...taggedImages, ...videoThumbnails];
     console.log(`[Worker] Reel ${jobId} | Agent1 input: ${agent1Images.length} items (${imageUploads.length} images + ${videoThumbnails.length} video thumbnails)`);
 
     const a1Costs = new CostTracker();

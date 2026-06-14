@@ -3,20 +3,32 @@ import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
 import type { CostTracker } from "./cost-tracker";
 
-/** Image metadata passed into Agent 1. */
+/** Media metadata passed into Agent 1 (images and video thumbnails). */
 export type UploadedImage = {
   path: string;
   signedUrl: string;
   mimeType: string | null;
   fileSize: number | null;
+  /** "image" or "video" — set for reel pipeline so agents know the source type. */
+  mediaType?: "image" | "video";
+  /** Video duration in seconds — only set for video uploads. */
+  durationSec?: number;
 };
 
-/** A curated image from Agent 1's shortlist. */
+/** A curated media item from Agent 1's shortlist. */
 export type CuratedImage = {
   path: string;
   relevanceScore: number;
   description: string;
   quality: "high" | "medium" | "low";
+  /** "image" or "video" — echoed from input so Agent 2 knows the media type. */
+  mediaType?: "image" | "video";
+  /** Video duration in seconds — only set for videos. */
+  durationSec?: number;
+  /** For videos: suggested trim start (seconds). */
+  suggestedTrimStart?: number;
+  /** For videos: suggested trim end (seconds). */
+  suggestedTrimEnd?: number;
 };
 
 /** Agent 1 output — stored in ai_generation_jobs.agent1_output. */
@@ -82,10 +94,10 @@ export async function runUnderstandingAgent(
       type: "image_url",
       image_url: { url: img.signedUrl, detail: "low" },
     });
-    pass1Content.push({
-      type: "text",
-      text: `[${img.path}]`,
-    });
+    const label = img.mediaType === "video"
+      ? `[VIDEO: ${img.path} — ${img.durationSec ?? "?"}s clip]`
+      : `[${img.path}]`;
+    pass1Content.push({ type: "text", text: label });
   }
 
   const pass1Response = await withRateLimitRetry(() =>
@@ -164,10 +176,11 @@ async function deepAnalysis(
       type: "image_url",
       image_url: { url: img.signedUrl, detail: "high" },
     });
-    userContent.push({
-      type: "text",
-      text: `[Image: ${img.path}]`,
-    });
+    // Label videos distinctly so the model knows it's a video frame, not a photo
+    const label = img.mediaType === "video"
+      ? `[VIDEO FRAME: ${img.path} — this is a THUMBNAIL from a ${img.durationSec ?? "unknown"}s video clip. Describe the VIDEO CONTENT you see (action, movement, setting). This is NOT a static photo.]`
+      : `[Image: ${img.path}]`;
+    userContent.push({ type: "text", text: label });
   }
 
   const response = await withRateLimitRetry(() => openai.chat.completions.create({
@@ -175,21 +188,29 @@ async function deepAnalysis(
     messages: [
       {
         role: "system",
-        content: `You are an expert visual content analyst for school marketing posters.
+        content: `You are an expert visual content analyst for school marketing materials (posters and video reels).
 
 Your job is to:
 1. Understand the theme, audience, and tone from the title and description.
-2. Analyze every image for quality, composition, content, and relevance to the theme.
-3. Curate a shortlist of the best images (max 10-15) ranked by relevance.
-4. Reject images that are blurry, irrelevant, or low quality — explain why.
-5. For each curated image, write a detailed description of what's in it (people, setting, action, mood).
-6. Identify the core message that should come through in the poster(s).
+2. Analyze every image AND video frame for quality, composition, content, and relevance to the theme.
+3. Curate a shortlist of the best media (max 10-15) ranked by relevance.
+4. Reject media that is blurry, irrelevant, or low quality — explain why.
+5. For each curated item, write a detailed description of what's in it (people, setting, action, mood).
+6. Identify the core message that should come through in the output.
+
+IMPORTANT — VIDEO FRAMES:
+- Items labeled "[VIDEO FRAME: ...]" are thumbnails extracted from video clips, NOT static photos.
+- Describe the VIDEO CONTENT: what action/movement is happening, the setting, the mood.
+- For videos, include "mediaType": "video" and "durationSec" (from the label) in your output.
+- For videos, suggest the most interesting trim window: "suggestedTrimStart" and "suggestedTrimEnd" in seconds.
+  If the video is short (under 8s), use the full clip. If longer, pick the best 3-8 second segment.
+- For regular photos, include "mediaType": "image" (no duration/trim fields needed).
 
 Return ONLY valid JSON matching this schema:
 {
   "theme": "string — the central theme/topic",
-  "coreMessage": "string — the key message for the poster",
-  "curatedImages": [{ "path": "string", "relevanceScore": 0-100, "description": "detailed description of the image content", "quality": "high|medium|low" }],
+  "coreMessage": "string — the key message",
+  "curatedImages": [{ "path": "string", "relevanceScore": 0-100, "description": "detailed description", "quality": "high|medium|low", "mediaType": "image|video", "durationSec": number_or_null, "suggestedTrimStart": number_or_null, "suggestedTrimEnd": number_or_null }],
   "rejectedImages": [{ "path": "string", "reason": "string" }],
   "audience": "string — target audience (parents, students, community, etc.)",
   "tone": "string — visual tone (celebratory, informational, urgent, etc.)",

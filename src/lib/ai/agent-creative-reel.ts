@@ -125,8 +125,11 @@ DURATION RULES:
 MEDIA ASSIGNMENT RULES:
 - Every curated image/video MUST appear in exactly ONE scene
 - Do NOT duplicate media across scenes
-- Trim videos to their most compelling 3-8 second segment
-- For images, specify Ken Burns direction (zoom in, pan left, etc.)
+- Set mediaType to "image" or "video" for each scene based on the curated media list
+- For VIDEOS: use the suggested trim points from the curated list (suggestedTrimStart/suggestedTrimEnd).
+  If no suggestion, pick the most compelling 3-8 second segment. Set trimStartSec and trimEndSec.
+  Videos should use their natural duration within the trim window (don't force them to 3s if they have 6s of good content).
+- For IMAGES: specify Ken Burns direction (zoom in, pan left, etc.). Images typically get 3-5s per scene.
 - focusX/focusY are 0-100 percentage values for the focal point
 
 MUSIC MOOD:
@@ -177,10 +180,17 @@ export async function runReelCreativeAgent(
   const openai = await getModelClient();
 
   const curatedSummary = input.understanding.curatedImages
-    .map(
-      (img) =>
-        `- ${img.path} [relevance: ${img.relevanceScore}, quality: ${img.quality}]: ${img.description}`,
-    )
+    .map((img) => {
+      let line = `- ${img.path} [${img.mediaType ?? "image"}, relevance: ${img.relevanceScore}, quality: ${img.quality}]: ${img.description}`;
+      if (img.mediaType === "video") {
+        line += ` (VIDEO: ${img.durationSec ?? "?"}s`;
+        if (img.suggestedTrimStart != null && img.suggestedTrimEnd != null) {
+          line += `, suggested trim: ${img.suggestedTrimStart}s-${img.suggestedTrimEnd}s`;
+        }
+        line += ")";
+      }
+      return line;
+    })
     .join("\n");
 
   const brandSummary = input.brandAssets
@@ -190,12 +200,12 @@ export async function runReelCreativeAgent(
     )
     .join("\n");
 
-  // Determine media types from file extensions
+  // Count by mediaType (set by Agent 1) with fallback to file extension
   const imageCount = input.understanding.curatedImages.filter(
-    (img) => /\.(jpg|jpeg|png|webp|gif)$/i.test(img.path),
+    (img) => img.mediaType === "image" || (!img.mediaType && /\.(jpg|jpeg|png|webp|gif)$/i.test(img.path)),
   ).length;
   const videoCount = input.understanding.curatedImages.filter(
-    (img) => /\.(mp4|mov|webm|avi)$/i.test(img.path),
+    (img) => img.mediaType === "video" || (!img.mediaType && /\.(mp4|mov|webm|avi)$/i.test(img.path)),
   ).length;
 
   const userMessage = `## School: ${input.schoolName}
