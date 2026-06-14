@@ -643,6 +643,20 @@ export async function runReelPipeline(
           console.warn(`[Worker] Reel ${jobId} | Media not found: ${scene.mediaPath}`);
           continue;
         }
+
+        // Validate and correct mediaType based on actual file MIME type
+        const isActuallyVideo = match.mimeType?.startsWith("video/") ?? /\.(mp4|mov|webm|avi)$/i.test(scene.mediaPath);
+        const isActuallyImage = !isActuallyVideo;
+        let effectiveType = scene.mediaType;
+
+        if (isActuallyVideo && scene.mediaType !== "video") {
+          console.warn(`[Worker] Reel ${jobId} | TYPE FIX: ${scene.mediaPath.split("/").pop()} is a video (${match.mimeType}) but Agent 2 said "${scene.mediaType}" → correcting to "video"`);
+          effectiveType = "video";
+        } else if (isActuallyImage && scene.mediaType === "video") {
+          console.warn(`[Worker] Reel ${jobId} | TYPE FIX: ${scene.mediaPath.split("/").pop()} is an image (${match.mimeType}) but Agent 2 said "video" → correcting to "image"`);
+          effectiveType = "image";
+        }
+
         try {
           const res = await fetch(match.signedUrl);
           if (!res.ok) continue;
@@ -651,9 +665,10 @@ export async function runReelPipeline(
           mediaFiles.set(filename, buf);
           const curatedInfo = understanding.curatedImages.find((c) => c.path === scene.mediaPath);
           mediaManifest.set(filename, {
-            type: scene.mediaType,
+            type: effectiveType,
             description: curatedInfo?.description ?? "uploaded media",
           });
+          console.log(`[Worker] Reel ${jobId} | Downloaded: ${filename} (${effectiveType}, ${(buf.length / 1024).toFixed(0)} KB)`);
         } catch {
           console.warn(`[Worker] Reel ${jobId} | Failed to download: ${scene.mediaPath}`);
         }

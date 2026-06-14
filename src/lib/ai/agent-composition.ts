@@ -302,6 +302,12 @@ ${examples.join("\n\n")}
 6. Include school branding (logo, name) as described above
 7. Write COMPLETE, COMPILABLE TypeScript — every import, every type, every component
 8. Do NOT use external assets or URLs — only staticFile() references
+9. CRITICAL — VIDEO FILES: Files listed as "(video)" in the media list MUST be rendered with the <Video> component from "@remotion/media", NOT <Img>. Example:
+   import { Video } from "@remotion/media";
+   <Video src={staticFile("media/clip.mp4")} muted objectFit="cover" style={{width:"100%",height:"100%"}} />
+   Use trimBefore={Math.round(startSec * 30)} and trimAfter={Math.round(endSec * 30)} for trimming.
+   Image files (.jpg, .png) use <Img> from "remotion". Video files (.mp4, .mov) use <Video> from "@remotion/media".
+   NEVER use <Img> for a .mp4 file. NEVER use <Video> for a .jpg file.
 9. Load Google Fonts via @remotion/google-fonts (e.g., import { loadFont } from "@remotion/google-fonts/Poppins")
 10. Calculate REEL_DURATION precisely from your timing constants
 

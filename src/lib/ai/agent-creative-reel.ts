@@ -125,12 +125,25 @@ DURATION RULES:
 MEDIA ASSIGNMENT RULES:
 - Every curated image/video MUST appear in exactly ONE scene
 - Do NOT duplicate media across scenes
-- Set mediaType to "image" or "video" for each scene based on the curated media list
+- MANDATORY VIDEO USAGE: If the curated list contains videos, you MUST use ALL of them.
+  Videos are MORE valuable than images for reels — they show movement, action, and life.
+  A reel with only still images feels like a slideshow. Videos make it feel alive.
+  Aim for at least 40-60% of scenes to be video clips when videos are available.
+  NEVER skip a curated video in favor of an image.
+- Set mediaType to "image" or "video" for each scene EXACTLY matching the curated media list.
+  If the curated list says the item is a video (mediaType: "video"), your scene MUST have mediaType: "video".
+  If it's an image (mediaType: "image"), your scene MUST have mediaType: "image".
+  NEVER set mediaType: "image" for a file that is listed as a video in the curated list.
 - For VIDEOS: use the suggested trim points from the curated list (suggestedTrimStart/suggestedTrimEnd).
   If no suggestion, pick the most compelling 3-8 second segment. Set trimStartSec and trimEndSec.
   Videos should use their natural duration within the trim window (don't force them to 3s if they have 6s of good content).
 - For IMAGES: specify Ken Burns direction (zoom in, pan left, etc.). Images typically get 3-5s per scene.
 - focusX/focusY are 0-100 percentage values for the focal point
+
+VERIFY YOUR WORK:
+1. Count videos in the curated list. Count videos in your scenes. They must match.
+2. Every scene with a .mp4 or .mov file MUST have mediaType: "video", trimStartSec, and trimEndSec.
+3. If you have 8 curated items and 3 are videos, your scenes MUST include exactly 3 video scenes.
 
 MUSIC MOOD:
 - Provide 2-4 keywords for Pixabay music search (e.g., ["upbeat", "acoustic", "school"])
@@ -272,11 +285,22 @@ Create 3 different reel script variations. Each should use a DISTINCT visual reg
 
   const parsed = JSON.parse(content) as ReelCreativeOutput;
 
-  // Log summary
+  // Log summary with video breakdown
   for (const v of parsed.variations) {
+    const videoScenes = v.scenes.filter((s) => s.mediaType === "video");
+    const imageScenes = v.scenes.filter((s) => s.mediaType === "image");
     console.log(
-      `[ReelAgent2] V${v.variationIndex}: "${v.direction}" — ${v.scenes.length} scenes, ${v.durationSec}s, music: [${v.musicMood.join(", ")}] ${v.musicTempo}`,
+      `[ReelAgent2] V${v.variationIndex}: "${v.direction}" — ${v.scenes.length} scenes (${videoScenes.length} video, ${imageScenes.length} image), ${v.durationSec}s, music: [${v.musicMood.join(", ")}] ${v.musicTempo}`,
     );
+    for (const vs of videoScenes) {
+      console.log(
+        `[ReelAgent2]   VIDEO scene ${vs.index}: ${vs.mediaPath.split("/").pop()} (${vs.durationSec}s, trim ${vs.trimStartSec ?? "?"}s-${vs.trimEndSec ?? "?"}s)`,
+      );
+    }
+    // Warn if no videos despite curated videos being available
+    if (videoScenes.length === 0 && videoCount > 0) {
+      console.warn(`[ReelAgent2] WARNING: V${v.variationIndex} has 0 video scenes but ${videoCount} curated videos exist!`);
+    }
   }
 
   return parsed;
