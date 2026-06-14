@@ -3,13 +3,10 @@
 import { useState } from "react";
 import { regenerateAi } from "../actions";
 
-const REEL_DURATIONS = [
-  { value: 30, label: "30 seconds" },
-  { value: 60, label: "1 minute" },
-  { value: 90, label: "1.5 minutes" },
-  { value: 120, label: "2 minutes" },
-  { value: 180, label: "3 minutes" },
-  { value: 300, label: "5 minutes" },
+const REEL_LENGTH_OPTIONS = [
+  { value: 60, label: "Short (up to 1 min)" },
+  { value: 120, label: "Medium (up to 2 min)" },
+  { value: 180, label: "Full (use all content, max 3 min)" },
 ];
 
 export function AiRegenerateButton({
@@ -24,7 +21,7 @@ export function AiRegenerateButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outputType, setOutputType] = useState<"single" | "carousel" | "reel">("single");
-  const [reelDuration, setReelDuration] = useState(60);
+  const [reelMaxDuration, setReelMaxDuration] = useState(120);
   const [engine, setEngine] = useState<"cloud" | "local">("cloud");
   const [showOptions, setShowOptions] = useState(false);
   const [title, setTitle] = useState(currentTitle ?? "");
@@ -61,7 +58,7 @@ export function AiRegenerateButton({
       title.trim(),
       description.trim() || null,
       outputType === "reel" ? "local" : engine,
-      outputType === "reel" ? reelDuration : undefined,
+      outputType === "reel" ? reelMaxDuration : undefined,
     );
     if (result.error) {
       setError(result.error);
@@ -177,16 +174,16 @@ export function AiRegenerateButton({
                 htmlFor="regen_reel_duration"
                 className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
               >
-                Preferred duration
+                Reel length
               </label>
               <select
                 id="regen_reel_duration"
-                value={reelDuration}
-                onChange={(e) => setReelDuration(Number(e.target.value))}
+                value={reelMaxDuration}
+                onChange={(e) => setReelMaxDuration(Number(e.target.value))}
                 disabled={busy}
                 className="mt-1 block rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
               >
-                {REEL_DURATIONS.map((d) => (
+                {REEL_LENGTH_OPTIONS.map((d) => (
                   <option key={d.value} value={d.value}>
                     {d.label}
                   </option>
@@ -216,7 +213,7 @@ export function AiRegenerateButton({
 
         {outputType === "reel" && (
           <p className="text-[10px] text-zinc-400">
-            Reels are rendered locally. Duration will be capped based on uploaded content.
+            Actual duration is calculated from your uploaded content. This setting caps the maximum length.
           </p>
         )}
       </div>

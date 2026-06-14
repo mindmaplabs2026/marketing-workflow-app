@@ -1,23 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { triggerAiGeneration, triggerLocalAiGeneration } from "../actions";
-import { triggerLocalReelGeneration } from "../actions";
+import { triggerAiGeneration, triggerLocalAiGeneration, triggerLocalReelGeneration } from "../actions";
 
-const REEL_DURATIONS = [
-  { value: 30, label: "30 seconds" },
-  { value: 60, label: "1 minute" },
-  { value: 90, label: "1.5 minutes" },
-  { value: 120, label: "2 minutes" },
-  { value: 180, label: "3 minutes" },
-  { value: 300, label: "5 minutes" },
+const REEL_LENGTH_OPTIONS = [
+  { value: 60, label: "Short (up to 1 min)" },
+  { value: 120, label: "Medium (up to 2 min)" },
+  { value: 180, label: "Full (use all content, max 3 min)" },
 ];
 
 export function AiGenerateButton({ requestId }: { requestId: string }) {
   const [busy, setBusy] = useState<null | "cloud" | "local" | "reel">(null);
   const [error, setError] = useState<string | null>(null);
   const [outputType, setOutputType] = useState<"single" | "carousel" | "reel">("single");
-  const [reelDuration, setReelDuration] = useState(60);
+  const [reelMaxDuration, setReelMaxDuration] = useState(120);
 
   async function run(engine: "cloud" | "local" | "reel") {
     setBusy(engine);
@@ -25,7 +21,7 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
 
     let result: { error?: string };
     if (engine === "reel") {
-      result = await triggerLocalReelGeneration(requestId, reelDuration);
+      result = await triggerLocalReelGeneration(requestId, reelMaxDuration);
     } else if (engine === "local") {
       result = await triggerLocalAiGeneration(requestId, outputType as "single" | "carousel");
     } else {
@@ -74,23 +70,23 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
           </select>
         </div>
 
-        {/* Duration picker — only visible for reels */}
+        {/* Reel length selector — only visible for reels */}
         {outputType === "reel" && (
           <div>
             <label
-              htmlFor="ai_reel_duration"
+              htmlFor="ai_reel_length"
               className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
             >
-              Preferred duration
+              Reel length
             </label>
             <select
-              id="ai_reel_duration"
-              value={reelDuration}
-              onChange={(e) => setReelDuration(Number(e.target.value))}
+              id="ai_reel_length"
+              value={reelMaxDuration}
+              onChange={(e) => setReelMaxDuration(Number(e.target.value))}
               disabled={busy !== null}
               className="mt-1 block rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
             >
-              {REEL_DURATIONS.map((d) => (
+              {REEL_LENGTH_OPTIONS.map((d) => (
                 <option key={d.value} value={d.value}>
                   {d.label}
                 </option>
@@ -137,7 +133,7 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
 
       {outputType === "reel" && (
         <p className="mt-2 text-[10px] text-zinc-400">
-          Reels are rendered locally. Duration will be capped based on uploaded content.
+          Actual duration is calculated from your uploaded content. This setting caps the maximum length.
         </p>
       )}
 

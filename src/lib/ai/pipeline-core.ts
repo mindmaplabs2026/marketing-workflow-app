@@ -417,18 +417,20 @@ export async function runReelPipeline(
 
   try {
     // --- Agent 1: Understanding (reused as-is) ---
-    // Fetch requested duration early — needed for Agent 1's shortlist sizing
+    // Fetch duration cap early — needed for Agent 1's shortlist sizing.
+    // The teacher's pick is a CAP, not a target. Actual duration is calculated
+    // from curated content after Agent 1.
     const { data: jobRow } = await admin
       .from("ai_generation_jobs")
       .select("reel_duration_sec")
       .eq("id", jobId)
       .single();
-    const requestedDuration = (jobRow?.reel_duration_sec as number | null) ?? 60;
+    const durationCapSec = (jobRow?.reel_duration_sec as number | null) ?? 120;
 
-    // Calculate max curated items based on duration:
-    // ~5s per scene average → 180s reel needs ~36 scenes + title/closing
-    const maxShortlist = Math.max(15, Math.ceil(requestedDuration / 4));
-    console.log(`[Worker] Reel ${jobId} | Requested ${requestedDuration}s → maxShortlist=${maxShortlist}`);
+    // Be generous with shortlist — we'll trim after calculating natural duration.
+    // Allow enough items to fill the cap: duration/3.5 (accounts for shorter scenes).
+    const maxShortlist = Math.max(20, Math.ceil(durationCapSec / 3.5));
+    console.log(`[Worker] Reel ${jobId} | Duration cap: ${durationCapSec}s → maxShortlist=${maxShortlist}`);
 
     console.log(`[Worker] Reel ${jobId} | ── Agent 1: Understanding ──`);
     await admin
@@ -639,6 +641,51 @@ export async function runReelPipeline(
       console.log(`[Worker] Reel ${jobId} | Agent 1 included ${curatedVideoCount}/${videoUploads.length} videos in curated list`);
     }
 
+    // ─── CONTENT-DRIVEN DURATION CALCULATOR ────────────────────────
+    // Calculate natural duration from curated content, then cap it.
+    const TITLE_CLOSING_SEC = 8; // 4s title + 4s closing
+    const IMAGE_SCENE_SEC = 4;   // avg seconds per image scene
+    const VIDEO_TRIM_DEFAULT = 6; // default trim window for videos without suggestion
+
+    const curatedVideos = understanding.curatedImages.filter((c) => c.mediaType === "video");
+    const curatedImages = understanding.curatedImages.filter((c) => c.mediaType !== "video");
+
+    // Video contribution: use suggested trim or default
+    let videoDurationSec = 0;
+    for (const v of curatedVideos) {
+      if (v.suggestedTrimStart != null && v.suggestedTrimEnd != null) {
+        videoDurationSec += Math.min(v.suggestedTrimEnd - v.suggestedTrimStart, 8);
+      } else if (v.durationSec && v.durationSec <= 10) {
+        videoDurationSec += v.durationSec; // short clip, use whole thing
+      } else {
+        videoDurationSec += VIDEO_TRIM_DEFAULT;
+      }
+    }
+
+    // Image contribution
+    const imageDurationSec = curatedImages.length * IMAGE_SCENE_SEC;
+
+    const naturalDuration = TITLE_CLOSING_SEC + videoDurationSec + imageDurationSec;
+    const effectiveDuration = Math.min(naturalDuration, durationCapSec, 180); // hard cap 180s
+
+    console.log(`[Worker] Reel ${jobId} | Duration calc: ${curatedVideos.length} videos (${Math.round(videoDurationSec)}s) + ${curatedImages.length} images (${imageDurationSec}s) + ${TITLE_CLOSING_SEC}s chrome = ${Math.round(naturalDuration)}s natural`);
+    console.log(`[Worker] Reel ${jobId} | Effective duration: ${effectiveDuration}s (cap: ${durationCapSec}s, natural: ${Math.round(naturalDuration)}s)`);
+
+    // If natural duration exceeds cap, trim lower-relevance IMAGES (keep all videos)
+    if (naturalDuration > durationCapSec) {
+      const excessSec = naturalDuration - durationCapSec;
+      const imagesToDrop = Math.ceil(excessSec / IMAGE_SCENE_SEC);
+      if (imagesToDrop > 0 && curatedImages.length > imagesToDrop) {
+        // Sort images by relevance ascending, drop lowest
+        const sortedImages = [...curatedImages].sort((a, b) => a.relevanceScore - b.relevanceScore);
+        const dropPaths = new Set(sortedImages.slice(0, imagesToDrop).map((c) => c.path));
+        understanding.curatedImages = understanding.curatedImages.filter(
+          (c) => c.mediaType === "video" || !dropPaths.has(c.path),
+        );
+        console.log(`[Worker] Reel ${jobId} | Trimmed ${imagesToDrop} lowest-relevance images to fit ${durationCapSec}s cap. Now ${understanding.curatedImages.length} curated.`);
+      }
+    }
+
     await admin
       .from("ai_generation_jobs")
       .update({ status: "creative", agent1_output: understanding as unknown as Record<string, unknown> })
@@ -656,7 +703,7 @@ export async function runReelPipeline(
         signedUrl: a.signedUrl,
         label: a.label,
       })),
-      requestedDurationSec: requestedDuration,
+      requestedDurationSec: effectiveDuration,
       schoolName: ctx.schoolName,
       schoolGuidelines: ctx.schoolGuidelines,
     }, a2Costs);
