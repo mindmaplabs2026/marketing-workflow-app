@@ -117,10 +117,15 @@ CREATIVE PROCESS:
 
 DURATION RULES:
 - Title card: 3-5 seconds
-- Each scene: 3-6 seconds (images shorter, videos can be longer)
+- Each scene: 3-8 seconds (images 3-5s, videos 4-8s using their natural duration)
 - Closing card: 3-5 seconds
-- Total duration = title + sum(scenes) + closing + transition overlaps
-- NEVER exceed 180 seconds total
+- Total duration = title + sum(scenes) + closing
+- Your goal is to fill the REQUESTED duration as closely as possible.
+  If the teacher requested 120s, try to produce a reel close to 120s.
+  Use ALL curated media to fill the time. Give each scene enough breathing room.
+- If you have more content than fits in the requested duration, prioritize
+  videos and the highest-relevance images.
+- NEVER exceed 180 seconds total regardless of requested duration.
 
 MEDIA ASSIGNMENT RULES:
 - Every curated image/video MUST appear in exactly ONE scene

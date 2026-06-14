@@ -48,9 +48,12 @@ type Agent1Input = {
   images: UploadedImage[];
   brandAssetTypes: string[];
   schoolGuidelines?: string | null;
+  /** Max curated items. Default 15 (posters). For reels, pass a higher value
+   *  based on requested duration (e.g., 180s reel needs ~36 items at 5s each). */
+  maxShortlist?: number;
 };
 
-const MAX_SHORTLIST = 15;
+const DEFAULT_MAX_SHORTLIST = 15;
 
 /**
  * Two-pass image analysis:
@@ -69,9 +72,11 @@ export async function runUnderstandingAgent(
 ): Promise<UnderstandingOutput> {
   const openai = await getModelClient();
 
+  const MAX_SHORTLIST = input.maxShortlist ?? DEFAULT_MAX_SHORTLIST;
+
   const contextText = `Title: ${input.title}\n\nDescription: ${input.description ?? "(none provided)"}\n\nSchool brand asset types available: ${input.brandAssetTypes.join(", ") || "none"}${input.schoolGuidelines ? `\n\nSchool-specific guidelines:\n${input.schoolGuidelines}` : ""}`;
 
-  // If 15 or fewer images, skip pass 1 and go straight to deep analysis
+  // If fewer items than the shortlist cap, skip pass 1 and go straight to deep analysis
   if (input.images.length <= MAX_SHORTLIST) {
     return deepAnalysis(openai, input.images, contextText);
   }

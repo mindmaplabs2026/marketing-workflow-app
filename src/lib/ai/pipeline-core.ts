@@ -417,6 +417,19 @@ export async function runReelPipeline(
 
   try {
     // --- Agent 1: Understanding (reused as-is) ---
+    // Fetch requested duration early — needed for Agent 1's shortlist sizing
+    const { data: jobRow } = await admin
+      .from("ai_generation_jobs")
+      .select("reel_duration_sec")
+      .eq("id", jobId)
+      .single();
+    const requestedDuration = (jobRow?.reel_duration_sec as number | null) ?? 60;
+
+    // Calculate max curated items based on duration:
+    // ~5s per scene average → 180s reel needs ~36 scenes + title/closing
+    const maxShortlist = Math.max(15, Math.ceil(requestedDuration / 4));
+    console.log(`[Worker] Reel ${jobId} | Requested ${requestedDuration}s → maxShortlist=${maxShortlist}`);
+
     console.log(`[Worker] Reel ${jobId} | ── Agent 1: Understanding ──`);
     await admin
       .from("ai_generation_jobs")
@@ -572,10 +585,11 @@ export async function runReelPipeline(
       images: agent1Images,
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       schoolGuidelines: ctx.schoolGuidelines,
+      maxShortlist,
     }, a1Costs);
     await appendCosts(jobId, a1Costs.toJSON());
 
-    console.log(`[Worker] Reel ${jobId} | Agent1: theme="${understanding.theme}", ${understanding.curatedImages.length} curated`);
+    console.log(`[Worker] Reel ${jobId} | Agent1: theme="${understanding.theme}", ${understanding.curatedImages.length} curated (requested up to ${maxShortlist})`);
 
     // PROGRAMMATIC VIDEO INJECTION: Agent 1 often drops videos from the curated
     // list because still frames look worse than photos. For reels, videos are
@@ -632,12 +646,6 @@ export async function runReelPipeline(
 
     // --- Agent 2: Reel Script ---
     console.log(`[Worker] Reel ${jobId} | ── Agent 2: Reel Script ──`);
-    const { data: jobRow } = await admin
-      .from("ai_generation_jobs")
-      .select("reel_duration_sec")
-      .eq("id", jobId)
-      .single();
-    const requestedDuration = (jobRow?.reel_duration_sec as number | null) ?? 60;
 
     const a2Costs = new CostTracker();
     const reelCreative = await runReelCreativeAgent({
