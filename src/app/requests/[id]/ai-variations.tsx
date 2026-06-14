@@ -48,10 +48,16 @@ export function AiVariations({
       for (const v of variations) {
         const urls: string[] = [];
         for (const path of v.storage_paths) {
-          const { data } = await supabase.storage
+          const { data, error: signErr } = await supabase.storage
             .from("designs")
             .createSignedUrl(path, 3600);
+          if (signErr) {
+            console.error(`[ai-variations] Signed URL failed for ${path}:`, signErr.message);
+          }
           if (data?.signedUrl) urls.push(data.signedUrl);
+        }
+        if (urls.length === 0 && v.storage_paths.length > 0) {
+          console.warn(`[ai-variations] No signed URLs for variation ${v.id} (${v.storage_paths.length} paths)`);
         }
         urlMap.set(v.id, urls);
       }

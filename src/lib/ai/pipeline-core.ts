@@ -825,9 +825,13 @@ export async function runReelPipeline(
       const storagePath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-${timestamp}.mp4`;
       const mp4Buffer = await import("node:fs").then((fs) => fs.promises.readFile(renderResult.outputPath));
 
-      await admin.storage
+      const { error: uploadErr } = await admin.storage
         .from("designs")
-        .upload(storagePath, mp4Buffer, { contentType: "video/mp4", upsert: false });
+        .upload(storagePath, mp4Buffer, { contentType: "video/mp4", upsert: true });
+      if (uploadErr) {
+        console.error(`[Worker] Reel ${jobId} | V${script.variationIndex} — UPLOAD FAILED: ${uploadErr.message}`);
+        throw new Error(`Storage upload failed: ${uploadErr.message}`);
+      }
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Uploaded: ${storagePath} (${(mp4Buffer.length / 1024 / 1024).toFixed(1)} MB)`);
 
       // --- Create variation record ---
@@ -891,9 +895,12 @@ export async function runReelPipeline(
             const refinedPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-refined-${refinedTimestamp}.mp4`;
             const refinedBuffer = await import("node:fs").then((f) => f.promises.readFile(refinedRender.outputPath));
 
-            await admin.storage
+            const { error: refinedUploadErr } = await admin.storage
               .from("designs")
-              .upload(refinedPath, refinedBuffer, { contentType: "video/mp4", upsert: false });
+              .upload(refinedPath, refinedBuffer, { contentType: "video/mp4", upsert: true });
+            if (refinedUploadErr) {
+              console.error(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined upload FAILED: ${refinedUploadErr.message}`);
+            }
 
             // Update variation with refined path and code
             await admin.from("ai_variations")
