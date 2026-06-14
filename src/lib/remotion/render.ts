@@ -126,20 +126,59 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
     console.log(`[remotion-render] Spawning renderer for ${workDir}`);
     await spawnRenderer(workDir, timeoutMs);
 
-    const outputPath = path.join(workDir, "output.mp4");
+    const rawPath = path.join(workDir, "output.mp4");
     if (
       !(await fs
-        .stat(outputPath)
+        .stat(rawPath)
         .then(() => true)
         .catch(() => false))
     ) {
       throw new Error("Render completed but output.mp4 not found");
     }
 
+    const rawSizeMb = (await fs.stat(rawPath)).size / 1024 / 1024;
     const renderTimeSec = (Date.now() - startTime) / 1000;
     console.log(
-      `[remotion-render] Success in ${renderTimeSec.toFixed(1)}s — ${outputPath}`,
+      `[remotion-render] Rendered in ${renderTimeSec.toFixed(1)}s — ${rawSizeMb.toFixed(1)} MB (raw)`,
     );
+
+    // Compress with ffmpeg — reduces ~70MB → ~15-20MB without visible quality loss.
+    // CRF 28 is a good balance for Instagram Reels (viewed on mobile screens).
+    const compressedPath = path.join(workDir, "output-compressed.mp4");
+    console.log("[remotion-render] Compressing with ffmpeg (crf=28)...");
+    const compressStart = Date.now();
+
+    await new Promise<void>((resolve, reject) => {
+      const { spawn: spawnProc } = require("node:child_process");
+      const child = spawnProc("ffmpeg", [
+        "-i", rawPath,
+        "-c:v", "libx264",
+        "-crf", "28",
+        "-preset", "fast",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        "-y", compressedPath,
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+      let stderr = "";
+      child.stdout.on("data", () => {});
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      child.on("close", (code: number | null) => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg compress exit ${code}: ${stderr.slice(0, 300)}`));
+      });
+      child.on("error", reject);
+      setTimeout(() => { child.kill(); reject(new Error("ffmpeg compress timeout")); }, 120000);
+    });
+
+    const compressedSizeMb = (await fs.stat(compressedPath)).size / 1024 / 1024;
+    const compressSec = ((Date.now() - compressStart) / 1000).toFixed(1);
+    console.log(
+      `[remotion-render] Compressed in ${compressSec}s: ${rawSizeMb.toFixed(1)} MB → ${compressedSizeMb.toFixed(1)} MB (${Math.round((1 - compressedSizeMb / rawSizeMb) * 100)}% reduction)`,
+    );
+
+    // Use compressed version as the output
+    const outputPath = compressedPath;
 
     const cleanupPublic = async () => {
       // Remove media + music from remotion-renderer/public/ to avoid stale files
