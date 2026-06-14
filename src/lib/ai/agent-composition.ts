@@ -296,7 +296,7 @@ ${examples.join("\n\n")}
 ## RULES
 1. Export a React.FC named "Reel" and a number constant "REEL_DURATION" (total frames at 30fps)
 2. Use only these packages: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
-3. Media files: use staticFile("media/filename.ext") — files are in the public/media/ folder
+3. Media files: use staticFile("media/filename.ext") — NEVER include "public/" in the path. staticFile() resolves relative to the public/ folder automatically. CORRECT: staticFile("media/photo.jpg"). WRONG: staticFile("public/media/photo.jpg")
 4. Music: use staticFile("music/track.mp3")
 5. Canvas: 1080×1920 pixels, 30fps — ALWAYS
 6. Include school branding (logo, name) as described above
@@ -413,7 +413,7 @@ RULES:
 3. Export "Reel" (React.FC) and "REEL_DURATION" (number in frames)
 4. Canvas: 1080x1920, 30fps
 5. Use only: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
-6. Media paths: use staticFile("media/filename.ext") and staticFile("music/track.mp3")
+6. Media paths: use staticFile("media/filename.ext") and staticFile("music/track.mp3") — NEVER include "public/" in the path
 7. Write COMPLETE, COMPILABLE TypeScript
 
 OUTPUT: Write the COMPLETE improved Reel.tsx inside a single \`\`\`tsx code fence.

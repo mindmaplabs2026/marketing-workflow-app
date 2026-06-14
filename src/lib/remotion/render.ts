@@ -85,15 +85,15 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       await fs.writeFile(path.join(workDir, "data.ts"), input.dataTsx);
     }
 
-    // 3. Write media files — inside public/ so staticFile() can resolve them.
-    //    Remotion's staticFile("media/logo.png") resolves to <workDir>/public/media/logo.png
+    // 3. Write media files into public/ — Remotion's mandatory static dir.
+    //    staticFile("media/logo.png") → serves from public/media/logo.png
     const mediaDir = path.join(workDir, "public", "media");
     await fs.mkdir(mediaDir, { recursive: true });
     for (const [name, buffer] of input.mediaFiles) {
       await fs.writeFile(path.join(mediaDir, name), buffer);
     }
 
-    // 4. Write music file — also inside public/
+    // 4. Write music file into public/
     if (input.musicFile) {
       const musicDir = path.join(workDir, "public", "music");
       await fs.mkdir(musicDir, { recursive: true });
