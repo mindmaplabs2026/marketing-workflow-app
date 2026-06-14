@@ -445,13 +445,11 @@ export async function runReelPipeline(
       for (let vi = 0; vi < videoUploads.length; vi++) {
         const vid = videoUploads[vi];
         const vidFilename = vid.path.split("/").pop() ?? `video${vi}.mp4`;
-        // Use a simple indexed name to avoid special characters in paths
         const safeBase = `v${vi}`;
         const vidPath = pathMod.join(thumbDir, `${safeBase}.mp4`);
-        const thumbPath = pathMod.join(thumbDir, `${safeBase}_thumb.jpg`);
 
         try {
-          // Download the video to a temp file
+          // Download the video
           const res = await fetch(vid.signedUrl);
           if (!res.ok) {
             console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: download failed (${res.status})`);
@@ -477,59 +475,70 @@ export async function runReelPipeline(
               setTimeout(() => { child.kill(); reject(new Error("ffprobe timeout")); }, 10000);
             });
             durationSec = Math.round(parseFloat(probeResult.out) * 10) / 10;
-            console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: duration=${durationSec}s`);
           } catch (probeErr) {
             console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: ffprobe failed — ${probeErr instanceof Error ? probeErr.message : probeErr}`);
           }
 
-          // Extract a single keyframe (midpoint of the video)
-          const seekTo = durationSec > 2 ? Math.floor(durationSec / 2) : 0;
+          // Extract frames every 2 seconds so Agent 1 can "watch" the whole video
+          const frameInterval = 2;
+          const frameCount = durationSec > 0 ? Math.max(1, Math.min(10, Math.ceil(durationSec / frameInterval))) : 1;
+          const framePattern = pathMod.join(thumbDir, `${safeBase}_frame_%02d.jpg`);
+
           const ffmpegResult = await new Promise<{ code: number; err: string }>((resolve) => {
             const child = spawnProc("ffmpeg", [
-              "-ss", String(seekTo),
               "-i", vidPath,
-              "-frames:v", "1",
+              "-vf", `fps=1/${frameInterval}`,
+              "-frames:v", String(frameCount),
               "-q:v", "5",
-              "-y", thumbPath,
+              "-y", framePattern,
             ], { stdio: ["ignore", "pipe", "pipe"] });
             let err = "";
             child.stdout.on("data", () => {});
             child.stderr.on("data", (d) => (err += d.toString()));
             child.on("close", (code) => resolve({ code: code ?? 1, err }));
             child.on("error", (e) => resolve({ code: 1, err: e.message }));
-            setTimeout(() => { child.kill(); resolve({ code: 1, err: "timeout" }); }, 15000);
+            setTimeout(() => { child.kill(); resolve({ code: 1, err: "timeout" }); }, 30000);
           });
 
-          if (ffmpegResult.code !== 0) {
-            console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: ffmpeg thumbnail failed (exit ${ffmpegResult.code}): ${ffmpegResult.err.slice(0, 200)}`);
-            // Even if thumbnail fails, still include the video in the pipeline
-            // (Agent 1 won't see a preview, but Agent 2 can still assign it to a scene)
+          // Collect extracted frames
+          const frameFiles: string[] = [];
+          for (let fi = 1; fi <= frameCount; fi++) {
+            const fp = pathMod.join(thumbDir, `${safeBase}_frame_${String(fi).padStart(2, "0")}.jpg`);
+            if (await fsPromises.stat(fp).then(() => true).catch(() => false)) {
+              frameFiles.push(fp);
+            }
+          }
+
+          if (frameFiles.length === 0 && ffmpegResult.code !== 0) {
+            console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: frame extraction failed (exit ${ffmpegResult.code}): ${ffmpegResult.err.slice(0, 200)}`);
+            // Still include for Remotion even without frames for Agent 1
             videoThumbnails.push({
-              path: vid.path,
-              signedUrl: "", // no thumbnail available
-              mimeType: "video/mp4",
-              fileSize: vidBuffer.length,
-              mediaType: "video",
-              durationSec: durationSec || undefined,
+              path: vid.path, signedUrl: "", mimeType: "video/mp4",
+              fileSize: vidBuffer.length, mediaType: "video", durationSec: durationSec || undefined,
             });
             continue;
           }
 
-          // Read the thumbnail and create a data URL for Agent 1
-          const thumbExists = await fsPromises.stat(thumbPath).then(() => true).catch(() => false);
-          if (thumbExists) {
-            const thumbBuffer = await fsPromises.readFile(thumbPath);
-            const dataUrl = `data:image/jpeg;base64,${thumbBuffer.toString("base64")}`;
+          // Create one UploadedImage per frame — all share the same video path
+          // but each has a different signedUrl (base64) and a timestamp label.
+          // Agent 1 sees ALL frames for this video, labeled with their timestamp.
+          for (let fi = 0; fi < frameFiles.length; fi++) {
+            const frameBuffer = await fsPromises.readFile(frameFiles[fi]);
+            const dataUrl = `data:image/jpeg;base64,${frameBuffer.toString("base64")}`;
+            const timestampSec = fi * frameInterval;
             videoThumbnails.push({
               path: vid.path,
               signedUrl: dataUrl,
               mimeType: "image/jpeg",
-              fileSize: thumbBuffer.length,
+              fileSize: frameBuffer.length,
               mediaType: "video",
               durationSec: durationSec || undefined,
-            });
-            console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: ${durationSec}s, thumbnail OK`);
+              // Store frame timestamp in a way Agent 1 can use
+              _frameTimestamp: timestampSec,
+            } as UploadedImage & { _frameTimestamp: number });
           }
+
+          console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: ${durationSec}s, ${frameFiles.length} frames extracted (every ${frameInterval}s)`);
         } catch (err) {
           console.warn(`[Worker] Reel ${jobId} | Failed to process video ${vidFilename}: ${err instanceof Error ? err.message : err}`);
         }
@@ -542,15 +551,18 @@ export async function runReelPipeline(
     // Tag image uploads with mediaType for consistency
     const taggedImages = imageUploads.map((img) => ({ ...img, mediaType: "image" as const }));
 
-    // Agent 1 gets: all images (tagged) + video thumbnails that have a valid preview
-    // Videos without thumbnails are still tracked for Agent 2 (Remotion can play them)
-    // but Agent 1 can't "see" them without a thumbnail
-    const videosWithThumbs = videoThumbnails.filter((v) => v.signedUrl);
-    const videosNoThumbs = videoThumbnails.filter((v) => !v.signedUrl);
-    if (videosNoThumbs.length > 0) {
-      console.log(`[Worker] Reel ${jobId} | ${videosNoThumbs.length} videos have no thumbnail — Agent 1 won't see them, but they'll be available for Remotion`);
+    // Agent 1 gets: all images + video frames that have a valid preview
+    // (frames with empty signedUrl are skipped for vision but their video
+    // path is still available for Remotion via ctx.images)
+    const framesWithPreview = videoThumbnails.filter((v) => v.signedUrl);
+    const uniqueVideoPathsWithFrames = new Set(framesWithPreview.map((v) => v.path));
+    const videosWithNoFrames = videoUploads.filter((v) => !uniqueVideoPathsWithFrames.has(v.path));
+    if (videosWithNoFrames.length > 0) {
+      console.log(`[Worker] Reel ${jobId} | ${videosWithNoFrames.length} videos have no frames — Agent 1 won't see them, but they'll be available for Remotion`);
     }
-    const agent1Images = [...taggedImages, ...videosWithThumbs];
+    const totalFramesSent = framesWithPreview.length;
+    console.log(`[Worker] Reel ${jobId} | Sending ${totalFramesSent} video frames from ${uniqueVideoPathsWithFrames.size} videos to Agent 1`);
+    const agent1Images = [...taggedImages, ...framesWithPreview];
     console.log(`[Worker] Reel ${jobId} | Agent1 input: ${agent1Images.length} items (${imageUploads.length} images + ${videoThumbnails.length} video thumbnails)`);
 
     const a1Costs = new CostTracker();

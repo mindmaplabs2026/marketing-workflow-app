@@ -89,15 +89,31 @@ export async function runUnderstandingAgent(
     },
   ];
 
+  const pass1IntroducedVideos = new Set<string>();
   for (const img of input.images) {
-    pass1Content.push({
-      type: "image_url",
-      image_url: { url: img.signedUrl, detail: "low" },
-    });
-    const label = img.mediaType === "video"
-      ? `[VIDEO: ${img.path} — ${img.durationSec ?? "?"}s clip]`
-      : `[${img.path}]`;
-    pass1Content.push({ type: "text", text: label });
+    if (img.mediaType === "video") {
+      // Skip video frames without a signedUrl
+      if (!img.signedUrl) continue;
+      if (!pass1IntroducedVideos.has(img.path)) {
+        pass1IntroducedVideos.add(img.path);
+        pass1Content.push({
+          type: "text",
+          text: `[VIDEO: ${img.path} — ${img.durationSec ?? "?"}s clip, frames below:]`,
+        });
+      }
+      pass1Content.push({
+        type: "image_url",
+        image_url: { url: img.signedUrl, detail: "low" },
+      });
+      const ts = (img as unknown as Record<string, unknown>)._frameTimestamp as number | undefined;
+      pass1Content.push({ type: "text", text: `[~${ts ?? "?"}s]` });
+    } else {
+      pass1Content.push({
+        type: "image_url",
+        image_url: { url: img.signedUrl, detail: "low" },
+      });
+      pass1Content.push({ type: "text", text: `[${img.path}]` });
+    }
   }
 
   const pass1Response = await withRateLimitRetry(() =>
@@ -171,16 +187,49 @@ async function deepAnalysis(
     },
   ];
 
+  // Group video frames by path so we can label them as a sequence
+  const videoFramesByPath = new Map<string, typeof images>();
   for (const img of images) {
-    userContent.push({
-      type: "image_url",
-      image_url: { url: img.signedUrl, detail: "high" },
-    });
-    // Label videos distinctly so the model knows it's a video frame, not a photo
-    const label = img.mediaType === "video"
-      ? `[VIDEO FRAME: ${img.path} — this is a THUMBNAIL from a ${img.durationSec ?? "unknown"}s video clip. Describe the VIDEO CONTENT you see (action, movement, setting). This is NOT a static photo.]`
-      : `[Image: ${img.path}]`;
-    userContent.push({ type: "text", text: label });
+    if (img.mediaType === "video") {
+      const existing = videoFramesByPath.get(img.path) ?? [];
+      existing.push(img);
+      videoFramesByPath.set(img.path, existing);
+    }
+  }
+
+  // Track which video paths we've already introduced
+  const introducedVideos = new Set<string>();
+
+  for (const img of images) {
+    if (img.mediaType === "video") {
+      const frames = videoFramesByPath.get(img.path) ?? [];
+      const frameIdx = frames.indexOf(img);
+      const timestamp = (img as unknown as Record<string, unknown>)._frameTimestamp as number | undefined;
+
+      // Introduce the video on its first frame
+      if (!introducedVideos.has(img.path)) {
+        introducedVideos.add(img.path);
+        userContent.push({
+          type: "text",
+          text: `\n── VIDEO: ${img.path} (${img.durationSec ?? "?"}s clip, ${frames.length} frames sampled every 2s) ──\nAnalyze ALL frames below to understand what happens throughout this video. Describe the action, movement, people, and setting. Suggest the BEST segment (start/end seconds) for a reel.`,
+        });
+      }
+
+      userContent.push({
+        type: "image_url",
+        image_url: { url: img.signedUrl, detail: "high" },
+      });
+      userContent.push({
+        type: "text",
+        text: `[Frame ${frameIdx + 1}/${frames.length} at ~${timestamp ?? "?"}s]`,
+      });
+    } else {
+      userContent.push({
+        type: "image_url",
+        image_url: { url: img.signedUrl, detail: "high" },
+      });
+      userContent.push({ type: "text", text: `[Image: ${img.path}]` });
+    }
   }
 
   const response = await withRateLimitRetry(() => openai.chat.completions.create({
