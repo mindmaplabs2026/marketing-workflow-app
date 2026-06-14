@@ -442,48 +442,78 @@ export async function runReelPipeline(
       const thumbDir = pathMod.join(osMod.tmpdir(), "reel-thumbs", `${process.pid}-${Date.now()}`);
       await fsPromises.mkdir(thumbDir, { recursive: true });
 
-      for (const vid of videoUploads) {
+      for (let vi = 0; vi < videoUploads.length; vi++) {
+        const vid = videoUploads[vi];
+        const vidFilename = vid.path.split("/").pop() ?? `video${vi}.mp4`;
+        // Use a simple indexed name to avoid special characters in paths
+        const safeBase = `v${vi}`;
+        const vidPath = pathMod.join(thumbDir, `${safeBase}.mp4`);
+        const thumbPath = pathMod.join(thumbDir, `${safeBase}_thumb.jpg`);
+
         try {
           // Download the video to a temp file
           const res = await fetch(vid.signedUrl);
-          if (!res.ok) continue;
+          if (!res.ok) {
+            console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: download failed (${res.status})`);
+            continue;
+          }
           const vidBuffer = Buffer.from(await res.arrayBuffer());
-          const vidFilename = vid.path.split("/").pop() ?? "video.mp4";
-          const vidPath = pathMod.join(thumbDir, `vid-${vidFilename}`);
           await fsPromises.writeFile(vidPath, vidBuffer);
+          console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: downloaded ${(vidBuffer.length / 1024).toFixed(0)} KB`);
 
           // Get video duration with ffprobe
           let durationSec = 0;
           try {
-            const durationStr = await new Promise<string>((resolve, reject) => {
+            const probeResult = await new Promise<{ out: string; err: string }>((resolve, reject) => {
               const child = spawnProc("ffprobe", [
                 "-v", "error", "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1", vidPath,
               ], { stdio: ["ignore", "pipe", "pipe"] });
-              let out = "";
+              let out = "", err = "";
               child.stdout.on("data", (d) => (out += d.toString()));
-              child.stderr.on("data", () => {});
-              child.on("close", (code) => code === 0 ? resolve(out.trim()) : reject(new Error(`ffprobe exit ${code}`)));
+              child.stderr.on("data", (d) => (err += d.toString()));
+              child.on("close", (code) => code === 0 ? resolve({ out: out.trim(), err }) : reject(new Error(`ffprobe exit ${code}: ${err.slice(0, 200)}`)));
               child.on("error", reject);
               setTimeout(() => { child.kill(); reject(new Error("ffprobe timeout")); }, 10000);
             });
-            durationSec = Math.round(parseFloat(durationStr) * 10) / 10;
-          } catch {
-            console.warn(`[Worker] Reel ${jobId} | Could not get duration for ${vidFilename}`);
+            durationSec = Math.round(parseFloat(probeResult.out) * 10) / 10;
+            console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: duration=${durationSec}s`);
+          } catch (probeErr) {
+            console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: ffprobe failed — ${probeErr instanceof Error ? probeErr.message : probeErr}`);
           }
 
-          // Extract 2 keyframes from the video (one at 1/3 and 2/3 through)
-          const thumbPath = pathMod.join(thumbDir, `thumb-${vidFilename}.jpg`);
-          await new Promise<void>((resolve, reject) => {
+          // Extract a single keyframe (midpoint of the video)
+          const seekTo = durationSec > 2 ? Math.floor(durationSec / 2) : 0;
+          const ffmpegResult = await new Promise<{ code: number; err: string }>((resolve) => {
             const child = spawnProc("ffmpeg", [
-              "-i", vidPath, "-vf", "fps=1/3", "-frames:v", "2", "-q:v", "5", "-y", thumbPath,
+              "-ss", String(seekTo),
+              "-i", vidPath,
+              "-frames:v", "1",
+              "-q:v", "5",
+              "-y", thumbPath,
             ], { stdio: ["ignore", "pipe", "pipe"] });
-            child.on("close", (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg thumb exit ${code}`)));
-            child.on("error", reject);
+            let err = "";
             child.stdout.on("data", () => {});
-            child.stderr.on("data", () => {});
-            setTimeout(() => { child.kill(); reject(new Error("ffmpeg thumb timeout")); }, 15000);
+            child.stderr.on("data", (d) => (err += d.toString()));
+            child.on("close", (code) => resolve({ code: code ?? 1, err }));
+            child.on("error", (e) => resolve({ code: 1, err: e.message }));
+            setTimeout(() => { child.kill(); resolve({ code: 1, err: "timeout" }); }, 15000);
           });
+
+          if (ffmpegResult.code !== 0) {
+            console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: ffmpeg thumbnail failed (exit ${ffmpegResult.code}): ${ffmpegResult.err.slice(0, 200)}`);
+            // Even if thumbnail fails, still include the video in the pipeline
+            // (Agent 1 won't see a preview, but Agent 2 can still assign it to a scene)
+            videoThumbnails.push({
+              path: vid.path,
+              signedUrl: "", // no thumbnail available
+              mimeType: "video/mp4",
+              fileSize: vidBuffer.length,
+              mediaType: "video",
+              durationSec: durationSec || undefined,
+            });
+            continue;
+          }
 
           // Read the thumbnail and create a data URL for Agent 1
           const thumbExists = await fsPromises.stat(thumbPath).then(() => true).catch(() => false);
@@ -496,12 +526,12 @@ export async function runReelPipeline(
               mimeType: "image/jpeg",
               fileSize: thumbBuffer.length,
               mediaType: "video",
-              durationSec,
+              durationSec: durationSec || undefined,
             });
-            console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: ${durationSec}s, thumbnail extracted`);
+            console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: ${durationSec}s, thumbnail OK`);
           }
         } catch (err) {
-          console.warn(`[Worker] Reel ${jobId} | Failed to process video ${vid.path.split("/").pop()}: ${err instanceof Error ? err.message : err}`);
+          console.warn(`[Worker] Reel ${jobId} | Failed to process video ${vidFilename}: ${err instanceof Error ? err.message : err}`);
         }
       }
 
@@ -512,8 +542,15 @@ export async function runReelPipeline(
     // Tag image uploads with mediaType for consistency
     const taggedImages = imageUploads.map((img) => ({ ...img, mediaType: "image" as const }));
 
-    // Agent 1 gets: all images (tagged) + video thumbnails (tagged with duration)
-    const agent1Images = [...taggedImages, ...videoThumbnails];
+    // Agent 1 gets: all images (tagged) + video thumbnails that have a valid preview
+    // Videos without thumbnails are still tracked for Agent 2 (Remotion can play them)
+    // but Agent 1 can't "see" them without a thumbnail
+    const videosWithThumbs = videoThumbnails.filter((v) => v.signedUrl);
+    const videosNoThumbs = videoThumbnails.filter((v) => !v.signedUrl);
+    if (videosNoThumbs.length > 0) {
+      console.log(`[Worker] Reel ${jobId} | ${videosNoThumbs.length} videos have no thumbnail — Agent 1 won't see them, but they'll be available for Remotion`);
+    }
+    const agent1Images = [...taggedImages, ...videosWithThumbs];
     console.log(`[Worker] Reel ${jobId} | Agent1 input: ${agent1Images.length} items (${imageUploads.length} images + ${videoThumbnails.length} video thumbnails)`);
 
     const a1Costs = new CostTracker();
