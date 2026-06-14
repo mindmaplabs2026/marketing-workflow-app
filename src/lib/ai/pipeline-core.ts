@@ -423,14 +423,78 @@ export async function runReelPipeline(
       .update({ status: "understanding", started_at: new Date().toISOString() })
       .eq("id", jobId);
 
-    const ctx = await fetchContext(requestId);
-    console.log(`[Worker] Reel ${jobId} | ${ctx.images.length} uploads, ${ctx.brandAssets.length} brand assets, title="${ctx.title}"`);
+    const ctx = await fetchContext(requestId, { includeVideos: true });
+
+    // Separate images from videos for Agent 1 processing
+    const imageUploads = ctx.images.filter((img) => !img.mimeType?.startsWith("video/"));
+    const videoUploads = ctx.images.filter((img) => img.mimeType?.startsWith("video/"));
+    console.log(`[Worker] Reel ${jobId} | ${ctx.images.length} uploads (${imageUploads.length} images, ${videoUploads.length} videos), ${ctx.brandAssets.length} brand assets, title="${ctx.title}"`);
+
+    // For videos, extract thumbnail frames so Agent 1 can "see" them.
+    // Agent 1's vision API only accepts images, not video files.
+    const videoThumbnails: UploadedImage[] = [];
+    if (videoUploads.length > 0) {
+      const fsPromises = await import("node:fs").then((m) => m.promises);
+      const pathMod = await import("node:path");
+      const osMod = await import("node:os");
+      const { spawn: spawnProc } = await import("node:child_process");
+
+      const thumbDir = pathMod.join(osMod.tmpdir(), "reel-thumbs", `${process.pid}-${Date.now()}`);
+      await fsPromises.mkdir(thumbDir, { recursive: true });
+
+      for (const vid of videoUploads) {
+        try {
+          // Download the video to a temp file
+          const res = await fetch(vid.signedUrl);
+          if (!res.ok) continue;
+          const vidBuffer = Buffer.from(await res.arrayBuffer());
+          const vidPath = pathMod.join(thumbDir, `vid-${vid.path.split("/").pop()}`);
+          await fsPromises.writeFile(vidPath, vidBuffer);
+
+          // Extract 2 keyframes from the video
+          const thumbPath = pathMod.join(thumbDir, `thumb-${vid.path.split("/").pop()}.jpg`);
+          await new Promise<void>((resolve, reject) => {
+            const child = spawnProc("ffmpeg", [
+              "-i", vidPath, "-vf", "fps=1/3", "-frames:v", "2", "-q:v", "5", "-y", thumbPath,
+            ], { stdio: ["ignore", "pipe", "pipe"] });
+            child.on("close", (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg thumb exit ${code}`)));
+            child.on("error", reject);
+            child.stdout.on("data", () => {});
+            child.stderr.on("data", () => {});
+            setTimeout(() => { child.kill(); reject(new Error("ffmpeg thumb timeout")); }, 15000);
+          });
+
+          // Read the thumbnail and create a data URL for Agent 1
+          const thumbExists = await fsPromises.stat(thumbPath).then(() => true).catch(() => false);
+          if (thumbExists) {
+            const thumbBuffer = await fsPromises.readFile(thumbPath);
+            const dataUrl = `data:image/jpeg;base64,${thumbBuffer.toString("base64")}`;
+            videoThumbnails.push({
+              path: vid.path,
+              signedUrl: dataUrl,
+              mimeType: "image/jpeg",
+              fileSize: thumbBuffer.length,
+            });
+            console.log(`[Worker] Reel ${jobId} | Extracted thumbnail for ${vid.path.split("/").pop()}`);
+          }
+        } catch (err) {
+          console.warn(`[Worker] Reel ${jobId} | Failed to extract thumbnail for ${vid.path.split("/").pop()}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+
+      // Clean up temp video files (keep thumbnails until Agent 1 is done)
+      await fsPromises.rm(thumbDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    // Agent 1 gets: all images + video thumbnails (for vision analysis)
+    const agent1Images = [...imageUploads, ...videoThumbnails];
+    console.log(`[Worker] Reel ${jobId} | Agent1 input: ${agent1Images.length} items (${imageUploads.length} images + ${videoThumbnails.length} video thumbnails)`);
 
     const a1Costs = new CostTracker();
     const understanding = await runUnderstandingAgent({
       title: ctx.title,
       description: ctx.description,
-      images: ctx.images,
+      images: agent1Images,
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       schoolGuidelines: ctx.schoolGuidelines,
     }, a1Costs);

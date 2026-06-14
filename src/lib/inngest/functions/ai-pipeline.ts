@@ -31,7 +31,7 @@ type PipelineData = {
   posterType: "single" | "carousel";
 };
 
-export async function fetchContext(requestId: string) {
+export async function fetchContext(requestId: string, opts?: { includeVideos?: boolean }) {
   const admin = createAdminClient();
 
   const { data: request, error: reqErr } = await admin
@@ -54,8 +54,10 @@ export async function fetchContext(requestId: string) {
 
   const images: UploadedImage[] = [];
   for (const u of uploads ?? []) {
-    // Only pass images to the AI agents — skip videos, PDFs, etc.
-    if (u.mime_type && !u.mime_type.startsWith("image/")) continue;
+    const isImage = !u.mime_type || u.mime_type.startsWith("image/");
+    const isVideo = u.mime_type?.startsWith("video/");
+    // Include images always; include videos only when opts.includeVideos is set
+    if (!isImage && !(isVideo && opts?.includeVideos)) continue;
     const { data: signedData } = await admin.storage
       .from("request-uploads")
       .createSignedUrl(u.storage_path, 3600);
