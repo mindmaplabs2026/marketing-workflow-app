@@ -6,7 +6,8 @@ import { triggerAiGeneration, triggerLocalAiGeneration, triggerLocalReelGenerati
 const REEL_LENGTH_OPTIONS = [
   { value: 60, label: "Short (up to 1 min)" },
   { value: 120, label: "Medium (up to 2 min)" },
-  { value: 180, label: "Full (use all content, max 3 min)" },
+  { value: 180, label: "Long (up to 3 min)" },
+  { value: 300, label: "Full (use all content, max 5 min)" },
 ];
 
 export function AiGenerateButton({ requestId }: { requestId: string }) {

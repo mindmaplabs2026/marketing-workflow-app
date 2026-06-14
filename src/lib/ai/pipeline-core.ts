@@ -666,7 +666,7 @@ export async function runReelPipeline(
     const imageDurationSec = curatedImages.length * IMAGE_SCENE_SEC;
 
     const naturalDuration = TITLE_CLOSING_SEC + videoDurationSec + imageDurationSec;
-    const effectiveDuration = Math.min(naturalDuration, durationCapSec, 180); // hard cap 180s
+    const effectiveDuration = Math.min(naturalDuration, durationCapSec, 300); // hard cap 5 min
 
     console.log(`[Worker] Reel ${jobId} | Duration calc: ${curatedVideos.length} videos (${Math.round(videoDurationSec)}s) + ${curatedImages.length} images (${imageDurationSec}s) + ${TITLE_CLOSING_SEC}s chrome = ${Math.round(naturalDuration)}s natural`);
     console.log(`[Worker] Reel ${jobId} | Effective duration: ${effectiveDuration}s (cap: ${durationCapSec}s, natural: ${Math.round(naturalDuration)}s)`);
