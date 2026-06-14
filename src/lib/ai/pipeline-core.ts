@@ -577,6 +577,54 @@ export async function runReelPipeline(
 
     console.log(`[Worker] Reel ${jobId} | Agent1: theme="${understanding.theme}", ${understanding.curatedImages.length} curated`);
 
+    // PROGRAMMATIC VIDEO INJECTION: Agent 1 often drops videos from the curated
+    // list because still frames look worse than photos. For reels, videos are
+    // essential. Force-add any missing videos into the curated list.
+    const videoPathsInUpload = new Set(videoUploads.map((v) => v.path));
+    const curatedVideoPaths = new Set(
+      understanding.curatedImages
+        .filter((c) => c.mediaType === "video")
+        .map((c) => c.path),
+    );
+
+    // Also check by filename match (Agent 1 might use slightly different paths)
+    const curatedPathFilenames = new Set(
+      understanding.curatedImages.map((c) => c.path.split("/").pop()),
+    );
+
+    // Build video metadata map from the thumbnail extraction step
+    const videoMeta = new Map<string, { durationSec?: number }>();
+    for (const vt of videoThumbnails) {
+      if (vt.mediaType === "video" && !videoMeta.has(vt.path)) {
+        videoMeta.set(vt.path, { durationSec: vt.durationSec });
+      }
+    }
+
+    let injectedCount = 0;
+    for (const vid of videoUploads) {
+      const filename = vid.path.split("/").pop() ?? "";
+      const alreadyCurated = curatedVideoPaths.has(vid.path) || curatedPathFilenames.has(filename);
+      if (!alreadyCurated) {
+        const meta = videoMeta.get(vid.path);
+        understanding.curatedImages.push({
+          path: vid.path,
+          relevanceScore: 70, // reasonable default
+          description: `Video clip (${meta?.durationSec ?? "?"}s) — injected programmatically because Agent 1 dropped it`,
+          quality: "medium",
+          mediaType: "video",
+          durationSec: meta?.durationSec,
+        });
+        injectedCount++;
+      }
+    }
+
+    if (injectedCount > 0) {
+      console.log(`[Worker] Reel ${jobId} | Injected ${injectedCount} videos into curated list (Agent 1 dropped them). Now ${understanding.curatedImages.length} curated total.`);
+    } else {
+      const curatedVideoCount = understanding.curatedImages.filter((c) => c.mediaType === "video").length;
+      console.log(`[Worker] Reel ${jobId} | Agent 1 included ${curatedVideoCount}/${videoUploads.length} videos in curated list`);
+    }
+
     await admin
       .from("ai_generation_jobs")
       .update({ status: "creative", agent1_output: understanding as unknown as Record<string, unknown> })
