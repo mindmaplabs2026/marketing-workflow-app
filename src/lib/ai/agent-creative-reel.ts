@@ -159,6 +159,16 @@ MEDIA ASSIGNMENT RULES:
 - For IMAGES: specify Ken Burns direction (zoom in, pan left, etc.). Images typically get 3-5s per scene.
 - focusX/focusY are 0-100 percentage values for the focal point
 
+TEXT OVERLAY PLACEMENT (CRITICAL — avoid covering faces and subjects):
+- The textOverlay position MUST be chosen based on focusY (where the subject is):
+  - If focusY <= 40 (subject is in the TOP of the image) → position: "bottom"
+  - If focusY >= 60 (subject is in the BOTTOM of the image) → position: "top"
+  - If focusY is 40-60 (subject is centered) → position: "top" or "bottom", NOT "center"
+- NEVER place text at "center" when the photo has people — it WILL cover faces
+- For full-bleed styles: text always goes in the opposite third from the focal point
+- For framed styles: text goes OUTSIDE the frame (below or above the card), not overlaid
+- Keep text overlays SHORT (3-6 words max) — long text blocks cover more of the image
+
 VERIFY YOUR WORK:
 1. Count videos in the curated list. Count videos in your scenes. They must match.
 2. Every scene with a .mp4 or .mov file MUST have mediaType: "video", trimStartSec, and trimEndSec.

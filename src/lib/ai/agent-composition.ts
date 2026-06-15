@@ -264,7 +264,7 @@ Title Card (${script.titleCard.durationSec}s):
 ${script.scenes.map((s) => {
   let line = `Scene ${s.index} (${s.durationSec}s, ${s.mediaType}): media/${path.basename(s.mediaPath)}`;
   if (s.trimStartSec != null) line += ` [trim ${s.trimStartSec}-${s.trimEndSec}s]`;
-  line += ` — focus: ${s.focusX}%,${s.focusY}%`;
+  line += ` — focus: ${s.focusX}%,${s.focusY}% (subject is ${s.focusY <= 40 ? "TOP" : s.focusY >= 60 ? "BOTTOM" : "CENTER"} → place text ${s.focusY <= 40 ? "at BOTTOM" : "at TOP"})`;
   if (s.kenBurns) line += ` — Ken Burns: ${s.kenBurns.direction} (${s.kenBurns.intensity})`;
   if (s.textOverlay) line += `\n  Text: "${s.textOverlay.text}" at ${s.textOverlay.position} (${s.textOverlay.style})`;
   line += `\n  Transition out: ${s.transition}`;
@@ -308,8 +308,17 @@ ${examples.join("\n\n")}
    Use trimBefore={Math.round(startSec * 30)} and trimAfter={Math.round(endSec * 30)} for trimming.
    Image files (.jpg, .png) use <Img> from "remotion". Video files (.mp4, .mov) use <Video> from "@remotion/media".
    NEVER use <Img> for a .mp4 file. NEVER use <Video> for a .jpg file.
-9. Load Google Fonts via @remotion/google-fonts (e.g., import { loadFont } from "@remotion/google-fonts/Poppins")
-10. Calculate REEL_DURATION precisely from your timing constants
+10. Load Google Fonts via @remotion/google-fonts (e.g., import { loadFont } from "@remotion/google-fonts/Poppins")
+11. Calculate REEL_DURATION precisely from your timing constants
+12. TEXT PLACEMENT — NEVER cover the subject:
+   - Each scene has focusX/focusY values (0-100) indicating where the subject is.
+   - If focusY <= 40 (subject at top): place text in the BOTTOM 20% of the frame.
+   - If focusY >= 60 (subject at bottom): place text in the TOP 20% of the frame.
+   - If focusY is 40-60 (centered): place text at top or bottom, NEVER center.
+   - For full-bleed scenes: use a gradient overlay (transparent→dark) on the side WHERE TEXT IS,
+     to ensure readability without covering the subject on the opposite side.
+   - For framed scenes: place text OUTSIDE the photo frame (above or below the card).
+   - Text should be SHORT (3-6 words). Long text blocks = more photo coverage = bad.
 
 OUTPUT FORMAT:
 Write the COMPLETE Reel.tsx file inside a single \`\`\`tsx code fence.
