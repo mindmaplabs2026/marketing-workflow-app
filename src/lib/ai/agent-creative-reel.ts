@@ -96,29 +96,38 @@ CREATIVE PROCESS:
    - Add 4s for title card + 4s for closing card.
    - Total should not exceed 180 seconds regardless of teacher's request.
    - If the calculated max is less than the teacher's request, use the calculated max.
-3. Design 3 DIFFERENT visual registers for the reel. Choose from these proven styles:
-   - Scrapbook/notebook: warm, handwritten feel, photos as polaroids taped on a notebook page
-   - Magazine editorial: photos in rounded white cards, serif typography, glossy yearbook feel
-   - Film strip: photos inside sprocket-hole film frames, dark background, retro cinema
-   - Postcard stack: photos as postcards dropped onto a wooden table, stamps and handwritten notes
-   - Minimal floating card: single photo in a shadowed card, dark background, huge negative space
-   - Split screen: clean geometric frames (2-up or 3-up grids), modern sans-serif
-   - College bulletin: clean cards, navy/gold header band, formal event recap
-   - Kinetic typography: bold word stamps synced to beats, high energy, hard cuts
-   - iPhone POV: handheld camera simulation, notification cards as captions
+3. Design 3 DIFFERENT visual registers for the reel.
+   You MUST pick 3 DIFFERENT styles from this list. Do NOT pick the same style twice.
+   Do NOT default to scrapbook/polaroid — that style is overused. Pick others.
 
-   Full-bleed styles (photo fills the entire screen):
-   - Bold overlay: full-bleed photo/video with large text overlaid, gradient darken at bottom
-   - Cinematic letterbox: full-bleed with black bars top/bottom (21:9 feel), minimal text
-   - Story slides: full-bleed with Instagram-story-style text stickers, emoji, color blocks
+   FRAMED styles (photo sits inside a frame with breathing room):
+   A. Magazine editorial: photos in rounded white cards, serif typography, glossy yearbook feel
+   B. Film strip: photos inside sprocket-hole film frames, dark background, retro cinema
+   C. Postcard stack: photos as postcards dropped onto a wooden table, stamps and handwritten notes
+   D. Minimal floating card: single photo in a shadowed card, dark background, huge negative space
+   E. Split screen: clean geometric frames (2-up or 3-up grids), modern sans-serif
+   F. Scrapbook/notebook: warm, handwritten feel, photos as polaroids taped on a notebook page
+   G. College bulletin: clean cards, navy/gold header band, formal event recap
+
+   FULL-BLEED styles (photo fills the entire screen):
+   H. Bold overlay: full-bleed photo/video with large text overlaid, gradient darken at bottom
+   I. Cinematic letterbox: full-bleed with black bars top/bottom (21:9 feel), minimal text
+   J. Story slides: full-bleed with Instagram-story-style text stickers, emoji, color blocks
+   K. Kinetic typography: bold word stamps synced to beats, high energy, hard cuts
+   L. iPhone POV: handheld camera simulation, notification cards as captions
 
    IMPORTANT: When using full-bleed styles, ALWAYS set objectPosition using the focusX/focusY
    values from the curated list so the subject stays centered even when cropped to 9:16.
    When using framed styles (cards, strips, grids), this is less critical since the frame
    preserves the photo's natural composition.
 
-   Aim for VARIETY across the 3 variations — mix framed and full-bleed styles. Do NOT
-   produce 3 variations that all look the same. Each should feel distinctly different.
+   VARIETY RULES (MANDATORY):
+   - Your 3 variations MUST use 3 DIFFERENT letter codes from the list above (e.g., A, H, D — not A, A, F)
+   - At least 1 variation MUST be a framed style (A-G)
+   - At least 1 variation MUST be a full-bleed style (H-L)
+   - The 3rd variation can be either — but it MUST be different from the other two
+   - Each variation should feel DISTINCTLY different in look and mood
+   - State which letter code you chose in the "direction" field (e.g., "B — Film Strip Chronicle")
 4. For each variation, sequence the scenes chronologically or thematically.
 5. Assign transitions that match the mood:
    - "fade" for contemplative, slow content
