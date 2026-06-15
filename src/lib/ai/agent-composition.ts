@@ -358,6 +358,9 @@ async function pickRelevantExamples(
     ["postcard-stack.md", scoreMatch(lower, ["postcard", "travel", "trip", "stamp", "mail", "diary", "wooden", "table", "memories", "farewell"])],
     ["split-screen.md", scoreMatch(lower, ["split", "grid", "geometric", "modern", "minimal", "comparison", "side", "triptych", "gallery"])],
     ["minimal-card.md", scoreMatch(lower, ["minimal", "floating", "card", "clean", "apple", "spotlight", "gallery", "showcase", "negative", "space"])],
+    ["bold-overlay.md", scoreMatch(lower, ["bold", "overlay", "full", "bleed", "gradient", "impact", "motivational", "highlight", "announcement"])],
+    ["cinematic-letterbox.md", scoreMatch(lower, ["cinematic", "letterbox", "widescreen", "movie", "trailer", "atmospheric", "premium", "campus", "tour"])],
+    ["story-slides.md", scoreMatch(lower, ["story", "stories", "instagram", "sticker", "casual", "fun", "gen-z", "colorful", "swipe", "playful"])],
   ];
 
   // Sort by score descending, pick top 2

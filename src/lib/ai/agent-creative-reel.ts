@@ -107,11 +107,18 @@ CREATIVE PROCESS:
    - Kinetic typography: bold word stamps synced to beats, high energy, hard cuts
    - iPhone POV: handheld camera simulation, notification cards as captions
 
-   CRITICAL: Photos and videos must ALWAYS sit inside FRAMES (cards, borders, film windows).
-   NEVER use full-bleed photos that stretch to fill the entire 1080x1920 canvas — the subject
-   gets cropped and the focal point is lost. Always leave breathing room around the media.
+   Full-bleed styles (photo fills the entire screen):
+   - Bold overlay: full-bleed photo/video with large text overlaid, gradient darken at bottom
+   - Cinematic letterbox: full-bleed with black bars top/bottom (21:9 feel), minimal text
+   - Story slides: full-bleed with Instagram-story-style text stickers, emoji, color blocks
 
-   You can invent new visual registers too, but they MUST use framed media, not full-bleed.
+   IMPORTANT: When using full-bleed styles, ALWAYS set objectPosition using the focusX/focusY
+   values from the curated list so the subject stays centered even when cropped to 9:16.
+   When using framed styles (cards, strips, grids), this is less critical since the frame
+   preserves the photo's natural composition.
+
+   Aim for VARIETY across the 3 variations — mix framed and full-bleed styles. Do NOT
+   produce 3 variations that all look the same. Each should feel distinctly different.
 4. For each variation, sequence the scenes chronologically or thematically.
 5. Assign transitions that match the mood:
    - "fade" for contemplative, slow content
