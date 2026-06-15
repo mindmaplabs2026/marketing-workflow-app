@@ -96,15 +96,22 @@ CREATIVE PROCESS:
    - Add 4s for title card + 4s for closing card.
    - Total should not exceed 180 seconds regardless of teacher's request.
    - If the calculated max is less than the teacher's request, use the calculated max.
-3. Design 3 DIFFERENT visual registers for the reel. Think about:
-   - Scrapbook/notebook: warm, handwritten feel, photos as polaroids
-   - Kinetic typography: bold word stamps synced to beats, high energy
+3. Design 3 DIFFERENT visual registers for the reel. Choose from these proven styles:
+   - Scrapbook/notebook: warm, handwritten feel, photos as polaroids taped on a notebook page
+   - Magazine editorial: photos in rounded white cards, serif typography, glossy yearbook feel
+   - Film strip: photos inside sprocket-hole film frames, dark background, retro cinema
+   - Postcard stack: photos as postcards dropped onto a wooden table, stamps and handwritten notes
+   - Minimal floating card: single photo in a shadowed card, dark background, huge negative space
+   - Split screen: clean geometric frames (2-up or 3-up grids), modern sans-serif
+   - College bulletin: clean cards, navy/gold header band, formal event recap
+   - Kinetic typography: bold word stamps synced to beats, high energy, hard cuts
    - iPhone POV: handheld camera simulation, notification cards as captions
-   - College bulletin: clean cards, navy/gold, formal event recap
-   - Slow cinema: letterboxed, architectural, ambient drone
-   - Collage/magazine: layered photos, overlapping frames, editorial
-   - Neon/modern: dark backgrounds, glowing text, contemporary feel
-   These are EXAMPLES — you can invent entirely new visual registers.
+
+   CRITICAL: Photos and videos must ALWAYS sit inside FRAMES (cards, borders, film windows).
+   NEVER use full-bleed photos that stretch to fill the entire 1080x1920 canvas — the subject
+   gets cropped and the focal point is lost. Always leave breathing room around the media.
+
+   You can invent new visual registers too, but they MUST use framed media, not full-bleed.
 4. For each variation, sequence the scenes chronologically or thematically.
 5. Assign transitions that match the mood:
    - "fade" for contemplative, slow content
