@@ -29,6 +29,7 @@ import { CommentThread } from "@/components/comment-thread";
 import { ProgressTracker } from "@/components/progress-tracker";
 import { BackLink } from "@/components/back-link";
 import { SubmitButton } from "@/components/submit-button";
+import { ToastForm } from "@/components/toast-form";
 import { AssetDownloadGrid, type AssetItem } from "@/components/asset-download-grid";
 import { AiGenerationStatus } from "./ai-generation-status";
 import { AiVariations } from "./ai-variations";
@@ -451,7 +452,7 @@ export default async function RequestDetailPage({
       <ProgressTracker status={req.status} awaitingPublish={awaitingPublish} />
 
       {canReassign && designerOptions.length > 0 && (
-        <form action={reassignDesigner} className="flex flex-wrap items-center gap-2">
+        <ToastForm action={reassignDesigner} success="Designer reassigned" className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="request_id" value={req.id} />
           <span className="text-xs text-zinc-500">Reassign to:</span>
           <select
@@ -471,7 +472,7 @@ export default async function RequestDetailPage({
           >
             Reassign
           </button>
-        </form>
+        </ToastForm>
       )}
 
       {(req.request_type || req.due_date) && (
@@ -725,7 +726,7 @@ export default async function RequestDetailPage({
           </Link>
         )}
         {canSubmit && (
-          <form action={submitDraft}>
+          <ToastForm action={submitDraft} success="Request submitted for approval">
             <input type="hidden" name="id" value={req.id} />
             <SubmitButton
               className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
@@ -733,10 +734,10 @@ export default async function RequestDetailPage({
             >
               Submit for approval
             </SubmitButton>
-          </form>
+          </ToastForm>
         )}
         {canApprove && (
-          <form action={approveRequest}>
+          <ToastForm action={approveRequest} success="Request approved">
             <input type="hidden" name="id" value={req.id} />
             <SubmitButton
               className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
@@ -744,10 +745,10 @@ export default async function RequestDetailPage({
             >
               Approve
             </SubmitButton>
-          </form>
+          </ToastForm>
         )}
         {canSendBack && (
-          <form action={sendBackForChanges} className="w-full">
+          <ToastForm action={sendBackForChanges} success="Sent back for changes" className="w-full">
             <input type="hidden" name="id" value={req.id} />
             <textarea
               name="feedback"
@@ -761,10 +762,10 @@ export default async function RequestDetailPage({
             >
               Send back for changes
             </SubmitButton>
-          </form>
+          </ToastForm>
         )}
         {canPickUp && (
-          <form action={pickUpRequest}>
+          <ToastForm action={pickUpRequest} success="Request picked up">
             <input type="hidden" name="id" value={req.id} />
             <SubmitButton
               className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
@@ -772,10 +773,10 @@ export default async function RequestDetailPage({
             >
               Pick this up
             </SubmitButton>
-          </form>
+          </ToastForm>
         )}
         {canApproveDesign && (
-          <form action={approveDesign}>
+          <ToastForm action={approveDesign} success="Design approved">
             <input type="hidden" name="id" value={req.id} />
             <SubmitButton
               className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
@@ -783,10 +784,10 @@ export default async function RequestDetailPage({
             >
               Approve design
             </SubmitButton>
-          </form>
+          </ToastForm>
         )}
         {canRequestDesignChanges && (
-          <form action={requestDesignChanges} className="w-full">
+          <ToastForm action={requestDesignChanges} success="Change request sent to the designer" className="w-full">
             <input type="hidden" name="id" value={req.id} />
             <textarea
               name="feedback"
@@ -800,7 +801,7 @@ export default async function RequestDetailPage({
             >
               Request changes
             </SubmitButton>
-          </form>
+          </ToastForm>
         )}
         {canArchive && (
           <ConfirmForm

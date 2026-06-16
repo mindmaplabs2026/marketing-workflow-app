@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { attachUpload, createRequest } from "../actions";
+import { toast } from "sonner";
 
 type School = { id: string; name: string };
 
@@ -54,7 +55,9 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
     try {
       const created = await createRequest({}, formData);
       if (created.error || !created.requestId) {
-        setError(created.error ?? "Could not create request.");
+        const m = created.error ?? "Could not create request.";
+        setError(m);
+        toast.error(m);
         setBusy(false);
         return;
       }
@@ -90,9 +93,12 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
         }
       }
 
+      toast.success("Request created");
       router.push(`/requests/${requestId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      const m = err instanceof Error ? err.message : "Something went wrong.";
+      setError(m);
+      toast.error(m);
       setBusy(false);
       setProgress(null);
     }

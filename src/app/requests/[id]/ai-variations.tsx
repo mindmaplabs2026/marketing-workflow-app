@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { acceptAiVariation } from "../actions";
+import { toast } from "sonner";
 
 type Variation = {
   id: string;
@@ -74,8 +75,10 @@ export function AiVariations({
       fd.set("variation_id", variationId);
       fd.set("request_id", requestId);
       await acceptAiVariation(fd);
+      toast.success("Design accepted");
       router.refresh();
     } catch {
+      toast.error("Couldn't accept the design. Please try again.");
       setAccepting(null);
     }
   }

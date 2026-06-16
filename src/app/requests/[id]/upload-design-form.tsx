@@ -4,6 +4,7 @@ import { useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { attachDesign } from "../actions";
+import { toast } from "sonner";
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
@@ -84,7 +85,9 @@ export function UploadDesignForm({
           upsert: false,
         });
       if (upErr) {
-        setError(`Couldn't upload ${file.name}: ${upErr.message}`);
+        const m = `Couldn't upload ${file.name}: ${upErr.message}`;
+        setError(m);
+        toast.error(m);
         setBusy(false);
         setProgress(null);
         router.refresh();
@@ -102,6 +105,7 @@ export function UploadDesignForm({
     setProgress(null);
     setNotes("");
     clearStaged();
+    toast.success("Design uploaded for review");
     router.refresh();
   }
 

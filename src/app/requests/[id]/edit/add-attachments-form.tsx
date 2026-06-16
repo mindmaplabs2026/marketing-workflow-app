@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { attachUpload } from "../../actions";
+import { toast } from "sonner";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -50,7 +51,9 @@ export function AddAttachmentsForm({
           upsert: false,
         });
       if (upErr) {
-        setError(`Couldn't upload ${file.name}: ${upErr.message}`);
+        const m = `Couldn't upload ${file.name}: ${upErr.message}`;
+        setError(m);
+        toast.error(m);
         setBusy(false);
         setProgress(null);
         router.refresh();
@@ -67,6 +70,7 @@ export function AddAttachmentsForm({
 
     setBusy(false);
     setProgress(null);
+    toast.success("Attachments uploaded");
     router.refresh();
   }
 

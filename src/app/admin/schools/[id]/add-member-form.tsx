@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { addMember, type MemberActionState } from "./actions";
 
 const initialState: MemberActionState = {};
@@ -22,8 +23,15 @@ export function AddMemberForm({
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (state.success) formRef.current?.reset();
+    if (state.success) {
+      formRef.current?.reset();
+      toast.success("Member added");
+    }
   }, [state.success]);
+
+  useEffect(() => {
+    if (state.error) toast.error(state.error);
+  }, [state.error]);
 
   if (candidates.length === 0) {
     return (

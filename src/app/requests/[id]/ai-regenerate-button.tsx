@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { regenerateAi } from "../actions";
 
 const REEL_LENGTH_OPTIONS = [
@@ -63,6 +64,7 @@ export function AiRegenerateButton({
     );
     if (result.error) {
       setError(result.error);
+      toast.error(result.error);
       setBusy(false);
     } else {
       window.location.reload();

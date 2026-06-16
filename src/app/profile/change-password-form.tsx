@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { changePassword, type ChangePasswordState } from "./actions";
 
 const initialState: ChangePasswordState = {};
@@ -15,8 +16,13 @@ export function ChangePasswordForm() {
   useEffect(() => {
     if (state.success) {
       formRef.current?.reset();
+      toast.success("Password updated");
     }
   }, [state.success]);
+
+  useEffect(() => {
+    if (state.error) toast.error(state.error);
+  }, [state.error]);
 
   return (
     <form ref={formRef} action={formAction} className="space-y-4">

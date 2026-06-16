@@ -10,19 +10,20 @@ export function BackLink({
   return (
     <Link
       href={href}
-      className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900 [html.capacitor-native_&]:hidden dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+      className="group inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/80 px-3.5 py-2 text-sm font-medium text-zinc-600 shadow-sm backdrop-blur transition-all hover:border-zinc-300 hover:bg-white hover:text-zinc-900 hover:shadow active:scale-95 [html.capacitor-native_&]:hidden dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        width="14"
-        height="14"
+        width="16"
+        height="16"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        strokeWidth="2"
+        strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
+        className="transition-transform duration-200 group-hover:-translate-x-0.5"
       >
         <path d="m15 18-6-6 6-6" />
       </svg>

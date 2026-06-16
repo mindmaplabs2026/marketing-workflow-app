@@ -24,3 +24,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * Sonner toasts: slide IN from the right edge of the screen (instead of the
+ * default vertical pop). A dedicated keyframe runs once when each toast mounts,
+ * sliding it horizontally from off-screen-right into its bottom-right spot.
+ * It only controls the ENTRANCE (no fill-forwards), so sonner's stacking and
+ * exit transitions stay intact.
+ */
+@keyframes toast-enter-from-right {
+  from {
+    transform: translateX(115%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+[data-sonner-toast] {
+  animation: toast-enter-from-right 450ms cubic-bezier(0.21, 1.02, 0.73, 1);
+}
+

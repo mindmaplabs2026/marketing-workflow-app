@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useRef, useState } from "react";
+import { toast } from "sonner";
 import { createUser, type CreateUserState } from "./actions";
 import type { UserRole } from "@/lib/supabase/types";
 
@@ -54,6 +55,9 @@ export function AddUserForm({
       if (result.success) {
         formRef.current?.reset();
         setNeedsSchool(false);
+        toast.success("User created");
+      } else if (result.error) {
+        toast.error(result.error);
       }
       return result;
     },

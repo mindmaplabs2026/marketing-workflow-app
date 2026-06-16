@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { createSchool, type ActionState } from "./actions";
 
 const initialState: ActionState = {};
@@ -13,8 +14,15 @@ export function CreateSchoolForm() {
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (state.success) formRef.current?.reset();
+    if (state.success) {
+      formRef.current?.reset();
+      toast.success("School added");
+    }
   }, [state.success]);
+
+  useEffect(() => {
+    if (state.error) toast.error(state.error);
+  }, [state.error]);
 
   return (
     <form ref={formRef} action={formAction} className="flex items-start gap-2">

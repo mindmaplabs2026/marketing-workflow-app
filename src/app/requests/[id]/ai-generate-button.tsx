@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { triggerAiGeneration, triggerLocalAiGeneration, triggerLocalReelGeneration } from "../actions";
 
 const REEL_LENGTH_OPTIONS = [
@@ -31,6 +32,7 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
 
     if (result.error) {
       setError(result.error);
+      toast.error(result.error);
       setBusy(null);
     } else {
       window.location.reload();

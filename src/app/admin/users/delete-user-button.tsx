@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { AlertDialog } from "@/components/alert-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { toast } from "sonner";
 import { deleteUser } from "./actions";
 
 export function DeleteUserButton({
@@ -22,7 +23,12 @@ export function DeleteUserButton({
       fd.append("user_id", userId);
       const result = await deleteUser(fd);
       setConfirmOpen(false);
-      if (result?.error) setError(result.error);
+      if (result?.error) {
+        setError(result.error);
+        toast.error(result.error);
+      } else {
+        toast.success(`${label} deleted`);
+      }
     });
   }
 

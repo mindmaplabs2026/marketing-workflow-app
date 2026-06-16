@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { publishRequest } from "../actions";
 import type { SocialPlatform } from "@/lib/supabase/types";
 
@@ -51,8 +52,12 @@ export function PublishForm({ requestId }: { requestId: string }) {
         fd.append("url", r.url.trim());
       }
       await publishRequest(fd);
+      toast.success("Marked as published — links saved.");
+      setBusy(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      const msg = err instanceof Error ? err.message : "Something went wrong.";
+      setError(msg);
+      toast.error(msg);
       setBusy(false);
     }
   }

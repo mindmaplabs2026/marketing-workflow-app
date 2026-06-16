@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
+import { Toaster } from "sonner";
 import { CapacitorNative } from "@/components/capacitor-native";
 import { RefreshOnFocus } from "@/components/refresh-on-focus";
 import { AppShell } from "@/components/app-shell";
@@ -58,6 +59,21 @@ export default async function RootLayout({
         <CapacitorNative />
         <RefreshOnFocus />
         {shellFree ? children : <AppShell>{children}</AppShell>}
+        <Toaster
+          position="bottom-right"
+          richColors
+          closeButton
+          expand
+          duration={4000}
+          // On phones the bottom nav (~4rem) sits at the bottom, so lift the
+          // toast above it (plus the device safe-area) and give side padding so
+          // it reads as a full-width card.
+          mobileOffset={{
+            bottom: "calc(4.5rem + env(safe-area-inset-bottom))",
+            left: "12px",
+            right: "12px",
+          }}
+        />
       </body>
     </html>
   );

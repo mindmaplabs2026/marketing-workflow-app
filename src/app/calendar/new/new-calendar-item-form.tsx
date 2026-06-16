@@ -6,6 +6,7 @@ import {
   createCalendarItem,
   type CalendarItemCreateState,
 } from "../actions";
+import { toast } from "sonner";
 
 type School = { id: string; name: string };
 
@@ -28,9 +29,14 @@ export function NewCalendarItemForm({
 
   useEffect(() => {
     if (state.itemId) {
+      toast.success("Calendar item created");
       router.push(`/calendar/${state.itemId}`);
     }
   }, [state.itemId, router]);
+
+  useEffect(() => {
+    if (state.error) toast.error(state.error);
+  }, [state.error]);
 
   return (
     <form action={formAction} className="space-y-4">

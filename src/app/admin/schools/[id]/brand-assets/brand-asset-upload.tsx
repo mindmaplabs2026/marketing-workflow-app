@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { attachBrandAsset } from "../actions";
+import { toast } from "sonner";
 import type { BrandAssetType } from "@/lib/supabase/types";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -52,7 +53,9 @@ export function BrandAssetUpload({
           });
 
         if (upErr) {
-          setError(`${file.name}: ${upErr.message}`);
+          const m = `${file.name}: ${upErr.message}`;
+          setError(m);
+          toast.error(m);
           continue;
         }
 
@@ -66,9 +69,12 @@ export function BrandAssetUpload({
         await attachBrandAsset(fd);
       }
 
+      toast.success("Brand asset uploaded");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      const m = err instanceof Error ? err.message : "Upload failed.";
+      setError(m);
+      toast.error(m);
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";

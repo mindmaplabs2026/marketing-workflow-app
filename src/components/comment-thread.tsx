@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
 
 type Comment = {
   id: string;
@@ -40,6 +41,7 @@ export function CommentThread({
   addCommentAction: (formData: FormData) => void;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  const [busy, setBusy] = useState(false);
 
   return (
     <section className="space-y-3">
@@ -86,8 +88,16 @@ export function CommentThread({
         action={async (formData) => {
           const body = String(formData.get("body") ?? "").trim();
           if (!body) return;
-          await addCommentAction(formData);
-          formRef.current?.reset();
+          setBusy(true);
+          try {
+            await addCommentAction(formData);
+            formRef.current?.reset();
+            toast.success("Comment posted");
+          } catch {
+            toast.error("Couldn't post the comment. Please try again.");
+          } finally {
+            setBusy(false);
+          }
         }}
         className="flex gap-2"
       >
@@ -101,9 +111,10 @@ export function CommentThread({
         />
         <button
           type="submit"
-          className="shrink-0 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
+          disabled={busy}
+          className="shrink-0 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
         >
-          Send
+          {busy ? "Sending…" : "Send"}
         </button>
       </form>
     </section>
