@@ -408,7 +408,7 @@ export async function runReelPipeline(
   // cannot statically analyze. They only run on the local worker, never Vercel.
   const { runReelCreativeAgent } = await import("./agent-creative-reel");
   const { findAndTrimMusic } = await import("./agent-music");
-  const { generateComposition, refineReelComposition } = await import("./agent-composition");
+  const { generateComposition, refineReelComposition, renderWithRepair } = await import("./agent-composition");
   const { evaluateReel } = await import("./agent-reel-evaluator");
   const { renderReel } = await import("@/lib/remotion/render");
 
@@ -714,8 +714,74 @@ export async function runReelPipeline(
       .update({ status: "music", agent2_output: reelCreative as unknown as Record<string, unknown> })
       .eq("id", jobId);
 
-    // Process each variation (typically 3, but run sequentially to avoid OOM)
-    for (const script of reelCreative.variations) {
+    // --- Download all curated media + brand assets ONCE (shared by every
+    //     variation). The media set is identical across variations, so fetching
+    //     it a single time up front avoids redundant re-downloads AND removes any
+    //     chance of a later variation rendering with missing media (the earlier
+    //     per-variation download could expire/fail mid-job). ---
+    const mediaFiles = new Map<string, Buffer>();
+    const mediaManifest = new Map<string, { type: "image" | "video"; description: string }>();
+    const allMediaPaths = new Set<string>();
+    for (const v of reelCreative.variations) {
+      for (const s of v.scenes) if (s.mediaPath) allMediaPaths.add(s.mediaPath);
+    }
+    for (const mediaPath of allMediaPaths) {
+      const match = ctx.images.find((img: UploadedImage) => img.path === mediaPath);
+      if (!match) {
+        console.warn(`[Worker] Reel ${jobId} | Media not found: ${mediaPath}`);
+        continue;
+      }
+      // Type from the actual MIME (authoritative), not Agent 2's guess.
+      const isVideo = match.mimeType?.startsWith("video/") ?? /\.(mp4|mov|webm|avi)$/i.test(mediaPath);
+      try {
+        // Admin (service-role) download — no signed-URL expiry on long jobs.
+        const { data: fileData, error: dlErr } = await admin.storage
+          .from("request-uploads")
+          .download(match.path);
+        if (dlErr || !fileData) {
+          console.warn(`[Worker] Reel ${jobId} | Failed to download: ${mediaPath} (${dlErr?.message ?? "no data"})`);
+          continue;
+        }
+        const buf = Buffer.from(await fileData.arrayBuffer());
+        const filename = mediaPath.split("/").pop() ?? "media.bin";
+        mediaFiles.set(filename, buf);
+        const curatedInfo = understanding.curatedImages.find((c) => c.path === mediaPath);
+        mediaManifest.set(filename, {
+          type: isVideo ? "video" : "image",
+          description: curatedInfo?.description ?? "uploaded media",
+        });
+        console.log(`[Worker] Reel ${jobId} | Downloaded: ${filename} (${isVideo ? "video" : "image"}, ${(buf.length / 1024).toFixed(0)} KB)`);
+      } catch {
+        console.warn(`[Worker] Reel ${jobId} | Failed to download: ${mediaPath}`);
+      }
+    }
+
+    // Brand assets (logo + footer), once.
+    let hasLogo = false;
+    let hasFooter = false;
+    const logoAsset = ctx.brandAssets.find((a) => a.assetType === "logo");
+    if (logoAsset?.storagePath) {
+      try {
+        const { data } = await admin.storage.from("school-assets").download(logoAsset.storagePath);
+        if (data) { mediaFiles.set("logo.png", Buffer.from(await data.arrayBuffer())); hasLogo = true; }
+      } catch { /* skip */ }
+    }
+    const footerAsset = ctx.brandAssets.find((a) => a.assetType === "footer");
+    if (footerAsset?.storagePath) {
+      try {
+        const { data } = await admin.storage.from("school-assets").download(footerAsset.storagePath);
+        if (data) { mediaFiles.set("footer.png", Buffer.from(await data.arrayBuffer())); hasFooter = true; }
+      } catch { /* skip */ }
+    }
+    console.log(`[Worker] Reel ${jobId} | Downloaded ${mediaFiles.size} shared media files (logo=${hasLogo}, footer=${hasFooter}) for ${reelCreative.variations.length} variation(s)`);
+
+    // Render one variation in full isolation. Returns true on success.
+    // A single variation's failure (bad Codex output, render crash, OOM, or a
+    // transient upload error) must NOT abort its siblings or fail the whole job.
+    // Captures the shared mediaFiles/mediaManifest/hasLogo/hasFooter above.
+    const renderVariation = async (
+      script: (typeof reelCreative.variations)[number],
+    ): Promise<boolean> => {
       console.log(`[Worker] Reel ${jobId} | ── Variation ${script.variationIndex} ──`);
 
       // --- Music Discovery ---
@@ -735,84 +801,32 @@ export async function runReelPipeline(
           .eq("id", jobId);
       }
 
-      // --- Download media from Supabase to local buffers ---
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Downloading ${script.scenes.length} media files`);
-      const mediaFiles = new Map<string, Buffer>();
-      const mediaManifest = new Map<string, { type: "image" | "video"; description: string }>();
-
-      for (const scene of script.scenes) {
-        const match = ctx.images.find((img: UploadedImage) => img.path === scene.mediaPath);
-        if (!match?.signedUrl) {
-          console.warn(`[Worker] Reel ${jobId} | Media not found: ${scene.mediaPath}`);
-          continue;
-        }
-
-        // Validate and correct mediaType based on actual file MIME type
-        const isActuallyVideo = match.mimeType?.startsWith("video/") ?? /\.(mp4|mov|webm|avi)$/i.test(scene.mediaPath);
-        const isActuallyImage = !isActuallyVideo;
-        let effectiveType = scene.mediaType;
-
-        if (isActuallyVideo && scene.mediaType !== "video") {
-          console.warn(`[Worker] Reel ${jobId} | TYPE FIX: ${scene.mediaPath.split("/").pop()} is a video (${match.mimeType}) but Agent 2 said "${scene.mediaType}" → correcting to "video"`);
-          effectiveType = "video";
-        } else if (isActuallyImage && scene.mediaType === "video") {
-          console.warn(`[Worker] Reel ${jobId} | TYPE FIX: ${scene.mediaPath.split("/").pop()} is an image (${match.mimeType}) but Agent 2 said "video" → correcting to "image"`);
-          effectiveType = "image";
-        }
-
-        try {
-          const res = await fetch(match.signedUrl);
-          if (!res.ok) continue;
-          const buf = Buffer.from(await res.arrayBuffer());
-          const filename = scene.mediaPath.split("/").pop() ?? `media-${scene.index}.bin`;
-          mediaFiles.set(filename, buf);
-          const curatedInfo = understanding.curatedImages.find((c) => c.path === scene.mediaPath);
-          mediaManifest.set(filename, {
-            type: effectiveType,
-            description: curatedInfo?.description ?? "uploaded media",
-          });
-          console.log(`[Worker] Reel ${jobId} | Downloaded: ${filename} (${effectiveType}, ${(buf.length / 1024).toFixed(0)} KB)`);
-        } catch {
-          console.warn(`[Worker] Reel ${jobId} | Failed to download: ${scene.mediaPath}`);
-        }
-      }
-
-      // Download logo if available
-      let hasLogo = false;
-      const logoAsset = ctx.brandAssets.find((a) => a.assetType === "logo");
-      if (logoAsset?.signedUrl) {
-        try {
-          const res = await fetch(logoAsset.signedUrl);
-          if (res.ok) {
-            mediaFiles.set("logo.png", Buffer.from(await res.arrayBuffer()));
-            hasLogo = true;
-          }
-        } catch { /* skip */ }
-      }
-
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — ${mediaFiles.size} media files downloaded, logo=${hasLogo}`);
+      // Media + brand assets are downloaded ONCE for the whole job (shared across
+      // all variations) — see the shared download block above the loop.
 
       // --- Composition Generator (Codex writes Reel.tsx) ---
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Generating Remotion composition`);
-      const composition = await generateComposition({
+      let composition = await generateComposition({
         script,
         mediaManifest,
         hasLogo,
+        hasFooter,
         hasMusic: music.buffer.length > 0,
       });
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Composition: ${composition.reelTsx.length} chars Reel.tsx`);
 
-      // --- Remotion Render ---
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendering MP4`);
-      const renderResult = await renderReel({
-        reelTsx: composition.reelTsx,
-        dataTsx: composition.dataTsx,
-        mediaFiles,
-        musicFile: music.buffer.length > 0
-          ? { name: "track.mp3", buffer: music.buffer }
-          : undefined,
+      // --- Remotion Render (self-correcting: feed compile/render errors back to Codex) ---
+      const musicFile = music.buffer.length > 0
+        ? { name: "track.mp3", buffer: music.buffer }
+        : undefined;
+      const { renderResult, composition: workingComposition, usedFallback } = await renderWithRepair({
+        composition,
+        script,
+        assets: { mediaFiles, mediaManifest, musicFile, hasLogo, hasFooter, hasMusic: music.buffer.length > 0 },
+        label: `V${script.variationIndex}`,
       });
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendered in ${renderResult.renderTimeSec.toFixed(1)}s`);
+      composition = workingComposition;
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendered in ${renderResult.renderTimeSec.toFixed(1)}s${usedFallback ? " (fallback slideshow)" : ""}`);
 
       // Track render + music costs
       const renderCosts = new CostTracker();
@@ -834,6 +848,20 @@ export async function runReelPipeline(
       }
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Uploaded: ${storagePath} (${(mp4Buffer.length / 1024 / 1024).toFixed(1)} MB)`);
 
+      // --- Persist the trimmed music track so chat-edits can reuse the exact
+      //     soundtrack (the buffer is otherwise dropped with the temp workdir). ---
+      let musicPath: string | undefined;
+      if (music.buffer.length > 0 && music.source !== "fallback-silent") {
+        musicPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/music.mp3`;
+        const { error: musicUploadErr } = await admin.storage
+          .from("designs")
+          .upload(musicPath, music.buffer, { contentType: "audio/mpeg", upsert: true });
+        if (musicUploadErr) {
+          console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Music persist failed (non-fatal): ${musicUploadErr.message}`);
+          musicPath = undefined;
+        }
+      }
+
       // --- Create variation record ---
       await admin.from("ai_variations").insert({
         job_id: jobId,
@@ -842,7 +870,9 @@ export async function runReelPipeline(
         creative_brief: {
           ...script,
           _compositionCode: composition.reelTsx,
+          _compositionDataCode: composition.dataTsx,
           _musicSource: music.source,
+          _musicPath: musicPath,
         } as unknown as Record<string, unknown>,
         storage_paths: [storagePath],
         poster_type: "reel",
@@ -909,7 +939,9 @@ export async function runReelPipeline(
                 creative_brief: {
                   ...script,
                   _compositionCode: refined.reelTsx,
+                  _compositionDataCode: refined.dataTsx,
                   _musicSource: music.source,
+                  _musicPath: musicPath,
                   _refinement: { originalScore: evaluation.score, feedback: evaluation.feedback },
                 } as unknown as Record<string, unknown>,
               })
@@ -932,7 +964,30 @@ export async function runReelPipeline(
 
       // Cleanup render temp dir
       await currentCleanup();
+      return true;
+    };
+
+    // Run variations sequentially (avoids OOM) but isolated — one failure is
+    // logged and skipped so successful variations still complete the job.
+    let succeeded = 0;
+    for (const script of reelCreative.variations) {
+      try {
+        if (await renderVariation(script)) succeeded++;
+      } catch (err) {
+        console.error(
+          `[Worker] Reel ${jobId} | V${script.variationIndex} — FAILED (skipping): ${err instanceof Error ? err.message : err}`,
+        );
+      }
     }
+
+    if (succeeded === 0) {
+      throw new Error(
+        `All ${reelCreative.variations.length} reel variation(s) failed to render`,
+      );
+    }
+    console.log(
+      `[Worker] Reel ${jobId} | ${succeeded}/${reelCreative.variations.length} variation(s) succeeded`,
+    );
 
     // --- Finalize ---
     await admin

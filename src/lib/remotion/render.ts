@@ -206,6 +206,22 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
   }
 }
 
+/**
+ * Pull the meaningful compile/render error out of the renderer's output so it
+ * can be fed back to Codex for self-correction. Remotion/webpack print the root
+ * cause near the FIRST "error"; the noise above it (font/objectFit warnings) is
+ * irrelevant. Falls back to the tail if no "error" token is present.
+ */
+function extractRenderError(stdout: string, stderr: string): string {
+  const combined = `${stderr}\n${stdout}`.trim();
+  const idx = combined.toLowerCase().indexOf("error");
+  const slice =
+    idx >= 0
+      ? combined.slice(Math.max(0, idx - 80), idx - 80 + 1800)
+      : combined.slice(-1800);
+  return slice.trim() || "(no renderer output)";
+}
+
 function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const renderScript = path.join(REMOTION_RENDERER_DIR, "render.ts");
@@ -253,7 +269,7 @@ function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
       } else {
         reject(
           new Error(
-            `Remotion render exited with code ${code}: ${stderr.slice(0, 500)}`,
+            `Remotion render exited with code ${code}: ${extractRenderError(stdout, stderr)}`,
           ),
         );
       }

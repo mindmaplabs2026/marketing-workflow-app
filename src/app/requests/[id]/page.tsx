@@ -412,10 +412,14 @@ export default async function RequestDetailPage({
   // Designer can trigger AI generation when they've picked up the request.
   // Show the button if no AI job is currently running (queued/understanding/creative/generating).
   const aiJobRunning = aiJob && !["completed", "failed"].includes(aiJob.status);
+  // Super admin can trigger AI at ANY status — this mirrors the server action
+  // (triggerLocalAiGeneration), which only restricts *designers* to
+  // in_design/changes_requested. A designer must have picked the request up first.
   const canTriggerAi =
-    (isAssignedDesigner || isSuperAdmin) &&
     !aiJobRunning &&
-    (req.status === "in_design" || req.status === "changes_requested");
+    (isSuperAdmin ||
+      (isAssignedDesigner &&
+        (req.status === "in_design" || req.status === "changes_requested")));
   const canArchive =
     (isCreator || isReviewer) &&
     req.status !== "archived" &&

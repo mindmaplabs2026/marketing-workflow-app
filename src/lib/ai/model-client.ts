@@ -117,15 +117,16 @@ async function filesToRefs(image: unknown): Promise<{ name: string; buffer: Buff
 
 /** Build a Codex prompt + image list from OpenAI chat.completions messages. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildFromChatMessages(messages: any[], jsonMode: boolean): { prompt: string; images: { dataUrl?: string }[] } {
+function buildFromChatMessages(messages: any[], jsonMode: boolean): { prompt: string; images: { dataUrl?: string; detail?: "low" | "high" }[] } {
   const texts: string[] = [];
-  const images: { dataUrl?: string }[] = [];
+  const images: { dataUrl?: string; detail?: "low" | "high" }[] = [];
   for (const m of messages ?? []) {
     if (typeof m?.content === "string") texts.push(m.content);
     else if (Array.isArray(m?.content)) {
       for (const part of m.content) {
         if (part?.type === "text" && part.text) texts.push(part.text);
-        else if (part?.type === "image_url" && part.image_url?.url) images.push({ dataUrl: part.image_url.url });
+        else if (part?.type === "image_url" && part.image_url?.url)
+          images.push({ dataUrl: part.image_url.url, detail: part.image_url.detail });
       }
     }
   }
@@ -136,15 +137,16 @@ function buildFromChatMessages(messages: any[], jsonMode: boolean): { prompt: st
 
 /** Build a Codex prompt + image list from OpenAI Responses API input. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildFromResponsesInput(input: any[], instructions?: string): { prompt: string; images: { dataUrl?: string }[] } {
+function buildFromResponsesInput(input: any[], instructions?: string): { prompt: string; images: { dataUrl?: string; detail?: "low" | "high" }[] } {
   const texts: string[] = [];
-  const images: { dataUrl?: string }[] = [];
+  const images: { dataUrl?: string; detail?: "low" | "high" }[] = [];
   for (const item of input ?? []) {
     if (typeof item?.content === "string") texts.push(item.content);
     else if (Array.isArray(item?.content)) {
       for (const part of item.content) {
         if (part?.type === "input_text" && part.text) texts.push(part.text);
-        else if (part?.type === "input_image" && part.image_url) images.push({ dataUrl: part.image_url });
+        else if (part?.type === "input_image" && part.image_url)
+          images.push({ dataUrl: part.image_url, detail: part.detail });
       }
     }
   }

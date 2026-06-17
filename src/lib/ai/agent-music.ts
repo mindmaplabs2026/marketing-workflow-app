@@ -50,6 +50,11 @@ export async function findAndTrimMusic(input: {
       try {
         const mp3Path = await discoverFromPixabay(keywords, workDir, input.timeoutMs ?? 120_000);
         if (mp3Path) {
+          // Archive the ORIGINAL (untrimmed) track into our permanent library so
+          // it's reusable at any duration and feeds the curated fallback over time.
+          // Best-effort — never blocks the reel.
+          await archiveToMusicLibrary(mp3Path, input.musicMood, input.musicTempo).catch(() => {});
+
           const trimmedPath = await trimWithFfmpeg(mp3Path, input.durationSec, workDir);
           const buffer = await fs.readFile(trimmedPath);
           console.log(`[Music] Success — Pixabay track trimmed to ${input.durationSec}s (${(buffer.length / 1024).toFixed(0)} KB)`);
@@ -102,23 +107,25 @@ async function discoverFromPixabay(
   const outFile = path.join(workDir, "codex-music-output.txt");
   const downloadPath = path.join(workDir, "downloaded.mp3");
 
-  const prompt = `You are a music researcher. Your task is to find and download ONE royalty-free music track from Pixabay.
+  const prompt = `You are a music researcher. Your task is to find and download ONE royalty-free music track from Pixabay using ONLY command-line tools (curl/wget). Do this entirely in the shell.
 
-STEPS:
-1. Go to https://pixabay.com/music/search/${encodeURIComponent(keywords)}/
-2. Find a track that:
-   - Is at least 30 seconds long
-   - Matches the mood: ${keywords}
-   - Is instrumental (no vocals preferred)
-3. Get the direct download URL for the MP3 file
-4. Download it to: ${downloadPath}
+ABSOLUTE RULE — NO BROWSER:
+- Do NOT open or use a web browser, Chrome, Chromium, Playwright, Puppeteer, the browser tool, or any GUI/headless browser. None of that is allowed or needed.
+- Use ONLY shell commands: curl (or wget) to fetch HTML and download files. Parse HTML with grep/sed/python from the command line.
 
-OUTPUT: Write ONLY the filename of the downloaded track (or "FAILED" if you could not download anything).
+STEPS (all via shell):
+1. Fetch the search page HTML with curl (send a normal browser User-Agent header):
+   curl -sL -A "Mozilla/5.0" "https://pixabay.com/music/search/${encodeURIComponent(keywords)}/" -o search.html
+2. Extract a direct .mp3 CDN URL from search.html (Pixabay serves audio from cdn.pixabay.com / *.pixabay.com; grep for "https" + ".mp3").
+3. Pick a track that is instrumental (no vocals preferred) and at least 30 seconds.
+4. Download the actual MP3 (not a preview) with curl to: ${downloadPath}
+   curl -sL -A "Mozilla/5.0" "<mp3-url>" -o "${downloadPath}"
+
+OUTPUT: Write ONLY the filename of the downloaded track (or "FAILED" if you could not download anything via the command line).
 
 IMPORTANT:
-- Pixabay music is free for commercial use, no attribution required
-- Download the actual MP3 file, not a preview
-- If the page structure blocks direct download, try alternative search terms or pages`;
+- Pixabay music is free for commercial use, no attribution required.
+- If you cannot extract a usable URL from the HTML, output "FAILED" — do NOT fall back to a browser.`;
 
   try {
     await runCodexExec(prompt, outFile, workDir, timeoutMs);
@@ -174,6 +181,10 @@ function runCodexExec(
       "exec",
       "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check",
+      // Hard-disable the browser/Chrome plugins so Codex cannot launch a GUI/headless
+      // browser for this task — it must use curl/wget in the shell instead.
+      "-c", `'plugins."browser@openai-bundled".enabled=false'`,
+      "-c", `'plugins."chrome@openai-bundled".enabled=false'`,
       "-C", `"${cwd}"`,
       "-o", `"${outFile}"`,
       "-",
@@ -230,6 +241,111 @@ const MOOD_MAPPING: Record<string, string[]> = {
   moderate: ["inspirational"],
 };
 
+/** Max tracks kept per mood folder before least-frequently-used eviction. */
+const MAX_PER_MOOD = Number(process.env.MUSIC_LIBRARY_MAX_PER_MOOD ?? 15);
+
+/** Pick the single mood folder a discovered track should be filed under. */
+function primaryMoodFolder(musicMood: string[], tempo: string): string {
+  for (const m of musicMood) {
+    const mapped = MOOD_MAPPING[m.toLowerCase()];
+    if (mapped?.length) return mapped[0];
+  }
+  const t = MOOD_MAPPING[tempo];
+  if (t?.length) return t[0];
+  return "inspirational";
+}
+
+let libraryBucketEnsured = false;
+
+/**
+ * Archive a discovered track into the permanent `music-library`.
+ *
+ * - Dedupes by content hash (same track is never stored twice; re-hits just bump usage).
+ * - Bounds storage: each mood folder keeps at most MAX_PER_MOOD tracks, evicting the
+ *   least-frequently-used (then oldest) when full.
+ * Best-effort: any failure is logged and swallowed so the reel pipeline is unaffected.
+ */
+async function archiveToMusicLibrary(
+  originalPath: string,
+  musicMood: string[],
+  tempo: string,
+): Promise<void> {
+  try {
+    const buf = await fs.readFile(originalPath);
+    if (buf.length < 10_000) return; // too small to be a real track
+
+    const crypto = await import("node:crypto");
+    const hash = crypto.createHash("sha256").update(buf).digest("hex");
+    const code = hash.slice(0, 12);
+
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const admin = createAdminClient();
+    // music_library is newer than the generated Database types — permissive accessor.
+    const db = admin as unknown as { from: (table: string) => any };
+
+    // Dedupe — already catalogued? Bump usage and stop.
+    const { data: existing } = await db
+      .from("music_library")
+      .select("id, times_used")
+      .eq("content_hash", hash)
+      .maybeSingle();
+    if (existing) {
+      await db
+        .from("music_library")
+        .update({ times_used: (existing.times_used ?? 0) + 1, last_used_at: new Date().toISOString() })
+        .eq("id", existing.id);
+      console.log(`[Music] Library: track ${code} already archived — usage bumped`);
+      return;
+    }
+
+    const mood = primaryMoodFolder(musicMood, tempo);
+
+    // Enforce the per-mood cap with least-frequently-used eviction.
+    const { data: moodRows } = await db
+      .from("music_library")
+      .select("id, storage_path, times_used, last_used_at")
+      .eq("mood", mood)
+      .order("times_used", { ascending: true })
+      .order("last_used_at", { ascending: true });
+    if (moodRows && moodRows.length >= MAX_PER_MOOD) {
+      const victims = moodRows.slice(0, moodRows.length - MAX_PER_MOOD + 1);
+      for (const v of victims) {
+        await admin.storage.from("music-library").remove([v.storage_path]).catch(() => {});
+        await db.from("music_library").delete().eq("id", v.id);
+      }
+      console.log(`[Music] Library: mood "${mood}" at cap (${MAX_PER_MOOD}) — evicted ${victims.length} least-used`);
+    }
+
+    // Ensure the bucket exists (idempotent; "already exists" errors are ignored).
+    if (!libraryBucketEnsured) {
+      await admin.storage.createBucket("music-library", { public: false }).catch(() => {});
+      libraryBucketEnsured = true;
+    }
+    const storagePath = `${mood}/${code}.mp3`;
+    const { error: upErr } = await admin.storage
+      .from("music-library")
+      .upload(storagePath, buf, { contentType: "audio/mpeg", upsert: true });
+    if (upErr) {
+      console.warn(`[Music] Library upload failed: ${upErr.message}`);
+      return;
+    }
+
+    await db.from("music_library").insert({
+      code,
+      content_hash: hash,
+      storage_path: storagePath,
+      mood,
+      mood_keywords: musicMood,
+      tempo,
+      source: "pixabay",
+      file_size: buf.length,
+    });
+    console.log(`[Music] Library: archived new track ${code} → ${storagePath} (${(buf.length / 1024).toFixed(0)} KB)`);
+  } catch (err) {
+    console.warn(`[Music] Library archive skipped: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 async function pickFromCuratedLibrary(
   musicMood: string[],
   musicTempo: "slow" | "moderate" | "fast",
@@ -279,6 +395,22 @@ async function pickFromCuratedLibrary(
 
     const trimmedPath = await trimWithFfmpeg(mp3Path, durationSec, workDir);
     const buffer = await fs.readFile(trimmedPath);
+
+    // Bump usage stats so least-frequently-used eviction reflects fallback picks too.
+    const db = admin as unknown as { from: (table: string) => any };
+    const code = picked.name.replace(/\.mp3$/i, "");
+    const { data: row } = await db
+      .from("music_library")
+      .select("id, times_used")
+      .eq("code", code)
+      .maybeSingle();
+    if (row) {
+      await db
+        .from("music_library")
+        .update({ times_used: (row.times_used ?? 0) + 1, last_used_at: new Date().toISOString() })
+        .eq("id", row.id)
+        .then(() => {}, () => {});
+    }
 
     console.log(`[Music] Curated library success: ${storagePath} trimmed to ${durationSec}s (${(buffer.length / 1024).toFixed(0)} KB)`);
     return {
