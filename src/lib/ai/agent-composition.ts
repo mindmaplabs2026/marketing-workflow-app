@@ -40,15 +40,15 @@ function logoSizingGuidance(): string {
   const maxPct = Math.round((LOGO_MAX_PX / 1080) * 100);
   const mid = Math.round((LOGO_MIN_PX + LOGO_MAX_PX) / 2);
   return [
-    `LOGO SIZE (the logo has been rendering too small — fix this):`,
-    `- The logo may be SQUARE or RECTANGULAR (wide wordmark or tall crest) — do NOT assume it is square.`,
-    `- Render it inside a bounding box whose LONGEST edge is between ${LOGO_MIN_PX}px and ${LOGO_MAX_PX}px on the 1080px canvas (≈${minPct}%–${maxPct}%). NEVER smaller than ${LOGO_MIN_PX}px.`,
-    `- Use the box approach so any aspect ratio fits and is never stretched or cropped:`,
-    `    <Img src={staticFile("media/logo.png")} style={{ maxWidth: <box>, maxHeight: <box>, width: "auto", height: "auto", objectFit: "contain" }} />`,
-    `  where <box> is your chosen size in px within the band above.`,
-    `- Corner / persistent watermark logo: box near the LOWER end (~${LOGO_MIN_PX}–${mid}px).`,
-    `- Hero logo on the title card or closing card: box near the UPPER end (~${mid}–${LOGO_MAX_PX}px).`,
-    `- Give the logo a safe-area margin from frame edges (≥40px) and ensure contrast against the background (a subtle shadow or chip behind it when placed over busy media).`,
+    `LOGO SIZE & TREATMENT (CRITICAL — the logo keeps rendering too small; fix it):`,
+    `- The logo may be SQUARE or RECTANGULAR (a wide wordmark, or a tall crest). Do NOT assume square.`,
+    `- Apply the size to the LOGO <Img> ITSELF — NEVER to a wrapping card. The VISIBLE logo's LONGEST edge MUST measure ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (≈${minPct}%–${maxPct}%), never below ${LOGO_MIN_PX}px. Exact CSS, directly on the Img:`,
+    `    <Img src={staticFile("media/logo.png")} style={{ width: "auto", height: "auto", maxWidth: <box>, maxHeight: <box>, objectFit: "contain" }} />`,
+    `  This makes a WIDE logo's WIDTH ≈ <box> and a TALL logo's HEIGHT ≈ <box>. That is the intended size — correct, not "too small".`,
+    `- DO NOT put the logo inside a large square card/box with padding around it, and DO NOT force a rectangular logo into a square frame. A logo letterboxed inside a padded square looks tiny — that is the EXACT bug we are fixing. No decorative card, no big padding.`,
+    `- If contrast over busy media truly needs a backing, it must HUG the logo: a tight rounded-rect with ≤12px uniform padding, matching the logo's own shape — never a big empty square with the logo floating small in the middle.`,
+    `- Corner / persistent watermark: longest edge near ${LOGO_MIN_PX}–${mid}px. Hero logo (title card / closing card): longest edge near ${mid}–${LOGO_MAX_PX}px — USE THE UPPER END, there is plenty of empty space on those cards.`,
+    `- Keep a ≥40px safe-area margin from the frame edges. Never stretch or distort the logo.`,
   ].join("\n");
 }
 
@@ -722,7 +722,7 @@ RULES:
 4. staticFile("media/<file>") / staticFile("music/track.mp3") — NEVER prefix with "public/". Only reference files in the list above.
 5. VIDEO (.mp4/.mov) uses <Video> from "@remotion/media" with style={{ width:"100%", height:"100%", objectPosition:"X% Y%" }} and objectFit="cover" as a PROP (never objectFit in style). Trim with trimBefore/trimAfter (frames = sec×30); startFrom/endAt do NOT exist. Images use <Img> from "remotion".
 6. The result must be COMPLETE, COMPILABLE TypeScript.
-${input.hasLogo ? `7. If the logo is shown, fit it in a bounding box whose longest edge is ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (never tiny). The logo may be rectangular, not square — use maxWidth+maxHeight with objectFit:"contain" and width/height:"auto" so it scales proportionally without distortion.` : ""}
+${input.hasLogo ? `7. If the logo is shown, size the LOGO <Img> ITSELF (not a wrapping card) so its longest visible edge is ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (never tiny). Use width/height:"auto" + maxWidth/maxHeight + objectFit:"contain". The logo may be rectangular — do NOT box it inside a padded square card (that letterboxes it and makes it look tiny).` : ""}
 
 OUTPUT: the COMPLETE updated Reel.tsx inside a single \`\`\`tsx code fence.
 
