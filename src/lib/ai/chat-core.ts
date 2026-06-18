@@ -295,12 +295,10 @@ async function runReelChatEdit(
   const wantsMusicChange = mentionsMusic && !wantsMusicOff && !wantsMusicDuck &&
     inMusicClause(/\b(change|different|new|replace|swap|another|other)\b/i);
 
+  // Tracks whether we ended up with REAL (audible) music, vs none/silence.
+  let hasRealMusic = false;
   if (wantsMusicOff) {
-    // Supply a SILENT track (not nothing) so any stray staticFile("music/track.mp3")
-    // left in the composition resolves to silence instead of 404-ing the render.
-    console.log(`[reel-chat] Edit requests music removed — supplying silent track`);
-    const { generateSilentTrack } = await import("./agent-music");
-    musicFile = { name: "track.mp3", buffer: await generateSilentTrack(reelScript.durationSec ?? 30) };
+    console.log(`[reel-chat] Edit requests music removed`);
     musicPath = undefined;
     musicSource = "none";
   } else if (wantsMusicChange) {
@@ -314,16 +312,32 @@ async function runReelChatEdit(
     if (music.buffer.length > 0 && music.source !== "fallback-silent") {
       musicFile = { name: "track.mp3", buffer: music.buffer };
       musicSource = music.source;
+      hasRealMusic = true;
       musicPath = `${schoolId}/${requestId}/ai/${variation.variation_index}/music-r${round}.mp3`;
       await admin.storage.from("designs").upload(musicPath, music.buffer, { contentType: "audio/mpeg", upsert: true });
     }
   } else if (musicPath) {
     const { data } = await admin.storage.from("designs").download(musicPath);
-    if (data) musicFile = { name: "track.mp3", buffer: Buffer.from(await data.arrayBuffer()) };
+    if (data) {
+      musicFile = { name: "track.mp3", buffer: Buffer.from(await data.arrayBuffer()) };
+      hasRealMusic = true;
+    } else {
+      console.warn(`[reel-chat] Persisted track ${musicPath} is no longer available — falling back to silence`);
+    }
   }
-  // On "music off" we still pass the silent file to the renderer (404 safety net)
-  // but tell the editor there is NO music, so it removes the Audio element.
-  const hasMusic = !wantsMusicOff && !!musicFile;
+
+  // UNIVERSAL 404 SAFETY NET: the composition may still reference
+  // staticFile("music/track.mp3") whatever happened above — music turned off,
+  // re-discovery failed, OR a persisted track that has since gone missing. Always
+  // supply SOMETHING so the render can never 404 on the music file.
+  if (!musicFile) {
+    const { generateSilentTrack } = await import("./agent-music");
+    musicFile = { name: "track.mp3", buffer: await generateSilentTrack(reelScript.durationSec ?? 30) };
+    console.log(`[reel-chat] No track available — using silent track (render-safe)`);
+  }
+  // Tell the editor music exists only when it's REAL — so when we're only supplying
+  // a silent safety-net track it removes the Audio element rather than playing silence.
+  const hasMusic = hasRealMusic;
 
   // Step 3: Apply the user's edit to the composition code.
   const { editComposition, renderWithRepair } = await import("./agent-composition");
