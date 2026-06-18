@@ -256,9 +256,18 @@ export default async function RequestDetailPage({
   // Each status change fans out 1 notification per recipient. Collapse those
   // into a single timeline entry keyed by (type, actor, created_at).
   const activityRaw = activityRes.data ?? [];
+  // AI generation is an internal MindMap tool — school-side users (school_admin,
+  // teacher) must not see any trace that a design was AI-generated. Only internal
+  // members (super_admin / designer) see AI activity entries.
+  const isInternalMember = role === "super_admin" || role === "designer";
+  const HIDDEN_FROM_EXTERNAL: NotificationType[] = [
+    "ai_generation_completed",
+    "ai_generation_failed",
+  ];
   const seen = new Set<string>();
   const activity: ActivityRow[] = [];
   for (const row of activityRaw) {
+    if (!isInternalMember && HIDDEN_FROM_EXTERNAL.includes(row.type)) continue;
     const key = `${row.type}|${row.actor_id ?? ""}|${row.created_at}`;
     if (seen.has(key)) continue;
     seen.add(key);
