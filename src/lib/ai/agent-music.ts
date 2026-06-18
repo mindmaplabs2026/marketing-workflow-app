@@ -121,15 +121,30 @@ export async function findAndTrimMusic(input: {
 
     // Last resort: generate a silent track with ffmpeg
     console.warn("[Music] All fallbacks exhausted — generating silent track");
+    const buffer = await generateSilentTrack(input.durationSec);
+    return { buffer, filename: "track.mp3", source: "fallback-silent" };
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Generate a silent MP3 of the given duration. Used as the "music off" track so a
+ * composition that still references music/track.mp3 resolves to silence instead
+ * of 404-ing the render.
+ */
+export async function generateSilentTrack(durationSec: number): Promise<Buffer> {
+  const workDir = path.join(os.tmpdir(), "reel-music-silent", `${process.pid}-${Date.now()}`);
+  await fs.mkdir(workDir, { recursive: true });
+  try {
     const silentPath = path.join(workDir, "silent.mp3");
     await runCommand("ffmpeg", [
       "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-      "-t", String(input.durationSec),
+      "-t", String(Math.max(1, Math.round(durationSec))),
       "-q:a", "9",
       silentPath,
     ], workDir, 30_000);
-    const buffer = await fs.readFile(silentPath);
-    return { buffer, filename: "track.mp3", source: "fallback-silent" };
+    return await fs.readFile(silentPath);
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
   }

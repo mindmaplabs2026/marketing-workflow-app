@@ -281,13 +281,26 @@ async function runReelChatEdit(
   let musicPath = brief._musicPath as string | undefined;
   let musicFile: { name: string; buffer: Buffer } | undefined;
   let musicSource = brief._musicSource as string | undefined;
-  const mentionsMusic = /\b(music|song|track|audio|sound|tune|soundtrack)\b/i.test(message);
-  const wantsMusicOff = mentionsMusic && /\b(remove|mute|silent|without|no\s+music|turn\s+off)\b/i.test(message);
-  const wantsMusicChange = mentionsMusic && !wantsMusicOff &&
-    /\b(change|different|new|replace|swap|another|other)\b/i.test(message);
+  const musicRe = /\b(music|song|track|audio|sound|tune|soundtrack|bgm|background\s*music)\b/i;
+  const mentionsMusic = musicRe.test(message);
+  // Scope intent to the CLAUSE that mentions music, so "remove the slide numbering"
+  // (a different clause) can't be read as "remove music", and "reduce BGM" reads as
+  // ducking (keep) rather than removal. Split on list markers / punctuation.
+  const clauses = message.split(/[\n.,;]|\d+\s*[.)]/).map((c) => c.trim()).filter(Boolean);
+  const musicClauses = clauses.filter((c) => musicRe.test(c));
+  const inMusicClause = (re: RegExp) => musicClauses.some((c) => re.test(c));
+  const wantsMusicDuck = inMusicClause(/\b(reduce|lower|quiet|softer|soften|duck|less|turn\s*down|tone\s*down)\b/i);
+  const wantsMusicOff = mentionsMusic && !wantsMusicDuck &&
+    inMusicClause(/\b(remove|mute|silent|without|no\s+music|turn\s*off|delete|get\s*rid|drop)\b/i);
+  const wantsMusicChange = mentionsMusic && !wantsMusicOff && !wantsMusicDuck &&
+    inMusicClause(/\b(change|different|new|replace|swap|another|other)\b/i);
 
   if (wantsMusicOff) {
-    console.log(`[reel-chat] Edit requests music removed`);
+    // Supply a SILENT track (not nothing) so any stray staticFile("music/track.mp3")
+    // left in the composition resolves to silence instead of 404-ing the render.
+    console.log(`[reel-chat] Edit requests music removed — supplying silent track`);
+    const { generateSilentTrack } = await import("./agent-music");
+    musicFile = { name: "track.mp3", buffer: await generateSilentTrack(reelScript.durationSec ?? 30) };
     musicPath = undefined;
     musicSource = "none";
   } else if (wantsMusicChange) {
@@ -308,7 +321,9 @@ async function runReelChatEdit(
     const { data } = await admin.storage.from("designs").download(musicPath);
     if (data) musicFile = { name: "track.mp3", buffer: Buffer.from(await data.arrayBuffer()) };
   }
-  const hasMusic = !!musicFile;
+  // On "music off" we still pass the silent file to the renderer (404 safety net)
+  // but tell the editor there is NO music, so it removes the Audio element.
+  const hasMusic = !wantsMusicOff && !!musicFile;
 
   // Step 3: Apply the user's edit to the composition code.
   const { editComposition, renderWithRepair } = await import("./agent-composition");
