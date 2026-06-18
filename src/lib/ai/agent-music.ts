@@ -6,6 +6,7 @@ import path from "node:path";
 
 /** Subset of the Jamendo /tracks API row we read. */
 type JamendoTrack = {
+  id?: number | string;
   name?: string;
   artist_name?: string;
   duration?: number | string;
@@ -38,6 +39,9 @@ export type MusicResult = {
   trackInfo?: string;
   /** Attribution/license metadata for crediting (CC tracks usually require it). */
   attribution?: MusicAttribution;
+  /** Stable identity of the chosen track (e.g. Jamendo id), for cross-variation
+   *  dedup so two variations in the same job don't get the same audio. */
+  trackKey?: string;
 };
 
 /**
@@ -62,6 +66,9 @@ export async function findAndTrimMusic(input: {
   musicTempo: "slow" | "moderate" | "fast";
   durationSec: number;
   timeoutMs?: number;
+  /** Track keys (Jamendo ids) already used by sibling variations in this job —
+   *  skipped so each variation gets DIFFERENT audio. */
+  excludeKeys?: Set<string>;
 }): Promise<MusicResult> {
   const workDir = path.join(os.tmpdir(), "reel-music", `${process.pid}-${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
@@ -79,7 +86,7 @@ export async function findAndTrimMusic(input: {
       console.log(`[Music] Attempt ${attempt + 1}/3: searching Jamendo for "${keywords}"`);
 
       try {
-        const found = await discoverFromJamendo(keywords, input.durationSec, workDir, input.timeoutMs ?? 60_000);
+        const found = await discoverFromJamendo(keywords, input.durationSec, workDir, input.timeoutMs ?? 60_000, input.excludeKeys);
         if (found) {
           // Archive the ORIGINAL (untrimmed) track into our permanent library so
           // it's reusable at any duration and feeds the curated fallback over time.
@@ -95,6 +102,7 @@ export async function findAndTrimMusic(input: {
             source: "jamendo",
             trackInfo: found.trackInfo,
             attribution: found.attribution,
+            trackKey: found.trackKey,
           };
         }
       } catch (err) {
@@ -141,7 +149,8 @@ async function discoverFromJamendo(
   durationSec: number,
   workDir: string,
   timeoutMs: number,
-): Promise<{ mp3Path: string; trackInfo: string; attribution: MusicAttribution } | null> {
+  excludeKeys?: Set<string>,
+): Promise<{ mp3Path: string; trackInfo: string; attribution: MusicAttribution; trackKey: string } | null> {
   const clientId = process.env.JAMENDO_CLIENT_ID;
   if (!clientId) {
     console.warn("[Music] JAMENDO_CLIENT_ID not set — skipping Jamendo discovery");
@@ -179,8 +188,18 @@ async function discoverFromJamendo(
     return Number(b.duration) - Number(a.duration); // then longest
   });
 
-  // Download the first candidate that yields a real MP3.
-  for (const track of pool.slice(0, 5)) {
+  // Skip tracks already used by sibling variations so each variation gets
+  // DIFFERENT audio (popular tracks otherwise win every keyword set). Scan deeper
+  // than the top 5 since exclusions may knock out the most-popular picks.
+  const trackKeyOf = (t: JamendoTrack) => String(t.id ?? t.audiodownload ?? `${t.artist_name}-${t.name}`);
+  const candidates = pool.filter((t) => !excludeKeys?.has(trackKeyOf(t)));
+  if (candidates.length === 0) {
+    console.warn(`[Music] All Jamendo matches for "${keywords}" already used by sibling variations — no fresh track`);
+    return null;
+  }
+
+  // Download the first fresh candidate that yields a real MP3.
+  for (const track of candidates.slice(0, 8)) {
     const dlUrl: string | undefined = track.audiodownload;
     if (!dlUrl) continue;
     try {
@@ -198,7 +217,7 @@ async function discoverFromJamendo(
         source: "jamendo",
       };
       console.log(`[Music] Jamendo downloaded "${trackInfo}" (${(buf.length / 1024).toFixed(0)} KB, ${track.duration}s)`);
-      return { mp3Path: downloadPath, trackInfo, attribution };
+      return { mp3Path: downloadPath, trackInfo, attribution, trackKey: trackKeyOf(track) };
     } catch (err) {
       console.warn(`[Music] Jamendo download failed for "${track.name}": ${err instanceof Error ? err.message : err}`);
     }

@@ -974,6 +974,11 @@ export async function runReelPipeline(
     }
     console.log(`[Worker] Reel ${jobId} | Downloaded ${mediaFiles.size} shared media files (logo=${hasLogo}, footer=${hasFooter}) for ${reelCreative.variations.length} variation(s)`);
 
+    // Tracks Jamendo track keys used across this job's variations, so two
+    // variations never get the same audio (popular tracks otherwise win every
+    // keyword set). Shared by reference into each renderVariation call.
+    const usedMusicKeys = new Set<string>();
+
     // Render one variation in full isolation. Returns true on success.
     // A single variation's failure (bad Codex output, render crash, OOM, or a
     // transient upload error) must NOT abort its siblings or fail the whole job.
@@ -989,7 +994,9 @@ export async function runReelPipeline(
         musicMood: script.musicMood,
         musicTempo: script.musicTempo,
         durationSec: script.durationSec,
+        excludeKeys: usedMusicKeys, // don't reuse a track another variation already used
       });
+      if (music.trackKey) usedMusicKeys.add(music.trackKey);
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Music: ${music.source}, ${(music.buffer.length / 1024).toFixed(0)} KB`);
 
       // Update status to generating for the first variation
