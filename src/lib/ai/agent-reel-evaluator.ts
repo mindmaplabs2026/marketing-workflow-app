@@ -22,6 +22,12 @@ export async function evaluateReel(input: {
   mp4Path: string;
   schoolName: string;
   reelDirection: string;
+  /** The art direction the reel was SUPPOSED to deliver — judged for adherence. */
+  artDirection?: {
+    visualRegister?: string;
+    colorPalette?: string[];
+    typography?: { heading: string; body: string; accent?: string };
+  };
   costTracker?: CostTracker;
 }): Promise<ReelEvaluation> {
   const workDir = path.join(os.tmpdir(), "reel-eval", `${process.pid}-${Date.now()}`);
@@ -50,16 +56,21 @@ export async function evaluateReel(input: {
     > = [
       {
         type: "text",
-        text: `You are evaluating an Instagram Reel video for a school named "${input.schoolName}".
+        text: `You are the CREATIVE DIRECTOR reviewing the rendered Instagram Reel for a school named "${input.schoolName}" against the art direction you specified.
+
 Creative direction: "${input.reelDirection}"
+${input.artDirection?.visualRegister ? `Intended visual register: ${input.artDirection.visualRegister}` : ""}
+${input.artDirection?.colorPalette?.length ? `Intended COLOUR PALETTE (the reel should clearly use these): ${input.artDirection.colorPalette.join(", ")}` : ""}
+${input.artDirection?.typography ? `Intended TYPOGRAPHY — heading: ${input.artDirection.typography.heading}, body: ${input.artDirection.typography.body}${input.artDirection.typography.accent ? `, accent: ${input.artDirection.typography.accent}` : ""}` : ""}
 
 Below are ${keyframes.length} evenly-spaced keyframes from the rendered video. Evaluate the reel on:
 
 1. VISUAL QUALITY (0-10): Is it visually polished? Good composition, no rendering artifacts?
-2. TEXT READABILITY (0-10): Can text overlays be read clearly? Proper contrast?
-3. BRAND PRESENCE (0-10): Is the school logo/name visible? Consistent branding?
+2. TEXT READABILITY (0-10): Can text overlays be read clearly? Proper contrast? No text smaller than ~28px? Nothing flush to the frame edges?
+3. BRAND PRESENCE (0-10): Is the school logo/name visible and a reasonable size (not tiny, not boxed in a big padded square)?
 4. VISUAL COHERENCE (0-10): Do the keyframes look like they belong to the same video? Consistent style?
 5. ENGAGEMENT (0-10): Would this stop a scroll on Instagram? Is it visually interesting?
+6. DIRECTION ADHERENCE (0-10): Does the render MATCH the intended visual register, colour palette, and typography above? Score LOW if it ignored the palette/fonts, looks generic, or resembles a stock template instead of the specified register. Name the specific mismatch in weaknesses (e.g. "palette is blue/grey but spec was warm terracotta", "headings are a default sans, spec was Playfair Display").
 
 Return JSON:
 {
@@ -68,10 +79,11 @@ Return JSON:
   "brand_presence": number,
   "visual_coherence": number,
   "engagement": number,
-  "overall_score": number (average of all 5),
+  "direction_adherence": number,
+  "overall_score": number (average of all 6),
   "strengths": ["...", "..."],
   "weaknesses": ["...", "..."],
-  "feedback": "one paragraph summary with specific improvement suggestions"
+  "feedback": "one paragraph summary with specific, actionable fixes — call out any palette/font/register drift first"
 }`,
       },
     ];

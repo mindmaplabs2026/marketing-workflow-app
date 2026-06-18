@@ -552,16 +552,18 @@ Here is the ORIGINAL Reel.tsx code that needs improvement:
 ${input.originalCode}
 \`\`\`
 
-CREATIVE DIRECTION (unchanged):
+CREATIVE DIRECTION — this is the spec the render MUST match (fix any drift from it):
 - Direction: ${input.script.direction}
 - Visual Register: ${input.script.visualRegister}
 - Theme: ${input.script.theme}
+- COLOUR PALETTE (use these EXACT hex values — if the render drifted to other colours, correct it): ${input.script.colorPalette.join(", ")}
+- TYPOGRAPHY (use these EXACT fonts): heading ${input.script.typography.heading}, body ${input.script.typography.body}${input.script.typography.accent ? `, accent ${input.script.typography.accent}` : ""}
 
 RULES:
-1. Fix the specific weaknesses listed above
-2. Keep the same overall structure and creative direction
+1. Fix the specific weaknesses listed above. If the feedback flags palette/font/register drift, that is the FIRST thing to correct — make the colours and fonts match the spec above exactly.
+2. Keep the same overall structure and creative direction; do NOT regress to a generic/stock look.
 3. Export "Reel" (React.FC) and "REEL_DURATION" (number in frames)
-4. Canvas: 1080x1920, 30fps
+4. Canvas: 1080x1920, 30fps. Keep text/logo/graphics within the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom); no text below ${MIN_FONT_PX}px; logo sized to its bounds (never tiny, never in a big padded square).
 5. Use only: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
 6. Media paths: use staticFile("media/filename.ext") and staticFile("music/track.mp3") — NEVER include "public/" in the path
 7. Write COMPLETE, COMPILABLE TypeScript

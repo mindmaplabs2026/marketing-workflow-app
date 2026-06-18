@@ -77,13 +77,25 @@ type ReelAgent2Input = {
   requestedDurationSec: number;
   schoolName: string;
   schoolGuidelines?: string | null;
+  /** Actual curated media (image URL / a video keyframe) so the director can SEE
+   *  the footage and choose a palette/mood that complements it — not direct blind. */
+  curatedMedia?: { path: string; url: string; mediaType: "image" | "video"; description: string }[];
+  /** Brand anchor colors extracted from the school logo, to keep palettes on-brand. */
+  brandColors?: string[];
 };
 
 const SYSTEM_PROMPT = `You are an expert creative director specializing in short-form vertical video (Instagram Reels) for school marketing.
 
+You are a CREATIVE DIRECTOR, not just a scriptwriter. The colour palette, typography,
+and visual register you choose are BINDING — a downstream agent writes the actual
+React/Remotion code to YOUR spec. Direct from what you SEE, not from a synopsis.
+
 You will receive:
 - An analysis of the request theme, curated images/videos, and audience (from a prior agent).
-- School brand assets (logo, header, footer images).
+- The ACTUAL curated photos and a keyframe from each video (attached as images) — LOOK at them:
+  their real colours, lighting, and mood must drive your palette and register choices, so the
+  design complements the footage instead of fighting it.
+- School brand assets (logo, header, footer images) and the school's BRAND COLOURS.
 - A requested duration (the teacher's preference — you may cap this based on available content).
 
 Your job is to produce 3 different creative direction "reel scripts" — each is a detailed blueprint for an AI to write a Remotion (React) composition that renders a vertical 9:16 MP4 video.
@@ -195,10 +207,19 @@ MUSIC MOOD:
 - Specify tempo: "slow" for reflective, "moderate" for balanced, "fast" for energetic
 - The music will be trimmed to match the reel duration automatically
 
+COLOR PALETTE (direct from the footage + brand):
+- Build each variation's 4-6 colour palette from what you SEE in the attached curated media
+  (dominant tones, lighting, mood) so the design complements the photos/videos.
+- Anchor the palette to the school's BRAND COLOURS when provided: include at least one brand
+  colour (or a close, tasteful variant) so the reel stays on-brand. Do not ignore them.
+- The 3 variations MUST have DISTINCT palettes (different mood/temperature), not three
+  near-identical colour sets. Provide real hex values.
+
 TYPOGRAPHY:
 - Use Google Fonts only (they're available via @remotion/google-fonts)
 - Good choices: Poppins, Inter, Caveat (handwriting), Playfair Display (serif), JetBrains Mono (code), Cormorant Garamond (elegant)
 - Specify heading + body fonts, optionally an accent font
+- The 3 variations should use DISTINCT typography (don't reuse the same font pairing for all three)
 
 Return ONLY valid JSON matching this schema:
 {
@@ -266,9 +287,14 @@ export async function runReelCreativeAgent(
     (img) => img.mediaType === "video" || (!img.mediaType && /\.(mp4|mov|webm|avi)$/i.test(img.path)),
   ).length;
 
+  const brandColorsLine = input.brandColors?.length
+    ? `## Brand colours (anchor palettes to these): ${input.brandColors.join(", ")}`
+    : "";
+
   const userMessage = `## School: ${input.schoolName}
 ## Requested duration: ${input.requestedDurationSec} seconds
 ## Media: ${imageCount} images, ${videoCount} videos (${input.understanding.curatedImages.length} total curated)
+${brandColorsLine}
 
 ## Theme Analysis (from prior agent)
 - Theme: ${input.understanding.theme}
@@ -305,8 +331,28 @@ Create 3 different reel script variations. Each should use a DISTINCT visual reg
     });
   }
 
+  // Attach the ACTUAL curated media so the director chooses palette/mood from the
+  // real footage. Low detail keeps cost down — enough to read colour and mood.
+  const curatedMedia = input.curatedMedia ?? [];
+  if (curatedMedia.length) {
+    userContent.push({
+      type: "text",
+      text: `\n[CURATED MEDIA BELOW — look at these to choose palettes/registers that complement the real footage]`,
+    });
+    for (const m of curatedMedia) {
+      userContent.push({
+        type: "text",
+        text: `[${m.mediaType}: ${m.path.split("/").pop()}${m.mediaType === "video" ? " (keyframe)" : ""}]`,
+      });
+      userContent.push({
+        type: "image_url",
+        image_url: { url: m.url, detail: "low" },
+      });
+    }
+  }
+
   console.log(
-    `[ReelAgent2] ${input.understanding.curatedImages.length} curated media, ${brandWithUrls.length} brand assets, requested ${input.requestedDurationSec}s`,
+    `[ReelAgent2] ${input.understanding.curatedImages.length} curated media, ${curatedMedia.length} shown to director, ${brandWithUrls.length} brand assets, brand colours [${(input.brandColors ?? []).join(", ") || "none"}], requested ${input.requestedDurationSec}s`,
   );
 
   const response = await withRateLimitRetry(() =>

@@ -42,6 +42,46 @@ type PosterType = "single" | "carousel";
 type Worst = { score: number; feedback: string; pageIndex: number };
 
 /**
+ * Extract a few dominant anchor colours (hex) from a logo image, so the creative
+ * director can keep palettes on-brand. Downscales to a tiny grid, ignores
+ * transparent/near-white/near-black pixels, buckets the rest, returns the most
+ * common. Best-effort — returns [] on any failure.
+ */
+async function extractBrandColors(buffer: Buffer, max = 3): Promise<string[]> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const { data, info } = await sharp(buffer)
+      .resize(24, 24, { fit: "inside" })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const ch = info.channels;
+    const buckets = new Map<string, { r: number; g: number; b: number; n: number }>();
+    for (let i = 0; i < data.length; i += ch) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const a = ch >= 4 ? data[i + 3] : 255;
+      if (a < 128) continue;                       // transparent
+      const hi = Math.max(r, g, b), lo = Math.min(r, g, b);
+      if (hi > 240 && lo > 240) continue;          // near-white (background)
+      if (hi < 24) continue;                        // near-black
+      const key = `${Math.round(r / 32)},${Math.round(g / 32)},${Math.round(b / 32)}`;
+      const e = buckets.get(key) ?? { r: 0, g: 0, b: 0, n: 0 };
+      e.r += r; e.g += g; e.b += b; e.n++;
+      buckets.set(key, e);
+    }
+    return [...buckets.values()]
+      .sort((x, y) => y.n - x.n)
+      .slice(0, max)
+      .map((e) => {
+        const c = (v: number) => Math.round(v / e.n).toString(16).padStart(2, "0");
+        return `#${c(e.r)}${c(e.g)}${c(e.b)}`;
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Evaluate the latest variation's pages (re-implements aiPipelineEvaluate
  * without sending events). Writes the _evaluation block + costs, and returns
  * whether the caller should finalize or refine the worst page.
@@ -820,6 +860,37 @@ export async function runReelPipeline(
     // --- Agent 2: Reel Script ---
     console.log(`[Worker] Reel ${jobId} | ── Agent 2: Reel Script ──`);
 
+    // Give the creative director the ACTUAL footage to look at: one image URL per
+    // unique curated path (a video uses one of its keyframes). Low detail; capped.
+    const curatedMediaForDirector: { path: string; url: string; mediaType: "image" | "video"; description: string }[] = [];
+    {
+      const seen = new Set<string>();
+      for (const c of understanding.curatedImages) {
+        if (seen.has(c.path)) continue;
+        seen.add(c.path);
+        const url = c.mediaType === "video"
+          ? videoThumbnails.find((v) => v.path === c.path && v.signedUrl)?.signedUrl
+          : ctx.images.find((i) => i.path === c.path)?.signedUrl;
+        if (url) {
+          curatedMediaForDirector.push({ path: c.path, url, mediaType: c.mediaType ?? "image", description: c.description });
+        }
+        if (curatedMediaForDirector.length >= 15) break;
+      }
+    }
+
+    // Extract brand anchor colours from the logo so palettes stay on-brand.
+    let brandColors: string[] = [];
+    const logoForColors = ctx.brandAssets.find((a) => a.assetType === "logo");
+    if (logoForColors?.storagePath) {
+      try {
+        const { data } = await admin.storage.from("school-assets").download(logoForColors.storagePath);
+        if (data) brandColors = await extractBrandColors(Buffer.from(await data.arrayBuffer()));
+      } catch { /* best-effort */ }
+    }
+    if (brandColors.length) {
+      console.log(`[Worker] Reel ${jobId} | Brand colours from logo: ${brandColors.join(", ")}`);
+    }
+
     const a2Costs = new CostTracker();
     const reelCreative = await runReelCreativeAgent({
       understanding,
@@ -832,6 +903,8 @@ export async function runReelPipeline(
       requestedDurationSec: effectiveDuration,
       schoolName: ctx.schoolName,
       schoolGuidelines: ctx.schoolGuidelines,
+      curatedMedia: curatedMediaForDirector,
+      brandColors,
     }, a2Costs);
     await appendCosts(jobId, a2Costs.toJSON());
 
@@ -1009,7 +1082,7 @@ export async function runReelPipeline(
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Evaluating`);
       let currentOutputPath = renderResult.outputPath;
       let currentCleanup = renderResult.cleanup;
-      let currentComposition = composition;
+      const currentComposition = composition;
 
       try {
         const evalCosts = new CostTracker();
@@ -1017,6 +1090,11 @@ export async function runReelPipeline(
           mp4Path: currentOutputPath,
           schoolName: ctx.schoolName,
           reelDirection: script.direction,
+          artDirection: {
+            visualRegister: script.visualRegister,
+            colorPalette: script.colorPalette,
+            typography: script.typography,
+          },
           costTracker: evalCosts,
         });
         await appendCosts(jobId, evalCosts.toJSON());
