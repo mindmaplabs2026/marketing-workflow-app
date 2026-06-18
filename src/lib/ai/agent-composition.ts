@@ -313,16 +313,20 @@ function buildPrompt(
 ): string {
   return `You are writing a Remotion composition (React/TypeScript component) for an Instagram Reel video.
 
-## CREATIVE DIRECTION
+Build the reel's VISUAL IDENTITY from the CREATIVE DIRECTION, COLOR PALETTE, and
+TYPOGRAPHY below — that is the binding spec. The example compositions near the end
+are TECHNIQUE references only; never copy their colors, fonts, text, or layout.
+
+## CREATIVE DIRECTION (the BINDING spec for how this reel must look — build THIS, from scratch)
 - Direction: ${script.direction}
 - Visual Register: ${script.visualRegister}
 - Theme: ${script.theme}
 - Animation Style: ${script.animationStyle}
 
-## COLOR PALETTE
+## COLOR PALETTE (use these EXACT hex values — do NOT substitute any example's colors)
 ${script.colorPalette.map((c) => `  ${c}`).join("\n")}
 
-## TYPOGRAPHY
+## TYPOGRAPHY (use these EXACT fonts — do NOT substitute any example's fonts)
 - Heading: ${script.typography.heading}
 - Body: ${script.typography.body}
 ${script.typography.accent ? `- Accent: ${script.typography.accent}` : ""}
@@ -362,7 +366,22 @@ ${apiRef}
 ${helpers}
 \`\`\`
 
-## EXAMPLE COMPOSITIONS (study these for patterns, but create something ORIGINAL)
+## EXAMPLE COMPOSITIONS — TECHNIQUE REFERENCE ONLY (do NOT copy their look)
+These exist to show you HOW to use Remotion — the mechanics ONLY: how to structure
+Sequences/Series, drive animation with spring()/interpolate(), use TransitionSeries,
+load fonts, layer elements, time scenes. Learn the CODE TECHNIQUE from them.
+
+You MUST NOT reproduce their visual identity. Do NOT copy from the examples:
+- their colors / palette → use the COLOR PALETTE above (those exact hex values)
+- their fonts → use the TYPOGRAPHY above
+- their text / copy / headlines → use the SCENES + title/closing cards above
+- their specific layouts, backgrounds, decorative motifs, or graphic flourishes
+An example may be in a COMPLETELY different style than this reel's CREATIVE DIRECTION —
+that is expected and fine. Your output must look like the CREATIVE DIRECTION + VISUAL
+REGISTER + COLOR PALETTE + TYPOGRAPHY above, NOT like any example. If your result
+resembles an example's colors, fonts, or layout, you have done it WRONG — rebuild the
+described register from scratch, using the example purely for Remotion technique.
+
 ${examples.join("\n\n")}
 
 ## LAYOUT SAFETY & LEGIBILITY
@@ -451,7 +470,11 @@ function extractCode(raw: string): CompositionCode {
 }
 
 /**
- * Pick 2 example files most relevant to the visual register description.
+ * Pick 2 example files: the BEST match for the visual register (so the model
+ * sees the right Remotion technique for this style) AND a deliberately DIFFERENT
+ * one. Showing two unlike examples stops the model from cloning a single template
+ * and reinforces that technique transfers across styles — the visual identity must
+ * come from the ReelScript, not from any one example.
  */
 async function pickRelevantExamples(
   visualRegister: string,
@@ -473,18 +496,21 @@ async function pickRelevantExamples(
     ["story-slides.md", scoreMatch(lower, ["story", "stories", "instagram", "sticker", "casual", "fun", "gen-z", "colorful", "swipe", "playful"])],
   ];
 
-  // Sort by score descending, pick top 2
   scores.sort((a, b) => b[1] - a[1]);
+  const exists = (file: string) =>
+    fs.stat(path.join(examplesDir, file)).then(() => true).catch(() => false);
 
-  // Verify files exist
   const picked: string[] = [];
+  // 1) Best match — the right technique for this register.
   for (const [file] of scores) {
-    const exists = await fs.stat(path.join(examplesDir, file)).then(() => true).catch(() => false);
-    if (exists) picked.push(file);
-    if (picked.length === 2) break;
+    if (await exists(file)) { picked.push(file); break; }
   }
-
-  // If fewer than 2 found, just return what we have
+  // 2) Most DIFFERENT existing example — breaks single-template cloning.
+  for (let i = scores.length - 1; i >= 0; i--) {
+    const file = scores[i][0];
+    if (picked.includes(file)) continue;
+    if (await exists(file)) { picked.push(file); break; }
+  }
   return picked;
 }
 
