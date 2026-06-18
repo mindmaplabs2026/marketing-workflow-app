@@ -35,6 +35,11 @@ const CPP_MODEL = process.env.WHISPER_CPP_MODEL;            // presence => use w
 const CPP_BIN = process.env.WHISPER_CPP_BIN ?? "whisper-cli";
 const OPENAI_CMD = process.env.WHISPER_CMD ?? "whisper";
 const OPENAI_MODEL = process.env.WHISPER_MODEL ?? "base";
+// Spoken language. "auto" lets a multilingual model (large-v3) detect it —
+// required for Kannada/Hindi/etc. Set a specific code (e.g. "kn", "en") to force.
+const WHISPER_LANG = process.env.WHISPER_LANG ?? "auto";
+// Translate the transcript to English instead of keeping the original language.
+const WHISPER_TRANSLATE = String(process.env.WHISPER_TRANSLATE ?? "").toLowerCase() === "true";
 
 type Backend = "cpp" | "openai";
 const backend: Backend = CPP_MODEL ? "cpp" : "openai";
@@ -69,7 +74,8 @@ export async function transcribeVideo(
 ): Promise<TranscriptSegment[] | null> {
   if (!(await checkWhisperAvailable())) return null;
 
-  const timeoutMs = opts?.timeoutMs ?? Number(process.env.WHISPER_TIMEOUT_MS ?? 240_000);
+  // large-v3 is ~0.4-0.5x realtime, so a long clip needs headroom before we abort.
+  const timeoutMs = opts?.timeoutMs ?? Number(process.env.WHISPER_TIMEOUT_MS ?? 600_000);
   const outDir = path.join(
     os.tmpdir(),
     "whisper-out",
@@ -103,11 +109,9 @@ async function transcribeWithCpp(
   );
 
   const ofBase = path.join(outDir, "out");
-  await runProc(
-    CPP_BIN,
-    ["-m", CPP_MODEL!, "-f", wav, "-l", "en", "-oj", "-of", ofBase],
-    timeoutMs,
-  );
+  const cppArgs = ["-m", CPP_MODEL!, "-f", wav, "-l", WHISPER_LANG, "-oj", "-of", ofBase];
+  if (WHISPER_TRANSLATE) cppArgs.push("-tr"); // translate to English
+  await runProc(CPP_BIN, cppArgs, timeoutMs);
 
   const data = JSON.parse(await fs.readFile(`${ofBase}.json`, "utf8")) as {
     transcription?: { offsets?: { from: number; to: number }; text?: string }[];
@@ -131,19 +135,18 @@ async function transcribeWithOpenAI(
   outDir: string,
   timeoutMs: number,
 ): Promise<TranscriptSegment[] | null> {
-  await runProc(
-    OPENAI_CMD,
-    [
-      mediaPath,
-      "--model", OPENAI_MODEL,
-      "--output_format", "json",
-      "--output_dir", outDir,
-      "--language", "en",
-      "--fp16", "False",
-      "--verbose", "False",
-    ],
-    timeoutMs,
-  );
+  const oaiArgs = [
+    mediaPath,
+    "--model", OPENAI_MODEL,
+    "--output_format", "json",
+    "--output_dir", outDir,
+    "--fp16", "False",
+    "--verbose", "False",
+  ];
+  // openai-whisper has no "auto" — omit --language to auto-detect, else force it.
+  if (WHISPER_LANG && WHISPER_LANG !== "auto") oaiArgs.push("--language", WHISPER_LANG);
+  if (WHISPER_TRANSLATE) oaiArgs.push("--task", "translate");
+  await runProc(OPENAI_CMD, oaiArgs, timeoutMs);
 
   const files = await fs.readdir(outDir);
   const jsonFile = files.find((f) => f.endsWith(".json"));
