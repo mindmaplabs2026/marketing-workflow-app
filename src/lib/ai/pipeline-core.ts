@@ -23,6 +23,7 @@ import { runUnderstandingAgent } from "./agent-understanding";
 import { runCreativeAgent } from "./agent-creative";
 import { evaluatePoster, refineAndRegenerate } from "./agent-generation";
 import type { UnderstandingOutput, UploadedImage } from "./agent-understanding";
+import { transcribeVideo, type TranscriptSegment } from "./transcribe";
 import type { VariationBrief } from "./agent-creative";
 import {
   fetchContext,
@@ -448,6 +449,9 @@ export async function runReelPipeline(
     // For videos, extract thumbnail frames so Agent 1 can "see" them.
     // Agent 1's vision API only accepts images, not video files.
     const videoThumbnails: UploadedImage[] = [];
+    // Per-video timestamped transcripts (Whisper). Best-effort; empty if Whisper
+    // is not installed. Fed to Agent 1 so it can pick segments by content.
+    const videoTranscripts: Record<string, TranscriptSegment[]> = {};
     if (videoUploads.length > 0) {
       const fsPromises = await import("node:fs").then((m) => m.promises);
       const pathMod = await import("node:path");
@@ -473,6 +477,16 @@ export async function runReelPipeline(
           const vidBuffer = Buffer.from(await res.arrayBuffer());
           await fsPromises.writeFile(vidPath, vidBuffer);
           console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: downloaded ${(vidBuffer.length / 1024).toFixed(0)} KB`);
+
+          // Transcribe (best-effort, local Whisper) so Agent 1 can pick segments
+          // by what's said. No-op if Whisper isn't installed.
+          try {
+            const segs = await transcribeVideo(vidPath);
+            if (segs && segs.length) {
+              videoTranscripts[vid.path] = segs;
+              console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: transcribed ${segs.length} segment(s)`);
+            }
+          } catch { /* best-effort */ }
 
           // Get video duration with ffprobe
           let durationSec = 0;
@@ -588,10 +602,49 @@ export async function runReelPipeline(
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       schoolGuidelines: ctx.schoolGuidelines,
       maxShortlist,
+      videoTranscripts,
     }, a1Costs);
     await appendCosts(jobId, a1Costs.toJSON());
 
     console.log(`[Worker] Reel ${jobId} | Agent1: theme="${understanding.theme}", ${understanding.curatedImages.length} curated (requested up to ${maxShortlist})`);
+
+    // ─── VALIDATE & CANONICALIZE CURATED PATHS ─────────────────────
+    // Agent 1 is shown the real upload paths, but the model sometimes echoes its
+    // own vision labels instead (e.g. "img11.jpg" — the names the Codex bridge
+    // assigns to attached images), or returns a video keyframe thumbnail as if it
+    // were a still upload. Those phantom paths match no real file, so the media
+    // download logs "Media not found" and the render 404s. Drop any curated item
+    // that maps to no REAL uploaded file, and canonicalize matched items to the
+    // real storage path + correct mediaType.
+    const realUploads = [
+      ...imageUploads.map((u) => ({ path: u.path, mediaType: "image" as const })),
+      ...videoUploads.map((u) => ({ path: u.path, mediaType: "video" as const })),
+    ];
+    const matchRealUpload = (curatedPath: string) => {
+      const fn = curatedPath.split("/").pop() ?? "";
+      return (
+        realUploads.find((u) => u.path === curatedPath) ??
+        realUploads.find((u) => u.path.endsWith(curatedPath) || curatedPath.endsWith(u.path)) ??
+        realUploads.find((u) => (u.path.split("/").pop() ?? "") === fn) ??
+        null
+      );
+    };
+    {
+      const validated: typeof understanding.curatedImages = [];
+      let droppedPhantom = 0;
+      for (const c of understanding.curatedImages) {
+        const real = matchRealUpload(c.path);
+        if (real) {
+          validated.push({ ...c, path: real.path, mediaType: real.mediaType });
+        } else {
+          droppedPhantom++;
+        }
+      }
+      understanding.curatedImages = validated;
+      if (droppedPhantom > 0) {
+        console.log(`[Worker] Reel ${jobId} | Dropped ${droppedPhantom} phantom curated item(s) matching no real upload (likely keyframe/vision labels). ${validated.length} remain.`);
+      }
+    }
 
     // PROGRAMMATIC VIDEO INJECTION: Agent 1 often drops videos from the curated
     // list because still frames look worse than photos. For reels, videos are
@@ -641,48 +694,121 @@ export async function runReelPipeline(
       console.log(`[Worker] Reel ${jobId} | Agent 1 included ${curatedVideoCount}/${videoUploads.length} videos in curated list`);
     }
 
-    // ─── CONTENT-DRIVEN DURATION CALCULATOR ────────────────────────
-    // Calculate natural duration from curated content, then cap it.
-    const TITLE_CLOSING_SEC = 8; // 4s title + 4s closing
-    const IMAGE_SCENE_SEC = 4;   // avg seconds per image scene
-    const VIDEO_TRIM_DEFAULT = 6; // default trim window for videos without suggestion
+    // ─── CONTENT-DRIVEN DURATION CALCULATOR (PER-SCENE) ────────────
+    // The requested duration is a TARGET, not just a ceiling. We measure how much
+    // the curated content can fill, scene by scene, and target min(requested,
+    // capacity) — filling toward the request when there's material, staying short
+    // (no padding) when there isn't.
+    //
+    // The cap is PER SCENE, not per source file. A single long video (e.g. a
+    // 10-min montage of many moments) is therefore not limited to one short clip:
+    // it can supply MANY scenes, each a different trim window. If the model didn't
+    // curate enough segments to reach the target, we deterministically EXPAND —
+    // adding evenly-spaced trim windows across each long video — so one long clip
+    // can fill the whole reel. (The transcript-guided Agent 1 below produces the
+    // best windows; this expansion is the guarantee we never starve the duration.)
+    const TITLE_CLOSING_SEC = 8;   // 4s title + 4s closing
+    const IMAGE_SCENE_SEC = 4;     // seconds per image scene
+    const MIN_VIDEO_SCENE_SEC = Number(process.env.REEL_MIN_VIDEO_SCENE_SEC ?? 4);
+    const MAX_VIDEO_SCENE_SEC = Number(process.env.REEL_MAX_VIDEO_SCENE_SEC ?? 8); // per SCENE
+    const MAX_SEGMENTS_PER_VIDEO = Number(process.env.REEL_MAX_SEGMENTS_PER_VIDEO ?? 24);
+    const VIDEO_TRIM_DEFAULT = 6;  // used when a clip's real length is unknown
+    const target = Math.min(durationCapSec, 300);
 
-    const curatedVideos = understanding.curatedImages.filter((c) => c.mediaType === "video");
-    const curatedImages = understanding.curatedImages.filter((c) => c.mediaType !== "video");
-
-    // Video contribution: use suggested trim or default
-    let videoDurationSec = 0;
-    for (const v of curatedVideos) {
+    // Length one curated video ENTRY occupies as a single scene.
+    const videoSceneLen = (v: { suggestedTrimStart?: number; suggestedTrimEnd?: number; durationSec?: number }): number => {
       if (v.suggestedTrimStart != null && v.suggestedTrimEnd != null) {
-        videoDurationSec += Math.min(v.suggestedTrimEnd - v.suggestedTrimStart, 8);
-      } else if (v.durationSec && v.durationSec <= 10) {
-        videoDurationSec += v.durationSec; // short clip, use whole thing
-      } else {
-        videoDurationSec += VIDEO_TRIM_DEFAULT;
+        return Math.max(MIN_VIDEO_SCENE_SEC, Math.min(v.suggestedTrimEnd - v.suggestedTrimStart, MAX_VIDEO_SCENE_SEC));
+      }
+      if (v.durationSec && v.durationSec > 0) {
+        return Math.max(MIN_VIDEO_SCENE_SEC, Math.min(v.durationSec, MAX_VIDEO_SCENE_SEC));
+      }
+      return VIDEO_TRIM_DEFAULT;
+    };
+    const computeCapacity = () => {
+      const vids = understanding.curatedImages.filter((c) => c.mediaType === "video");
+      const imgs = understanding.curatedImages.filter((c) => c.mediaType !== "video");
+      const v = vids.reduce((s, x) => s + videoSceneLen(x), 0);
+      const i = imgs.length * IMAGE_SCENE_SEC;
+      return { total: TITLE_CLOSING_SEC + v + i, v, i, nVid: vids.length, nImg: imgs.length };
+    };
+
+    let cap = computeCapacity();
+
+    // EXPANSION: under target + videos have unused footage → add spread-out segments.
+    if (cap.total < target) {
+      const videoPaths = [...new Set(
+        understanding.curatedImages.filter((c) => c.mediaType === "video").map((c) => c.path),
+      )];
+      // Precompute evenly-spaced candidate windows per video, skipping any that
+      // overlap a segment the model already curated.
+      const candidates = new Map<string, { start: number; end: number }[]>();
+      for (const vp of videoPaths) {
+        const realDur = videoMeta.get(vp)?.durationSec ?? 0;
+        if (realDur < MIN_VIDEO_SCENE_SEC * 2) continue; // too short to split further
+        const existing = understanding.curatedImages
+          .filter((c) => c.path === vp && c.mediaType === "video")
+          .map((c) => [c.suggestedTrimStart ?? 0, c.suggestedTrimEnd ?? MAX_VIDEO_SCENE_SEC] as const);
+        const n = Math.min(MAX_SEGMENTS_PER_VIDEO, Math.floor(realDur / MAX_VIDEO_SCENE_SEC));
+        const stride = realDur / Math.max(1, n);
+        const wins: { start: number; end: number }[] = [];
+        for (let k = 0; k < n; k++) {
+          const start = Math.round(k * stride);
+          const end = Math.min(Math.round(realDur), start + MAX_VIDEO_SCENE_SEC);
+          if (end - start < MIN_VIDEO_SCENE_SEC) continue;
+          if (existing.some(([s, e]) => start < e && end > s)) continue; // overlaps existing
+          wins.push({ start, end });
+        }
+        if (wins.length) candidates.set(vp, wins);
+      }
+      // Round-robin draw windows across videos until target reached or dry.
+      let added = 0;
+      let progress = true;
+      while (cap.total < target && progress) {
+        progress = false;
+        for (const vp of videoPaths) {
+          if (cap.total >= target) break;
+          const wins = candidates.get(vp);
+          if (!wins || wins.length === 0) continue;
+          const w = wins.shift()!;
+          understanding.curatedImages.push({
+            path: vp,
+            relevanceScore: 60,
+            description: `Additional segment (${w.start}-${w.end}s) from a long video — added to fill the requested ${durationCapSec}s`,
+            quality: "medium",
+            mediaType: "video",
+            durationSec: videoMeta.get(vp)?.durationSec,
+            suggestedTrimStart: w.start,
+            suggestedTrimEnd: w.end,
+          });
+          added++;
+          cap = computeCapacity();
+          progress = true;
+        }
+      }
+      if (added > 0) {
+        console.log(`[Worker] Reel ${jobId} | Expanded ${added} extra video segment(s) from long clip(s) to fill ${target}s.`);
       }
     }
 
-    // Image contribution
-    const imageDurationSec = curatedImages.length * IMAGE_SCENE_SEC;
+    const effectiveDuration = Math.min(target, cap.total);
+    console.log(`[Worker] Reel ${jobId} | Duration calc: ${cap.nVid} video scene(s) (${Math.round(cap.v)}s, ≤${MAX_VIDEO_SCENE_SEC}s each) + ${cap.nImg} image(s) (${Math.round(cap.i)}s) + ${TITLE_CLOSING_SEC}s chrome = ${Math.round(cap.total)}s capacity`);
+    console.log(`[Worker] Reel ${jobId} | Effective duration: ${effectiveDuration}s (requested: ${durationCapSec}s, content capacity: ${Math.round(cap.total)}s)`);
 
-    const naturalDuration = TITLE_CLOSING_SEC + videoDurationSec + imageDurationSec;
-    const effectiveDuration = Math.min(naturalDuration, durationCapSec, 300); // hard cap 5 min
-
-    console.log(`[Worker] Reel ${jobId} | Duration calc: ${curatedVideos.length} videos (${Math.round(videoDurationSec)}s) + ${curatedImages.length} images (${imageDurationSec}s) + ${TITLE_CLOSING_SEC}s chrome = ${Math.round(naturalDuration)}s natural`);
-    console.log(`[Worker] Reel ${jobId} | Effective duration: ${effectiveDuration}s (cap: ${durationCapSec}s, natural: ${Math.round(naturalDuration)}s)`);
-
-    // If natural duration exceeds cap, trim lower-relevance IMAGES (keep all videos)
-    if (naturalDuration > durationCapSec) {
-      const excessSec = naturalDuration - durationCapSec;
+    // If capacity exceeds the target, trim lowest-relevance IMAGES first (keep all
+    // video scenes — videos are the priority for reels).
+    if (cap.total > target) {
+      const excessSec = cap.total - target;
       const imagesToDrop = Math.ceil(excessSec / IMAGE_SCENE_SEC);
-      if (imagesToDrop > 0 && curatedImages.length > imagesToDrop) {
-        // Sort images by relevance ascending, drop lowest
-        const sortedImages = [...curatedImages].sort((a, b) => a.relevanceScore - b.relevanceScore);
+      const imgEntries = understanding.curatedImages.filter((c) => c.mediaType !== "video");
+      if (imagesToDrop > 0 && imgEntries.length > imagesToDrop) {
+        const sortedImages = [...imgEntries].sort((a, b) => a.relevanceScore - b.relevanceScore);
         const dropPaths = new Set(sortedImages.slice(0, imagesToDrop).map((c) => c.path));
         understanding.curatedImages = understanding.curatedImages.filter(
           (c) => c.mediaType === "video" || !dropPaths.has(c.path),
         );
-        console.log(`[Worker] Reel ${jobId} | Trimmed ${imagesToDrop} lowest-relevance images to fit ${durationCapSec}s cap. Now ${understanding.curatedImages.length} curated.`);
+        cap = computeCapacity();
+        console.log(`[Worker] Reel ${jobId} | Trimmed ${imagesToDrop} lowest-relevance image(s) to fit ${target}s. Capacity now ${Math.round(cap.total)}s.`);
       }
     }
 
@@ -873,6 +999,7 @@ export async function runReelPipeline(
           _compositionDataCode: composition.dataTsx,
           _musicSource: music.source,
           _musicPath: musicPath,
+          _musicAttribution: music.attribution ?? null,
         } as unknown as Record<string, unknown>,
         storage_paths: [storagePath],
         poster_type: "reel",

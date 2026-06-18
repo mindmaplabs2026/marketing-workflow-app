@@ -151,9 +151,14 @@ DURATION RULES:
 - NEVER exceed 300 seconds (5 minutes) total regardless of requested duration.
 
 MEDIA ASSIGNMENT RULES:
-- Every curated image/video MUST appear in exactly ONE scene
-- Do NOT duplicate media across scenes
-- MANDATORY VIDEO USAGE: If the curated list contains videos, you MUST use ALL of them.
+- The curated list is a list of ENTRIES. Each entry becomes exactly ONE scene.
+- A long video may appear as SEVERAL entries, each with a DIFFERENT suggested trim
+  window (e.g. the same .mp4 at 0-8s, then 40-48s, then 95-103s). This is intentional:
+  treat each entry as its own distinct scene using ITS OWN trim window. Do NOT collapse
+  them into one scene, and do NOT reuse the same trim window twice.
+- Do NOT reuse the SAME still IMAGE in more than one scene.
+- MANDATORY VIDEO USAGE: If the curated list contains videos, you MUST use ALL of them
+  (every entry, including the multiple trim windows of a long video).
   Videos are MORE valuable than images for reels — they show movement, action, and life.
   A reel with only still images feels like a slideshow. Videos make it feel alive.
   Aim for at least 40-60% of scenes to be video clips when videos are available.
@@ -179,9 +184,11 @@ TEXT OVERLAY PLACEMENT (CRITICAL — avoid covering faces and subjects):
 - Keep text overlays SHORT (3-6 words max) — long text blocks cover more of the image
 
 VERIFY YOUR WORK:
-1. Count videos in the curated list. Count videos in your scenes. They must match.
+1. Count the curated video ENTRIES (a long video split into N trim windows counts as N).
+   Count the video scenes you created. They MUST match — one scene per entry.
 2. Every scene with a .mp4 or .mov file MUST have mediaType: "video", trimStartSec, and trimEndSec.
-3. If you have 8 curated items and 3 are videos, your scenes MUST include exactly 3 video scenes.
+3. If a video has 3 curated trim windows, your scenes MUST include 3 separate scenes for it,
+   each using its own window — never just one.
 
 MUSIC MOOD:
 - Provide 2-4 keywords for Pixabay music search (e.g., ["upbeat", "acoustic", "school"])

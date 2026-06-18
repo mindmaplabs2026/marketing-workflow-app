@@ -4,15 +4,28 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+/** Attribution + license info for a discovered track (Creative Commons). */
+export type MusicAttribution = {
+  artist?: string;
+  title?: string;
+  /** License URL (e.g. the CC license deed) — needed when crediting. */
+  licenseUrl?: string;
+  /** Track page URL on the source. */
+  trackUrl?: string;
+  source: string;
+};
+
 export type MusicResult = {
   /** Buffer of the trimmed MP3 file. */
   buffer: Buffer;
   /** Filename for the trimmed track. */
   filename: string;
-  /** Source: "pixabay" or "fallback-library". */
+  /** Source: "jamendo", "curated-library", or "fallback-silent". */
   source: string;
-  /** Original track info (if Pixabay). */
+  /** Original track info (artist — title, if from Jamendo). */
   trackInfo?: string;
+  /** Attribution/license metadata for crediting (CC tracks usually require it). */
+  attribution?: MusicAttribution;
 };
 
 /**
@@ -20,11 +33,17 @@ export type MusicResult = {
  * then trim it to the target duration with ffmpeg fade-in/out.
  *
  * Strategy:
- *   1. Use Codex to browse Pixabay's music search page and extract a download URL.
- *   2. Download the MP3.
- *   3. Trim with ffmpeg: exact duration + 0.5s fade-in + 2s fade-out.
+ *   1. Query the Jamendo API (official REST/JSON) for a Creative-Commons track
+ *      matching the mood keywords, and download its direct MP3 URL.
+ *   2. Trim with ffmpeg: exact duration + 0.5s fade-in + 2s fade-out.
  *
- * If Pixabay discovery fails after retries, falls back to a curated local library.
+ * (We previously scraped Pixabay via `curl`, but Pixabay sits behind a Cloudflare
+ * bot challenge — curl gets a 403 "Just a moment..." page with no audio URLs, so
+ * it failed 100% of the time. Jamendo exposes a real JSON API with direct
+ * `audiodownload` MP3 links and no bot wall, so plain Node fetch works headless.)
+ *
+ * If Jamendo discovery fails after retries, falls back to a curated local library,
+ * then to a silent track.
  */
 export async function findAndTrimMusic(input: {
   musicMood: string[];
@@ -36,7 +55,7 @@ export async function findAndTrimMusic(input: {
   await fs.mkdir(workDir, { recursive: true });
 
   try {
-    // Try Pixabay discovery up to 3 times with broadening keywords
+    // Try Jamendo discovery up to 3 times with broadening keywords
     const keywordSets = [
       input.musicMood.join(" "),
       input.musicMood.slice(0, 2).join(" "),
@@ -45,33 +64,34 @@ export async function findAndTrimMusic(input: {
 
     for (let attempt = 0; attempt < keywordSets.length; attempt++) {
       const keywords = keywordSets[attempt];
-      console.log(`[Music] Attempt ${attempt + 1}/3: searching Pixabay for "${keywords}"`);
+      console.log(`[Music] Attempt ${attempt + 1}/3: searching Jamendo for "${keywords}"`);
 
       try {
-        const mp3Path = await discoverFromPixabay(keywords, workDir, input.timeoutMs ?? 120_000);
-        if (mp3Path) {
+        const found = await discoverFromJamendo(keywords, input.durationSec, workDir, input.timeoutMs ?? 60_000);
+        if (found) {
           // Archive the ORIGINAL (untrimmed) track into our permanent library so
           // it's reusable at any duration and feeds the curated fallback over time.
           // Best-effort — never blocks the reel.
-          await archiveToMusicLibrary(mp3Path, input.musicMood, input.musicTempo).catch(() => {});
+          await archiveToMusicLibrary(found.mp3Path, input.musicMood, input.musicTempo).catch(() => {});
 
-          const trimmedPath = await trimWithFfmpeg(mp3Path, input.durationSec, workDir);
+          const trimmedPath = await trimWithFfmpeg(found.mp3Path, input.durationSec, workDir);
           const buffer = await fs.readFile(trimmedPath);
-          console.log(`[Music] Success — Pixabay track trimmed to ${input.durationSec}s (${(buffer.length / 1024).toFixed(0)} KB)`);
+          console.log(`[Music] Success — Jamendo track "${found.trackInfo}" trimmed to ${input.durationSec}s (${(buffer.length / 1024).toFixed(0)} KB)`);
           return {
             buffer,
             filename: "track.mp3",
-            source: "pixabay",
-            trackInfo: keywords,
+            source: "jamendo",
+            trackInfo: found.trackInfo,
+            attribution: found.attribution,
           };
         }
       } catch (err) {
-        console.warn(`[Music] Pixabay attempt ${attempt + 1} failed: ${err instanceof Error ? err.message : err}`);
+        console.warn(`[Music] Jamendo attempt ${attempt + 1} failed: ${err instanceof Error ? err.message : err}`);
       }
     }
 
     // Fallback: try curated library from Supabase Storage
-    console.warn("[Music] All Pixabay attempts failed — trying curated library");
+    console.warn("[Music] All Jamendo attempts failed — trying curated library");
     try {
       const fallbackResult = await pickFromCuratedLibrary(input.musicMood, input.musicTempo, input.durationSec, workDir);
       if (fallbackResult) return fallbackResult;
@@ -96,56 +116,96 @@ export async function findAndTrimMusic(input: {
 }
 
 /**
- * Use Codex to browse Pixabay music search and download a track.
- * Returns the local path to the downloaded MP3, or null if not found.
+ * Discover a royalty-free track from the Jamendo API and download its MP3.
+ *
+ * Jamendo exposes an official JSON API (no Cloudflare bot wall), so this is a
+ * plain Node fetch — no Codex/browser needed. Requires a free client_id in the
+ * JAMENDO_CLIENT_ID env var (register at https://devportal.jamendo.com/).
+ *
+ * Returns the local MP3 path + a human-readable "artist — title", or null.
  */
-async function discoverFromPixabay(
+async function discoverFromJamendo(
   keywords: string,
+  durationSec: number,
   workDir: string,
   timeoutMs: number,
-): Promise<string | null> {
-  const outFile = path.join(workDir, "codex-music-output.txt");
+): Promise<{ mp3Path: string; trackInfo: string; attribution: MusicAttribution } | null> {
+  const clientId = process.env.JAMENDO_CLIENT_ID;
+  if (!clientId) {
+    console.warn("[Music] JAMENDO_CLIENT_ID not set — skipping Jamendo discovery");
+    return null;
+  }
+
   const downloadPath = path.join(workDir, "downloaded.mp3");
+  const tags = encodeURIComponent(keywords.trim().replace(/\s+/g, "+"));
+  // mp32 = full 320kbps MP3; audiodownload_allowed=true ensures the track is
+  // legally downloadable; order by popularity for quality; fuzzytags matches mood.
+  const apiUrl =
+    `https://api.jamendo.com/v3.0/tracks/?client_id=${clientId}` +
+    `&format=json&limit=20&fuzzytags=${tags}` +
+    `&audioformat=mp32&audiodownload_allowed=true&include=musicinfo+licenses&order=popularity_total`;
 
-  const prompt = `You are a music researcher. Your task is to find and download ONE royalty-free music track from Pixabay using ONLY command-line tools (curl/wget). Do this entirely in the shell.
+  // Pull the candidate list from the JSON API.
+  const listJson = await fetchWithTimeout(apiUrl, timeoutMs).then((r) => r.json());
+  if (listJson?.headers?.status !== "success") {
+    console.warn(`[Music] Jamendo API error: ${listJson?.headers?.error_message ?? "unknown"}`);
+    return null;
+  }
+  const results: any[] = Array.isArray(listJson.results) ? listJson.results : [];
+  if (results.length === 0) return null;
 
-ABSOLUTE RULE — NO BROWSER:
-- Do NOT open or use a web browser, Chrome, Chromium, Playwright, Puppeteer, the browser tool, or any GUI/headless browser. None of that is allowed or needed.
-- Use ONLY shell commands: curl (or wget) to fetch HTML and download files. Parse HTML with grep/sed/python from the command line.
+  // Prefer instrumental tracks at least as long as the reel; otherwise take the
+  // longest available so ffmpeg has enough material to trim to durationSec.
+  const isInstrumental = (t: any) =>
+    String(t?.musicinfo?.vocalinstrumental ?? "").toLowerCase() === "instrumental";
+  const longEnough = results.filter((t) => Number(t.duration) >= durationSec);
+  const pool = longEnough.length ? longEnough : results;
+  pool.sort((a, b) => {
+    const ai = isInstrumental(a) ? 0 : 1;
+    const bi = isInstrumental(b) ? 0 : 1;
+    if (ai !== bi) return ai - bi; // instrumental first
+    return Number(b.duration) - Number(a.duration); // then longest
+  });
 
-STEPS (all via shell):
-1. Fetch the search page HTML with curl (send a normal browser User-Agent header):
-   curl -sL -A "Mozilla/5.0" "https://pixabay.com/music/search/${encodeURIComponent(keywords)}/" -o search.html
-2. Extract a direct .mp3 CDN URL from search.html (Pixabay serves audio from cdn.pixabay.com / *.pixabay.com; grep for "https" + ".mp3").
-3. Pick a track that is instrumental (no vocals preferred) and at least 30 seconds.
-4. Download the actual MP3 (not a preview) with curl to: ${downloadPath}
-   curl -sL -A "Mozilla/5.0" "<mp3-url>" -o "${downloadPath}"
-
-OUTPUT: Write ONLY the filename of the downloaded track (or "FAILED" if you could not download anything via the command line).
-
-IMPORTANT:
-- Pixabay music is free for commercial use, no attribution required.
-- If you cannot extract a usable URL from the HTML, output "FAILED" — do NOT fall back to a browser.`;
-
-  try {
-    await runCodexExec(prompt, outFile, workDir, timeoutMs);
-
-    // Check if the file was downloaded
-    const exists = await fs.stat(downloadPath).then(() => true).catch(() => false);
-    if (exists) {
-      const size = (await fs.stat(downloadPath)).size;
-      if (size > 10_000) { // >10KB = real MP3
-        console.log(`[Music] Codex downloaded ${(size / 1024).toFixed(0)} KB MP3`);
-        return downloadPath;
-      }
+  // Download the first candidate that yields a real MP3.
+  for (const track of pool.slice(0, 5)) {
+    const dlUrl: string | undefined = track.audiodownload;
+    if (!dlUrl) continue;
+    try {
+      const res = await fetchWithTimeout(dlUrl, timeoutMs);
+      if (!res.ok) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 10_000) continue; // too small to be a real track
+      await fs.writeFile(downloadPath, buf);
+      const trackInfo = `${track.artist_name ?? "Unknown"} — ${track.name ?? "Untitled"}`;
+      const attribution: MusicAttribution = {
+        artist: track.artist_name ?? undefined,
+        title: track.name ?? undefined,
+        licenseUrl: track.license_ccurl ?? undefined,
+        trackUrl: track.shareurl ?? track.shorturl ?? undefined,
+        source: "jamendo",
+      };
+      console.log(`[Music] Jamendo downloaded "${trackInfo}" (${(buf.length / 1024).toFixed(0)} KB, ${track.duration}s)`);
+      return { mp3Path: downloadPath, trackInfo, attribution };
+    } catch (err) {
+      console.warn(`[Music] Jamendo download failed for "${track.name}": ${err instanceof Error ? err.message : err}`);
     }
+  }
 
-    // Check codex output for any alternative path
-    const output = await fs.readFile(outFile, "utf8").catch(() => "");
-    console.log(`[Music] Codex output: ${output.slice(0, 200)}`);
-    return null;
-  } catch {
-    return null;
+  return null;
+}
+
+/** fetch() with an AbortController timeout and a browser-ish User-Agent. */
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "marketing-workflow-app/1.0 (+reel-music)" },
+    });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -169,46 +229,6 @@ async function trimWithFfmpeg(
   return outputPath;
 }
 
-/** Spawn codex exec with a prompt on stdin, capturing output to a file. */
-function runCodexExec(
-  prompt: string,
-  outFile: string,
-  cwd: string,
-  timeoutMs: number,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "exec",
-      "--dangerously-bypass-approvals-and-sandbox",
-      "--skip-git-repo-check",
-      // Hard-disable the browser/Chrome plugins so Codex cannot launch a GUI/headless
-      // browser for this task — it must use curl/wget in the shell instead.
-      "-c", `'plugins."browser@openai-bundled".enabled=false'`,
-      "-c", `'plugins."chrome@openai-bundled".enabled=false'`,
-      "-C", `"${cwd}"`,
-      "-o", `"${outFile}"`,
-      "-",
-    ];
-
-    const child = spawn("codex", args, { cwd, shell: true });
-    let stderr = "";
-    child.stderr.on("data", (d) => (stderr += d.toString()));
-    child.stdout.on("data", () => {}); // drain
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`codex exec (music) timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    child.on("error", (err) => { clearTimeout(timer); reject(err); });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`codex exec (music) exited ${code}: ${stderr.slice(0, 300)}`));
-    });
-    child.stdin.write(prompt);
-    child.stdin.end();
-  });
-}
-
 /**
  * Curated music library — tracks stored in Supabase Storage `music-library` bucket.
  *
@@ -220,7 +240,7 @@ function runCodexExec(
  *     inspirational/track1.mp3
  *     ambient/track1.mp3
  *
- * Each mood folder contains 2-3 royalty-free tracks pre-downloaded from Pixabay.
+ * Each mood folder contains 2-3 royalty-free tracks archived from Jamendo discovery.
  */
 const MOOD_MAPPING: Record<string, string[]> = {
   // Map common mood keywords to curated folder names
@@ -337,7 +357,7 @@ async function archiveToMusicLibrary(
       mood,
       mood_keywords: musicMood,
       tempo,
-      source: "pixabay",
+      source: "jamendo",
       file_size: buf.length,
     });
     console.log(`[Music] Library: archived new track ${code} → ${storagePath} (${(buf.length / 1024).toFixed(0)} KB)`);

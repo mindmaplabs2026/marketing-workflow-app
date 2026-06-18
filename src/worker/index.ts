@@ -19,6 +19,7 @@ import { runPosterPipeline, runReelPipeline } from "@/lib/ai/pipeline-core";
 import { runChatEdit } from "@/lib/ai/chat-core";
 import { getModelEngineKind } from "@/lib/config/engine";
 import { checkFfmpegAvailable } from "@/lib/ai/agent-music";
+import { checkWhisperAvailable } from "@/lib/ai/transcribe";
 
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 
@@ -126,11 +127,15 @@ async function processChatEdit(edit: ClaimedChatEdit) {
 async function loop() {
   // Startup checks
   const hasFfmpeg = await checkFfmpegAvailable();
+  const hasWhisper = await checkWhisperAvailable();
   console.log(
-    `[Worker] started — engine='local', MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms, ffmpeg=${hasFfmpeg ? "yes" : "NOT FOUND (reel generation will fail)"}`,
+    `[Worker] started — engine='local', MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms, ffmpeg=${hasFfmpeg ? "yes" : "NOT FOUND (reel generation will fail)"}, whisper=${hasWhisper ? "yes" : "no (video transcription disabled)"}`,
   );
   if (!hasFfmpeg) {
     console.warn("[Worker] WARNING: ffmpeg is required for reel generation (music trimming + keyframe extraction). Install with: brew install ffmpeg");
+  }
+  if (!hasWhisper) {
+    console.warn("[Worker] NOTE: Whisper not found — video transcription is disabled (Agent 1 will use keyframes only). Install with: pipx install openai-whisper");
   }
 
   while (running) {

@@ -2,6 +2,7 @@ import "server-only";
 import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
 import type { CostTracker } from "./cost-tracker";
+import { formatTranscript, type TranscriptSegment } from "./transcribe";
 
 /** Media metadata passed into Agent 1 (images and video thumbnails). */
 export type UploadedImage = {
@@ -51,6 +52,9 @@ type Agent1Input = {
   /** Max curated items. Default 15 (posters). For reels, pass a higher value
    *  based on requested duration (e.g., 180s reel needs ~36 items at 5s each). */
   maxShortlist?: number;
+  /** Per-video timestamped transcripts (Whisper), keyed by video path. Lets the
+   *  agent pick segments by spoken content and split long videos into scenes. */
+  videoTranscripts?: Record<string, TranscriptSegment[]>;
 };
 
 const DEFAULT_MAX_SHORTLIST = 15;
@@ -78,7 +82,7 @@ export async function runUnderstandingAgent(
 
   // If fewer items than the shortlist cap, skip pass 1 and go straight to deep analysis
   if (input.images.length <= MAX_SHORTLIST) {
-    return deepAnalysis(openai, input.images, contextText);
+    return deepAnalysis(openai, input.images, contextText, costTracker, input.videoTranscripts);
   }
 
   // ---------------------------------------------------------------
@@ -167,13 +171,13 @@ export async function runUnderstandingAgent(
 
   // If no images made the cut, take the first few as fallback
   if (shortlistedImages.length === 0) {
-    return deepAnalysis(openai, input.images.slice(0, MAX_SHORTLIST), contextText, costTracker);
+    return deepAnalysis(openai, input.images.slice(0, MAX_SHORTLIST), contextText, costTracker, input.videoTranscripts);
   }
 
   // ---------------------------------------------------------------
   // Pass 2: Deep analysis at high detail — only shortlisted images
   // ---------------------------------------------------------------
-  return deepAnalysis(openai, shortlistedImages, contextText, costTracker);
+  return deepAnalysis(openai, shortlistedImages, contextText, costTracker, input.videoTranscripts);
 }
 
 async function deepAnalysis(
@@ -181,6 +185,7 @@ async function deepAnalysis(
   images: UploadedImage[],
   contextText: string,
   costTracker?: CostTracker,
+  videoTranscripts?: Record<string, TranscriptSegment[]>,
 ): Promise<UnderstandingOutput> {
   const userContent: Array<
     | { type: "text"; text: string }
@@ -214,9 +219,13 @@ async function deepAnalysis(
       // Introduce the video on its first frame
       if (!introducedVideos.has(img.path)) {
         introducedVideos.add(img.path);
+        const transcript = videoTranscripts?.[img.path];
+        const transcriptBlock = transcript?.length
+          ? `\nTRANSCRIPT (timestamped — use this to find the meaningful moments and align trim windows to what is said):\n${formatTranscript(transcript)}`
+          : "";
         userContent.push({
           type: "text",
-          text: `\n── VIDEO: ${img.path} (${img.durationSec ?? "?"}s clip, ${frames.length} frames sampled every 2s) ──\nAnalyze ALL frames below to understand what happens throughout this video. Describe the action, movement, people, and setting. Suggest the BEST segment (start/end seconds) for a reel.`,
+          text: `\n── VIDEO: ${img.path} (${img.durationSec ?? "?"}s clip, ${frames.length} frames sampled every 2s) ──\nAnalyze ALL frames below to understand what happens throughout this video. Describe the action, movement, people, and setting.${transcriptBlock}\n\nIf this is a LONG video (more than ~15s) containing several distinct moments, return MULTIPLE curated entries for it — one per moment — each with the SAME path but a DIFFERENT suggestedTrimStart/suggestedTrimEnd window (each window 4-8s). For a short clip, return a single best segment.`,
         });
       }
 
@@ -257,7 +266,12 @@ IMPORTANT — VIDEO FRAMES:
 - Describe the VIDEO CONTENT: what action/movement is happening, the setting, the mood.
 - For videos, include "mediaType": "video" and "durationSec" (from the label) in your output.
 - For videos, suggest the most interesting trim window: "suggestedTrimStart" and "suggestedTrimEnd" in seconds.
-  If the video is short (under 8s), use the full clip. If longer, pick the best 3-8 second segment.
+  If the video is short (under ~15s), return ONE entry using the full clip or the best 3-8s segment.
+- LONG videos (over ~15s, e.g. a montage of multiple moments) should yield MULTIPLE curated entries:
+  emit one entry per distinct moment, each with the SAME "path" but a DIFFERENT 4-8s
+  suggestedTrimStart/suggestedTrimEnd window. Use the timestamped TRANSCRIPT (when provided) and the
+  frames to choose windows that land on meaningful moments (a quote, an action, a reaction) and spread
+  them across the clip. This lets one long video become several scenes.
 - For regular photos, include "mediaType": "image" (no duration/trim fields needed).
 
 Return ONLY valid JSON matching this schema:

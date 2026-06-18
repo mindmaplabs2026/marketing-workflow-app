@@ -21,6 +21,37 @@ const REMOTION_RENDERER_DIR =
   process.env.REMOTION_RENDERER_DIR ??
   path.resolve(__dirname, "../../../../remotion-renderer");
 
+/**
+ * Logo sizing band, in pixels of the logo's LONGEST edge on the fixed 1080×1920
+ * canvas. Expressed as a bounding box (not a fixed width) because logos are not
+ * always square — some are wide wordmarks, some are tall crests. Sizing by width
+ * alone would blow up a tall logo's height or squash a wide one, so the logo is
+ * scaled to FIT inside a box of this size (objectFit: contain), preserving aspect
+ * ratio for any shape. Codex previously got no size at all and defaulted to a
+ * tiny logo. Corner watermarks sit near the minimum, hero logos (title/closing
+ * cards) near the maximum. Tune via env without a redeploy.
+ */
+const LOGO_MIN_PX = Number(process.env.REEL_LOGO_MIN_PX ?? 128);
+const LOGO_MAX_PX = Number(process.env.REEL_LOGO_MAX_PX ?? 320);
+
+/** Prompt block describing how big the logo must be rendered. */
+function logoSizingGuidance(): string {
+  const minPct = Math.round((LOGO_MIN_PX / 1080) * 100);
+  const maxPct = Math.round((LOGO_MAX_PX / 1080) * 100);
+  const mid = Math.round((LOGO_MIN_PX + LOGO_MAX_PX) / 2);
+  return [
+    `LOGO SIZE (the logo has been rendering too small — fix this):`,
+    `- The logo may be SQUARE or RECTANGULAR (wide wordmark or tall crest) — do NOT assume it is square.`,
+    `- Render it inside a bounding box whose LONGEST edge is between ${LOGO_MIN_PX}px and ${LOGO_MAX_PX}px on the 1080px canvas (≈${minPct}%–${maxPct}%). NEVER smaller than ${LOGO_MIN_PX}px.`,
+    `- Use the box approach so any aspect ratio fits and is never stretched or cropped:`,
+    `    <Img src={staticFile("media/logo.png")} style={{ maxWidth: <box>, maxHeight: <box>, width: "auto", height: "auto", objectFit: "contain" }} />`,
+    `  where <box> is your chosen size in px within the band above.`,
+    `- Corner / persistent watermark logo: box near the LOWER end (~${LOGO_MIN_PX}–${mid}px).`,
+    `- Hero logo on the title card or closing card: box near the UPPER end (~${mid}–${LOGO_MAX_PX}px).`,
+    `- Give the logo a safe-area margin from frame edges (≥40px) and ensure contrast against the background (a subtle shadow or chip behind it when placed over busy media).`,
+  ].join("\n");
+}
+
 export type CompositionCode = {
   /** The full Reel.tsx source code. */
   reelTsx: string;
@@ -80,7 +111,7 @@ export async function generateComposition(input: {
       "utf8",
     ).catch(() => "");
 
-    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers);
+    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers, input.hasLogo);
 
     // Run Codex
     const outFile = path.join(workDir, "out.txt");
@@ -254,6 +285,7 @@ function buildPrompt(
   apiRef: string,
   examples: string[],
   helpers: string,
+  hasLogo: boolean,
 ): string {
   return `You are writing a Remotion composition (React/TypeScript component) for an Instagram Reel video.
 
@@ -293,6 +325,7 @@ Closing Card (${script.closingCard.durationSec}s):
 ## BRANDING
 - Logo: ${script.brandingConfig.logoPlacement}
 - School: ${script.brandingConfig.schoolName}
+${hasLogo ? logoSizingGuidance() : ""}
 
 ## MEDIA FILES AVAILABLE
 ${mediaLines.join("\n")}
@@ -314,7 +347,7 @@ ${examples.join("\n\n")}
 3. Media files: use staticFile("media/filename.ext") — NEVER include "public/" in the path. staticFile() resolves relative to the public/ folder automatically. CORRECT: staticFile("media/photo.jpg"). WRONG: staticFile("public/media/photo.jpg")
 4. Music: use staticFile("music/track.mp3")
 5. Canvas: 1080×1920 pixels, 30fps — ALWAYS
-6. Include school branding (logo, name) as described above
+6. Include school branding (logo, name) as described above — the logo MUST respect the LOGO SIZE bounds in the BRANDING section (never render it tiny)
 7. Write COMPLETE, COMPILABLE TypeScript — every import, every type, every component
 8. ONLY use files listed in "MEDIA FILES AVAILABLE" above — do NOT reference any other filenames. If a file is not listed, it does NOT exist. Do NOT use external assets or URLs.
 9. CRITICAL — VIDEO FILES: Files listed as "(video)" MUST use the <Video> component from "@remotion/media", NOT <Img>.
@@ -689,6 +722,7 @@ RULES:
 4. staticFile("media/<file>") / staticFile("music/track.mp3") — NEVER prefix with "public/". Only reference files in the list above.
 5. VIDEO (.mp4/.mov) uses <Video> from "@remotion/media" with style={{ width:"100%", height:"100%", objectPosition:"X% Y%" }} and objectFit="cover" as a PROP (never objectFit in style). Trim with trimBefore/trimAfter (frames = sec×30); startFrom/endAt do NOT exist. Images use <Img> from "remotion".
 6. The result must be COMPLETE, COMPILABLE TypeScript.
+${input.hasLogo ? `7. If the logo is shown, fit it in a bounding box whose longest edge is ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (never tiny). The logo may be rectangular, not square — use maxWidth+maxHeight with objectFit:"contain" and width/height:"auto" so it scales proportionally without distortion.` : ""}
 
 OUTPUT: the COMPLETE updated Reel.tsx inside a single \`\`\`tsx code fence.
 
