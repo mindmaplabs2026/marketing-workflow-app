@@ -4,6 +4,18 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+/** Subset of the Jamendo /tracks API row we read. */
+type JamendoTrack = {
+  name?: string;
+  artist_name?: string;
+  duration?: number | string;
+  audiodownload?: string;
+  license_ccurl?: string;
+  shareurl?: string;
+  shorturl?: string;
+  musicinfo?: { vocalinstrumental?: string };
+};
+
 /** Attribution + license info for a discovered track (Creative Commons). */
 export type MusicAttribution = {
   artist?: string;
@@ -151,12 +163,12 @@ async function discoverFromJamendo(
     console.warn(`[Music] Jamendo API error: ${listJson?.headers?.error_message ?? "unknown"}`);
     return null;
   }
-  const results: any[] = Array.isArray(listJson.results) ? listJson.results : [];
+  const results: JamendoTrack[] = Array.isArray(listJson.results) ? listJson.results : [];
   if (results.length === 0) return null;
 
   // Prefer instrumental tracks at least as long as the reel; otherwise take the
   // longest available so ffmpeg has enough material to trim to durationSec.
-  const isInstrumental = (t: any) =>
+  const isInstrumental = (t: JamendoTrack) =>
     String(t?.musicinfo?.vocalinstrumental ?? "").toLowerCase() === "instrumental";
   const longEnough = results.filter((t) => Number(t.duration) >= durationSec);
   const pool = longEnough.length ? longEnough : results;
