@@ -34,6 +34,30 @@ const REMOTION_RENDERER_DIR =
 const LOGO_MIN_PX = Number(process.env.REEL_LOGO_MIN_PX ?? 128);
 const LOGO_MAX_PX = Number(process.env.REEL_LOGO_MAX_PX ?? 320);
 
+/**
+ * Safe-area margins (px) on the 1080×1920 canvas for TEXT / LOGO / GRAPHIC
+ * elements — NOT for background media (full-bleed photos/videos still reach the
+ * edges). Platform-aware per Instagram Reels: a large bottom margin clears the
+ * caption/controls, the right margin clears the action buttons. And a minimum
+ * font size so fine print stays legible on a phone. All env-tunable.
+ */
+const SAFE_TOP_PX = Number(process.env.REEL_SAFE_TOP_PX ?? 100);
+const SAFE_SIDE_PX = Number(process.env.REEL_SAFE_SIDE_PX ?? 100);
+const SAFE_RIGHT_PX = Number(process.env.REEL_SAFE_RIGHT_PX ?? 120);
+const SAFE_BOTTOM_PX = Number(process.env.REEL_SAFE_BOTTOM_PX ?? 280);
+const MIN_FONT_PX = Number(process.env.REEL_MIN_FONT_PX ?? 28);
+
+/** Prompt block: safe-area padding + minimum legible font size. */
+function layoutSafetyGuidance(): string {
+  return [
+    `SAFE AREA & TEXT LEGIBILITY (mobile — enforce strictly):`,
+    `- Full-bleed background photos/videos MUST still fill the entire 1080×1920 frame edge-to-edge. The safe area below applies ONLY to TEXT, the LOGO, and GRAPHIC/UI elements (captions, cards, buttons, chips) — never to background media.`,
+    `- Keep ALL text, the logo, and graphic elements within the safe area: ≥${SAFE_TOP_PX}px from the TOP, ≥${SAFE_SIDE_PX}px from the LEFT, ≥${SAFE_RIGHT_PX}px from the RIGHT, and ≥${SAFE_BOTTOM_PX}px from the BOTTOM. The large bottom margin keeps elements clear of the Instagram caption/controls; the right margin clears the action buttons. Nothing should ever sit flush to an edge.`,
+    `- Easiest implementation: wrap your text/element layer in an AbsoluteFill with paddingTop:${SAFE_TOP_PX}, paddingLeft:${SAFE_SIDE_PX}, paddingRight:${SAFE_RIGHT_PX}, paddingBottom:${SAFE_BOTTOM_PX} (background media sits in a separate full-frame layer behind it, with NO padding).`,
+    `- MINIMUM FONT SIZE: no text anywhere smaller than ${MIN_FONT_PX}px — this is a 1080px-wide canvas, so ${MIN_FONT_PX}px is already small on a phone. Captions/body text ≥36px; headlines much larger. NEVER render labels, credits, dates, or footnotes below ${MIN_FONT_PX}px.`,
+  ].join("\n");
+}
+
 /** Prompt block describing how big the logo must be rendered. */
 function logoSizingGuidance(): string {
   const minPct = Math.round((LOGO_MIN_PX / 1080) * 100);
@@ -341,6 +365,9 @@ ${helpers}
 ## EXAMPLE COMPOSITIONS (study these for patterns, but create something ORIGINAL)
 ${examples.join("\n\n")}
 
+## LAYOUT SAFETY & LEGIBILITY
+${layoutSafetyGuidance()}
+
 ## RULES
 1. Export a React.FC named "Reel" and a number constant "REEL_DURATION" (total frames at 30fps)
 2. Use only these packages: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
@@ -348,9 +375,10 @@ ${examples.join("\n\n")}
 4. Music: use staticFile("music/track.mp3")
 5. Canvas: 1080×1920 pixels, 30fps — ALWAYS
 6. Include school branding (logo, name) as described above — the logo MUST respect the LOGO SIZE bounds in the BRANDING section (never render it tiny)
-7. Write COMPLETE, COMPILABLE TypeScript — every import, every type, every component
-8. ONLY use files listed in "MEDIA FILES AVAILABLE" above — do NOT reference any other filenames. If a file is not listed, it does NOT exist. Do NOT use external assets or URLs.
-9. CRITICAL — VIDEO FILES: Files listed as "(video)" MUST use the <Video> component from "@remotion/media", NOT <Img>.
+7. Respect the LAYOUT SAFETY rules above: text/logo/graphics inside the safe-area margins (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom), and NO text smaller than ${MIN_FONT_PX}px. Background media stays full-bleed.
+8. Write COMPLETE, COMPILABLE TypeScript — every import, every type, every component
+9. ONLY use files listed in "MEDIA FILES AVAILABLE" above — do NOT reference any other filenames. If a file is not listed, it does NOT exist. Do NOT use external assets or URLs.
+10. CRITICAL — VIDEO FILES: Files listed as "(video)" MUST use the <Video> component from "@remotion/media", NOT <Img>.
    import { Video } from "@remotion/media";
    The video element has NO intrinsic size in this renderer — if you do not give it an explicit
    width AND height it renders at the clip's native resolution and overflows/misaligns the 9:16 frame.
@@ -379,13 +407,13 @@ ${examples.join("\n\n")}
    do NOT exist on @remotion/media's <Video> and are silently ignored — never use them.
    Image files (.jpg, .png) use <Img> from "remotion"; for images objectFit IN style is fine.
    NEVER use <Img> for a .mp4/.mov file. NEVER use <Video> for a .jpg/.png file.
-10. Load Google Fonts via @remotion/google-fonts (e.g., import { loadFont } from "@remotion/google-fonts/Poppins")
-11. Calculate REEL_DURATION precisely from your timing constants
-12. TEXT PLACEMENT — NEVER cover the subject:
+11. Load Google Fonts via @remotion/google-fonts (e.g., import { loadFont } from "@remotion/google-fonts/Poppins")
+12. Calculate REEL_DURATION precisely from your timing constants
+13. TEXT PLACEMENT — NEVER cover the subject, and stay inside the safe area:
    - Each scene has focusX/focusY values (0-100) indicating where the subject is.
-   - If focusY <= 40 (subject at top): place text in the BOTTOM 20% of the frame.
-   - If focusY >= 60 (subject at bottom): place text in the TOP 20% of the frame.
-   - If focusY is 40-60 (centered): place text at top or bottom, NEVER center.
+   - If focusY <= 40 (subject at top): place text LOW — but ABOVE the ${SAFE_BOTTOM_PX}px bottom safe margin (never in the bottom danger zone).
+   - If focusY >= 60 (subject at bottom): place text HIGH — but BELOW the ${SAFE_TOP_PX}px top safe margin.
+   - If focusY is 40-60 (centered): place text high or low (within the safe area), NEVER dead-center over the subject.
    - For full-bleed scenes: use a gradient overlay (transparent→dark) on the side WHERE TEXT IS,
      to ensure readability without covering the subject on the opposite side.
    - For framed scenes: place text OUTSIDE the photo frame (above or below the card).
@@ -723,6 +751,7 @@ RULES:
 5. VIDEO (.mp4/.mov) uses <Video> from "@remotion/media" with style={{ width:"100%", height:"100%", objectPosition:"X% Y%" }} and objectFit="cover" as a PROP (never objectFit in style). Trim with trimBefore/trimAfter (frames = sec×30); startFrom/endAt do NOT exist. Images use <Img> from "remotion".
 6. The result must be COMPLETE, COMPILABLE TypeScript.
 ${input.hasLogo ? `7. If the logo is shown, size the LOGO <Img> ITSELF (not a wrapping card) so its longest visible edge is ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (never tiny). Use width/height:"auto" + maxWidth/maxHeight + objectFit:"contain". The logo may be rectangular — do NOT box it inside a padded square card (that letterboxes it and makes it look tiny).` : ""}
+8. Keep text/logo/graphics inside the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom) and use NO font smaller than ${MIN_FONT_PX}px. Background media stays full-bleed (no padding on it).
 
 OUTPUT: the COMPLETE updated Reel.tsx inside a single \`\`\`tsx code fence.
 
