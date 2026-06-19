@@ -243,20 +243,48 @@ async function runReelChatEdit(
     .single();
   const schoolId = reqData?.school_id ?? "unknown";
 
+  // Download a storage object with retries. Storage downloads use fetch/undici,
+  // which throws `terminated` if a (large video) stream is interrupted mid-transfer
+  // — that single blip was crashing the whole chat-edit. Retry transient failures;
+  // return null on permanent failure so one bad asset doesn't kill the edit.
+  const downloadWithRetry = async (bucket: string, storagePath: string, attempts = 3): Promise<Buffer | null> => {
+    for (let i = 1; i <= attempts; i++) {
+      try {
+        const { data, error } = await admin.storage.from(bucket).download(storagePath);
+        if (error) throw error;
+        if (data) return Buffer.from(await data.arrayBuffer());
+        return null; // not found — no point retrying
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`[reel-chat] download ${bucket}/${storagePath} attempt ${i}/${attempts} failed: ${msg}`);
+        if (i === attempts) return null;
+        await new Promise((r) => setTimeout(r, 500 * i));
+      }
+    }
+    return null;
+  };
+
   // Media — from the variation's scenes (originals still live in request-uploads).
+  // Dedup by path: the per-scene model reuses one long video across several scenes,
+  // so downloading per-scene re-fetched the same large file many times (slow, and
+  // more chances for a `terminated` stream error). Fetch each unique file ONCE.
   const scenes = (brief.scenes as Array<{ mediaPath: string; mediaType?: "image" | "video" }>) ?? [];
   const mediaFiles = new Map<string, Buffer>();
   const mediaManifest = new Map<string, { type: "image" | "video"; description: string }>();
+  const seenPaths = new Set<string>();
   for (const scene of scenes) {
-    if (!scene.mediaPath) continue;
+    if (!scene.mediaPath || seenPaths.has(scene.mediaPath)) continue;
+    seenPaths.add(scene.mediaPath);
     const filename = scene.mediaPath.split("/").pop() ?? "media.bin";
-    const { data: fileData } = await admin.storage.from("request-uploads").download(scene.mediaPath);
-    if (fileData) {
-      mediaFiles.set(filename, Buffer.from(await fileData.arrayBuffer()));
+    const buf = await downloadWithRetry("request-uploads", scene.mediaPath);
+    if (buf) {
+      mediaFiles.set(filename, buf);
       mediaManifest.set(filename, {
         type: scene.mediaType === "video" ? "video" : "image",
         description: "uploaded media",
       });
+    } else {
+      console.warn(`[reel-chat] media ${filename} could not be downloaded — proceeding without it`);
     }
   }
 
@@ -269,9 +297,8 @@ async function runReelChatEdit(
   let hasLogo = false;
   let hasFooter = false;
   for (const a of brandAssets ?? []) {
-    const { data } = await admin.storage.from("school-assets").download(a.storage_path);
-    if (!data) continue;
-    const buf = Buffer.from(await data.arrayBuffer());
+    const buf = await downloadWithRetry("school-assets", a.storage_path);
+    if (!buf) continue;
     if (a.asset_type === "logo") { mediaFiles.set("logo.png", buf); hasLogo = true; }
     else if (a.asset_type === "footer") { mediaFiles.set("footer.png", buf); hasFooter = true; }
   }
@@ -317,9 +344,9 @@ async function runReelChatEdit(
       await admin.storage.from("designs").upload(musicPath, music.buffer, { contentType: "audio/mpeg", upsert: true });
     }
   } else if (musicPath) {
-    const { data } = await admin.storage.from("designs").download(musicPath);
-    if (data) {
-      musicFile = { name: "track.mp3", buffer: Buffer.from(await data.arrayBuffer()) };
+    const buf = await downloadWithRetry("designs", musicPath);
+    if (buf) {
+      musicFile = { name: "track.mp3", buffer: buf };
       hasRealMusic = true;
     } else {
       console.warn(`[reel-chat] Persisted track ${musicPath} is no longer available — falling back to silence`);
