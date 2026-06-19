@@ -30,6 +30,9 @@ export type CuratedImage = {
   suggestedTrimStart?: number;
   /** For videos: suggested trim end (seconds). */
   suggestedTrimEnd?: number;
+  /** For videos: true if the trim window contains spoken words (per the transcript)
+   *  — so the composition plays the clip's own audio and ducks the music. */
+  containsSpeech?: boolean;
 };
 
 /** Agent 1 output — stored in ai_generation_jobs.agent1_output. */
@@ -272,13 +275,18 @@ IMPORTANT — VIDEO FRAMES:
   suggestedTrimStart/suggestedTrimEnd window. Use the timestamped TRANSCRIPT (when provided) and the
   frames to choose windows that land on meaningful moments (a quote, an action, a reaction) and spread
   them across the clip. This lets one long video become several scenes.
+- SPEECH: for each video entry, set "containsSpeech": true if its trim window overlaps spoken words in
+  the TRANSCRIPT (someone is talking — an interview answer, a statement, a dialogue). Set false for
+  silent action / b-roll / music-only footage. This drives the audio mix (the composition will let the
+  speaker's voice play and duck the background music during these segments). If no transcript is
+  provided, infer from the frames (people clearly mid-speech) and default to false when unsure.
 - For regular photos, include "mediaType": "image" (no duration/trim fields needed).
 
 Return ONLY valid JSON matching this schema:
 {
   "theme": "string — the central theme/topic",
   "coreMessage": "string — the key message",
-  "curatedImages": [{ "path": "string", "relevanceScore": 0-100, "description": "detailed description", "quality": "high|medium|low", "mediaType": "image|video", "durationSec": number_or_null, "suggestedTrimStart": number_or_null, "suggestedTrimEnd": number_or_null }],
+  "curatedImages": [{ "path": "string", "relevanceScore": 0-100, "description": "detailed description", "quality": "high|medium|low", "mediaType": "image|video", "durationSec": number_or_null, "suggestedTrimStart": number_or_null, "suggestedTrimEnd": number_or_null, "containsSpeech": true_or_false }],
   "rejectedImages": [{ "path": "string", "reason": "string" }],
   "audience": "string — target audience (parents, students, community, etc.)",
   "tone": "string — visual tone (celebratory, informational, urgent, etc.)",

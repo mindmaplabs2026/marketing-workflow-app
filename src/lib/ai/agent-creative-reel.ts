@@ -14,6 +14,9 @@ export type SceneBeat = {
   trimEndSec?: number;
   focusX: number;
   focusY: number;
+  /** Video scene whose clip contains spoken words → play the clip's own audio and
+   *  duck the background music during this scene. Carried from the curated entry. */
+  containsSpeech?: boolean;
   kenBurns?: {
     direction: "in" | "out" | "left" | "right";
     intensity: "subtle" | "moderate" | "dramatic";
@@ -204,6 +207,15 @@ VERIFY YOUR WORK:
 3. If a video has 3 curated trim windows, your scenes MUST include 3 separate scenes for it,
    each using its own window — never just one.
 
+AUDIO MIX (speech vs background music):
+- Each curated video entry is tagged SPEECH when someone is talking in it (interview,
+  statement, dialogue). Copy that onto the scene as "containsSpeech": true.
+- The composition will, for speech scenes, play the CLIP'S OWN audio (the speaker's
+  voice) and DUCK the background music low so the voice is clearly audible.
+- If the reel is SPEECH-HEAVY (most video scenes are speech — an interview/statement
+  reel), pick a calmer musicMood and "slow"/"moderate" tempo so the BGM sits under the
+  voices; do NOT pick loud/"fast" tracks that fight the talking.
+
 MUSIC MOOD:
 - Provide 2-4 keywords for Pixabay music search (e.g., ["upbeat", "acoustic", "school"])
 - Specify tempo: "slow" for reflective, "moderate" for balanced, "fast" for energetic
@@ -241,6 +253,7 @@ Return ONLY valid JSON matching this schema:
       "durationSec": number,
       "trimStartSec": number (for videos),
       "trimEndSec": number (for videos),
+      "containsSpeech": true_or_false (copy from the curated video entry),
       "focusX": 50, "focusY": 50,
       "kenBurns": { "direction": "in|out|left|right", "intensity": "subtle|moderate|dramatic" },
       "textOverlay": { "text": "optional caption", "position": "top|center|bottom", "style": "bold|handwritten|minimal" },
@@ -268,6 +281,7 @@ export async function runReelCreativeAgent(
         if (img.suggestedTrimStart != null && img.suggestedTrimEnd != null) {
           line += `, suggested trim: ${img.suggestedTrimStart}s-${img.suggestedTrimEnd}s`;
         }
+        if (img.containsSpeech) line += `, SPEECH`;
         line += ")";
       }
       return line;

@@ -78,6 +78,41 @@ function logoContrastLine(profile?: LogoProfile): string {
   return `- CONTRAST (measured): this logo is ${desc}, so it is INVISIBLE on light backgrounds. It MUST sit on a DARK surface — place it on a dark rounded chip, or on a dark area of the frame. NEVER put it on a white / light background.`;
 }
 
+/**
+ * Audio-mix guidance: when a scene's clip has speech, play the clip's own audio
+ * and duck the background music so the speaker is clearly audible.
+ */
+function audioMixGuidance(script: ReelScript, hasMusic: boolean): string {
+  const videoScenes = script.scenes.filter((s) => s.mediaType === "video");
+  const speechScenes = videoScenes.filter((s) => s.containsSpeech);
+  if (speechScenes.length === 0) {
+    return [
+      `AUDIO MIX:`,
+      `- No scene is marked SPEECH — mute every <Video> (visual only)${hasMusic ? " and let the background music play at a normal level throughout" : ""}.`,
+    ].join("\n");
+  }
+  const speechHeavy = speechScenes.length >= Math.ceil(videoScenes.length / 2);
+  const lines = [
+    `AUDIO MIX (CRITICAL — the speakers must be heard):`,
+    `- Scenes marked 🔊 SPEECH contain talking. On those scenes the <Video> MUST play its OWN audio — do NOT put the \`muted\` prop on them. Mute all OTHER videos (visual only).`,
+  ];
+  if (hasMusic) {
+    lines.push(
+      `- DUCK the background music during every SPEECH scene so the voice cuts through: drop music volume to ~0.12 for those frames, restore to ~0.8 elsewhere. Use a frame-based volume function on the music <Audio>:`,
+      `    const SPEECH_RANGES = [[startFrame, endFrame], ...]; // each SPEECH scene's frame range (seconds × 30)`,
+      `    const ducked = (f) => SPEECH_RANGES.some(([a, b]) => f >= a && f < b);`,
+      `    <Audio src={staticFile("music/track.mp3")} volume={(f) => ducked(f) ? 0.12 : 0.8} />`,
+      `  Compute SPEECH_RANGES from where each SPEECH scene sits in your timeline; add a short ~8-frame ramp at each edge so the duck eases in/out instead of clicking.`,
+    );
+    if (speechHeavy) {
+      lines.push(`- This reel is SPEECH-HEAVY (≥half the video scenes are talking) — keep the music low THROUGHOUT (~0.2 baseline), letting it swell only on the title/closing cards and non-speech scenes. Voices lead; music supports.`);
+    }
+  } else {
+    lines.push(`- There is no music track — just make sure the SPEECH clips play their own audio.`);
+  }
+  return lines.join("\n");
+}
+
 /** Prompt block describing how big the logo must be rendered + contrast. */
 function logoSizingGuidance(profile?: LogoProfile): string {
   const minPct = Math.round((LOGO_MIN_PX / 1080) * 100);
@@ -158,7 +193,7 @@ export async function generateComposition(input: {
       "utf8",
     ).catch(() => "");
 
-    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers, input.hasLogo, input.logoProfile);
+    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers, input.hasLogo, input.logoProfile, input.hasMusic);
 
     // Run Codex
     const outFile = path.join(workDir, "out.txt");
@@ -334,6 +369,7 @@ function buildPrompt(
   helpers: string,
   hasLogo: boolean,
   logoProfile?: LogoProfile,
+  hasMusic = false,
 ): string {
   return `You are writing a Remotion composition (React/TypeScript component) for an Instagram Reel video.
 
@@ -363,6 +399,7 @@ Title Card (${script.titleCard.durationSec}s):
 ${script.scenes.map((s) => {
   let line = `Scene ${s.index} (${s.durationSec}s, ${s.mediaType}): media/${path.basename(s.mediaPath)}`;
   if (s.trimStartSec != null) line += ` [trim ${s.trimStartSec}-${s.trimEndSec}s]`;
+  if (s.mediaType === "video" && s.containsSpeech) line += ` 🔊 SPEECH (play clip audio, duck music)`;
   line += ` — focus: ${s.focusX}%,${s.focusY}% (subject is ${s.focusY <= 40 ? "TOP" : s.focusY >= 60 ? "BOTTOM" : "CENTER"} → place text ${s.focusY <= 40 ? "at BOTTOM" : "at TOP"})`;
   if (s.kenBurns) line += ` — Ken Burns: ${s.kenBurns.direction} (${s.kenBurns.intensity})`;
   if (s.textOverlay) line += `\n  Text: "${s.textOverlay.text}" at ${s.textOverlay.position} (${s.textOverlay.style})`;
@@ -411,6 +448,9 @@ ${examples.join("\n\n")}
 ## LAYOUT SAFETY & LEGIBILITY
 ${layoutSafetyGuidance()}
 
+## AUDIO MIX
+${audioMixGuidance(script, hasMusic)}
+
 ## RULES
 1. Export a React.FC named "Reel" and a number constant "REEL_DURATION" (total frames at 30fps)
 2. Use only these packages: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
@@ -429,7 +469,9 @@ ${layoutSafetyGuidance()}
    as a PROP (never objectFit inside style — @remotion/media warns and it is the wrong API). The
    <Video> must be a child of an <AbsoluteFill> or an absolutely-positioned full-size box (1080×1920),
    never a div that lacks an explicit size. Use objectPosition (in style) for the focal point.
-   CORRECT full-bleed example:
+   AUDIO: add the \`muted\` prop on videos that are NOT marked 🔊 SPEECH (visual only). For SPEECH
+   scenes, OMIT \`muted\` so the speaker's voice plays, and duck the music (see AUDIO MIX above).
+   CORRECT full-bleed example (non-speech → muted):
      <AbsoluteFill>
        <Video
          src={staticFile("media/clip.mp4")}
@@ -798,6 +840,9 @@ ${input.originalCode}
 
 THE ONLY FILES THAT EXIST (referencing anything else will fail the render):
 ${mediaLines.join("\n") || "(none)"}
+
+AUDIO MIX REFERENCE (apply if the request touches music/voice/BGM/ducking):
+${audioMixGuidance(input.script, input.hasMusic)}
 
 RULES:
 1. Make the smallest change that satisfies the request. Do NOT redesign unrelated parts.
