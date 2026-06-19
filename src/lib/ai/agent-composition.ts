@@ -85,27 +85,38 @@ function logoContrastLine(profile?: LogoProfile): string {
 function audioMixGuidance(script: ReelScript, hasMusic: boolean): string {
   const videoScenes = script.scenes.filter((s) => s.mediaType === "video");
   const speechScenes = videoScenes.filter((s) => s.containsSpeech);
-  if (speechScenes.length === 0) {
+  // The creative director's intent wins. Default for older scripts without the
+  // field: voice mode only if speech scenes exist, else bgm-only.
+  const style: "bgm-only" | "voice-led" | "mixed" =
+    script.audioStyle ?? (speechScenes.length > 0 ? "mixed" : "bgm-only");
+
+  // BGM-only: visuals/activity carry it. Mute everything, music plays full —
+  // ignore any incidental talking in the clips.
+  if (style === "bgm-only" || speechScenes.length === 0) {
     return [
-      `AUDIO MIX:`,
-      `- No scene is marked SPEECH — mute every <Video> (visual only)${hasMusic ? " and let the background music play at a normal level throughout" : ""}.`,
+      `AUDIO MIX — this reel is BGM-ONLY (carried by visuals/activity):`,
+      `- Mute EVERY <Video> (visual only) — add the \`muted\` prop on all of them. Ignore any incidental talking in the clips; it is not the point of this reel.`,
+      hasMusic
+        ? `- The background music plays at a normal/full level the WHOLE time — no ducking.`
+        : `- There is no music track.`,
     ].join("\n");
   }
-  const speechHeavy = speechScenes.length >= Math.ceil(videoScenes.length / 2);
+
+  // voice-led / mixed: the speakers must be heard.
   const lines = [
-    `AUDIO MIX (CRITICAL — the speakers must be heard):`,
+    `AUDIO MIX — this reel is ${style.toUpperCase()} (the speakers must be heard):`,
     `- Scenes marked 🔊 SPEECH contain talking. On those scenes the <Video> MUST play its OWN audio — do NOT put the \`muted\` prop on them. Mute all OTHER videos (visual only).`,
   ];
   if (hasMusic) {
     lines.push(
-      `- DUCK the background music during every SPEECH scene so the voice cuts through: drop music volume to ~0.12 for those frames, restore to ~0.8 elsewhere. Use a frame-based volume function on the music <Audio>:`,
+      `- DUCK the background music during every SPEECH scene so the voice cuts through: drop music volume to ~0.12 for those frames, ~0.8 elsewhere. Use a frame-based volume function on the music <Audio>:`,
       `    const SPEECH_RANGES = [[startFrame, endFrame], ...]; // each SPEECH scene's frame range (seconds × 30)`,
       `    const ducked = (f) => SPEECH_RANGES.some(([a, b]) => f >= a && f < b);`,
       `    <Audio src={staticFile("music/track.mp3")} volume={(f) => ducked(f) ? 0.12 : 0.8} />`,
       `  Compute SPEECH_RANGES from where each SPEECH scene sits in your timeline; add a short ~8-frame ramp at each edge so the duck eases in/out instead of clicking.`,
     );
-    if (speechHeavy) {
-      lines.push(`- This reel is SPEECH-HEAVY (≥half the video scenes are talking) — keep the music low THROUGHOUT (~0.2 baseline), letting it swell only on the title/closing cards and non-speech scenes. Voices lead; music supports.`);
+    if (style === "voice-led") {
+      lines.push(`- VOICE-LED: the message is in the words. Keep music as a quiet bed (~0.15 baseline) the WHOLE time, dropping to ~0.08 under speech; let it rise only on the title/closing cards. Voices lead; music merely supports.`);
     }
   } else {
     lines.push(`- There is no music track — just make sure the SPEECH clips play their own audio.`);

@@ -39,6 +39,15 @@ export type ReelScript = {
   durationSec: number;
   musicMood: string[];
   musicTempo: "slow" | "moderate" | "fast";
+  /**
+   * The reel's audio intent, decided by the creative director:
+   *  - "bgm-only": visuals/activity carry it; clips muted, music plays full (ignore
+   *    any incidental talking).
+   *  - "voice-led": built around what people say (interview/commentary/statement);
+   *    speaker audio leads, music is a low bed ducked hard under speech.
+   *  - "mixed": mostly visual + music, but a few key spoken moments should be heard.
+   */
+  audioStyle: "bgm-only" | "voice-led" | "mixed";
   scenes: SceneBeat[];
   titleCard: {
     headline: string;
@@ -207,14 +216,23 @@ VERIFY YOUR WORK:
 3. If a video has 3 curated trim windows, your scenes MUST include 3 separate scenes for it,
    each using its own window — never just one.
 
-AUDIO MIX (speech vs background music):
-- Each curated video entry is tagged SPEECH when someone is talking in it (interview,
-  statement, dialogue). Copy that onto the scene as "containsSpeech": true.
-- The composition will, for speech scenes, play the CLIP'S OWN audio (the speaker's
-  voice) and DUCK the background music low so the voice is clearly audible.
-- If the reel is SPEECH-HEAVY (most video scenes are speech — an interview/statement
-  reel), pick a calmer musicMood and "slow"/"moderate" tempo so the BGM sits under the
-  voices; do NOT pick loud/"fast" tracks that fight the talking.
+AUDIO STYLE (decide what KIND of reel this is — set "audioStyle"):
+First judge where this reel's value lives, then choose ONE:
+- "bgm-only": the reel is carried by the VISUALS / activity / showcase (events, sports,
+  crafts, campus life, b-roll). What anyone happens to be saying does NOT matter. The
+  clips will be MUTED and the music plays at full level. Choose this even if some clips
+  contain incidental talking — if the talking isn't the point, it's bgm-only.
+- "voice-led": the reel is built around WHAT PEOPLE SAY — an interview, testimonial,
+  student/teacher commentary, a speech or statement. The message is in the words. The
+  speaker's voice leads and the music is only a quiet bed under it.
+- "mixed": mostly visual + music, but ONE or a FEW specific spoken moments are worth
+  hearing (a single quote, a winner's reaction). Those scenes play their audio; the rest
+  are muted.
+Then:
+- Copy "containsSpeech" onto each scene from the curated entry (the composition uses it
+  for voice-led/mixed; it is ignored for bgm-only).
+- For "voice-led", pick a calm, low musicMood and "slow"/"moderate" tempo — never a
+  loud/"fast" track that fights the talking.
 
 MUSIC MOOD:
 - Provide 2-4 keywords for Pixabay music search (e.g., ["upbeat", "acoustic", "school"])
@@ -246,6 +264,7 @@ Return ONLY valid JSON matching this schema:
     "durationSec": number,
     "musicMood": ["keyword1", "keyword2"],
     "musicTempo": "slow|moderate|fast",
+    "audioStyle": "bgm-only|voice-led|mixed",
     "scenes": [{
       "index": 1,
       "mediaPath": "exact path from curated images list",
@@ -401,7 +420,7 @@ Create 3 different reel script variations. Each should use a DISTINCT visual reg
     const videoScenes = v.scenes.filter((s) => s.mediaType === "video");
     const imageScenes = v.scenes.filter((s) => s.mediaType === "image");
     console.log(
-      `[ReelAgent2] V${v.variationIndex}: "${v.direction}" — ${v.scenes.length} scenes (${videoScenes.length} video, ${imageScenes.length} image), ${v.durationSec}s, music: [${v.musicMood.join(", ")}] ${v.musicTempo}`,
+      `[ReelAgent2] V${v.variationIndex}: "${v.direction}" — ${v.scenes.length} scenes (${videoScenes.length} video, ${imageScenes.length} image), ${v.durationSec}s, audio=${v.audioStyle ?? "?"}, music: [${v.musicMood.join(", ")}] ${v.musicTempo}`,
     );
     for (const vs of videoScenes) {
       console.log(
