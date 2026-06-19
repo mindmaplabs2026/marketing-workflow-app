@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ReelScript } from "./agent-creative-reel";
 import { CodexUsageLimitError, extractCodexError } from "./codex-text";
+import type { LogoProfile } from "./logo-analysis";
 import type { RenderResult } from "@/lib/remotion/render";
 
 /** Assets needed to render a composition (shared by generation + chat-edit). */
@@ -13,6 +14,7 @@ export type RenderAssets = {
   mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
   musicFile?: { name: string; buffer: Buffer };
   hasLogo: boolean;
+  logoProfile?: LogoProfile;
   hasFooter?: boolean;
   hasMusic: boolean;
 };
@@ -58,19 +60,38 @@ function layoutSafetyGuidance(): string {
   ].join("\n");
 }
 
-/** Prompt block describing how big the logo must be rendered. */
-function logoSizingGuidance(): string {
+/**
+ * Contrast line for the logo, derived from a MEASURED profile (the composition
+ * writer never sees the logo's pixels, so we hand it the fact). Without a profile
+ * it falls back to a generic "ensure contrast" note.
+ */
+function logoContrastLine(profile?: LogoProfile): string {
+  if (!profile || profile.requiredBackground === "any") {
+    return profile
+      ? `- CONTRAST: the logo carries its own background, so it stays legible on any surface — just give it a little breathing room.`
+      : `- CONTRAST: make sure the logo is clearly legible against whatever is behind it; if in doubt, put it on a small white rounded chip.`;
+  }
+  const desc = `${profile.tone}${profile.hasTransparency ? " with transparency" : ""}`;
+  if (profile.requiredBackground === "light") {
+    return `- CONTRAST (measured): this logo is ${desc}, so it is INVISIBLE on dark backgrounds. It MUST sit on a LIGHT / WHITE surface — place it on a white (or very light) rounded chip, or on a light area of the frame. NEVER put it on a dark header bar, dark gradient, or dark photo region.`;
+  }
+  return `- CONTRAST (measured): this logo is ${desc}, so it is INVISIBLE on light backgrounds. It MUST sit on a DARK surface — place it on a dark rounded chip, or on a dark area of the frame. NEVER put it on a white / light background.`;
+}
+
+/** Prompt block describing how big the logo must be rendered + contrast. */
+function logoSizingGuidance(profile?: LogoProfile): string {
   const minPct = Math.round((LOGO_MIN_PX / 1080) * 100);
   const maxPct = Math.round((LOGO_MAX_PX / 1080) * 100);
   const mid = Math.round((LOGO_MIN_PX + LOGO_MAX_PX) / 2);
   return [
-    `LOGO SIZE & TREATMENT (CRITICAL — the logo keeps rendering too small; fix it):`,
+    `LOGO SIZE & TREATMENT (CRITICAL — the logo keeps rendering too small / invisible; fix it):`,
     `- The logo may be SQUARE or RECTANGULAR (a wide wordmark, or a tall crest). Do NOT assume square.`,
     `- Apply the size to the LOGO <Img> ITSELF — NEVER to a wrapping card. The VISIBLE logo's LONGEST edge MUST measure ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (≈${minPct}%–${maxPct}%), never below ${LOGO_MIN_PX}px. Exact CSS, directly on the Img:`,
     `    <Img src={staticFile("media/logo.png")} style={{ width: "auto", height: "auto", maxWidth: <box>, maxHeight: <box>, objectFit: "contain" }} />`,
     `  This makes a WIDE logo's WIDTH ≈ <box> and a TALL logo's HEIGHT ≈ <box>. That is the intended size — correct, not "too small".`,
     `- DO NOT put the logo inside a large square card/box with padding around it, and DO NOT force a rectangular logo into a square frame. A logo letterboxed inside a padded square looks tiny — that is the EXACT bug we are fixing. No decorative card, no big padding.`,
-    `- If contrast over busy media truly needs a backing, it must HUG the logo: a tight rounded-rect with ≤12px uniform padding, matching the logo's own shape — never a big empty square with the logo floating small in the middle.`,
+    logoContrastLine(profile),
+    `- If a backing is needed for contrast, it must HUG the logo: a tight rounded-rect with ≤12px uniform padding, matching the logo's own shape — never a big empty square with the logo floating small in the middle.`,
     `- Corner / persistent watermark: longest edge near ${LOGO_MIN_PX}–${mid}px. Hero logo (title card / closing card): longest edge near ${mid}–${LOGO_MAX_PX}px — USE THE UPPER END, there is plenty of empty space on those cards.`,
     `- Keep a ≥40px safe-area margin from the frame edges. Never stretch or distort the logo.`,
   ].join("\n");
@@ -97,6 +118,8 @@ export async function generateComposition(input: {
   mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
   /** Whether a logo file is available in media/. */
   hasLogo: boolean;
+  /** Measured logo tone/transparency so the writer can guarantee contrast. */
+  logoProfile?: LogoProfile;
   /** Whether a footer image is available in media/. */
   hasFooter?: boolean;
   /** Whether a music file is available in music/. */
@@ -135,7 +158,7 @@ export async function generateComposition(input: {
       "utf8",
     ).catch(() => "");
 
-    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers, input.hasLogo);
+    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers, input.hasLogo, input.logoProfile);
 
     // Run Codex
     const outFile = path.join(workDir, "out.txt");
@@ -310,6 +333,7 @@ function buildPrompt(
   examples: string[],
   helpers: string,
   hasLogo: boolean,
+  logoProfile?: LogoProfile,
 ): string {
   return `You are writing a Remotion composition (React/TypeScript component) for an Instagram Reel video.
 
@@ -353,7 +377,7 @@ Closing Card (${script.closingCard.durationSec}s):
 ## BRANDING
 - Logo: ${script.brandingConfig.logoPlacement}
 - School: ${script.brandingConfig.schoolName}
-${hasLogo ? logoSizingGuidance() : ""}
+${hasLogo ? logoSizingGuidance(logoProfile) : ""}
 
 ## MEDIA FILES AVAILABLE
 ${mediaLines.join("\n")}
@@ -529,6 +553,7 @@ export async function refineReelComposition(input: {
   script: ReelScript;
   mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
   hasLogo: boolean;
+  logoProfile?: LogoProfile;
   hasMusic: boolean;
   timeoutMs?: number;
 }): Promise<CompositionCode> {
@@ -564,9 +589,10 @@ RULES:
 2. Keep the same overall structure and creative direction; do NOT regress to a generic/stock look.
 3. Export "Reel" (React.FC) and "REEL_DURATION" (number in frames)
 4. Canvas: 1080x1920, 30fps. Keep text/logo/graphics within the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom); no text below ${MIN_FONT_PX}px; logo sized to its bounds (never tiny, never in a big padded square).
-5. Use only: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
-6. Media paths: use staticFile("media/filename.ext") and staticFile("music/track.mp3") — NEVER include "public/" in the path
-7. Write COMPLETE, COMPILABLE TypeScript
+${input.hasLogo ? `5. LOGO CONTRAST: ${logoContrastLine(input.logoProfile).replace(/^- /, "")}` : ""}
+6. Use only: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
+7. Media paths: use staticFile("media/filename.ext") and staticFile("music/track.mp3") — NEVER include "public/" in the path
+8. Write COMPLETE, COMPILABLE TypeScript
 
 OUTPUT: Write the COMPLETE improved Reel.tsx inside a single \`\`\`tsx code fence.
 
@@ -601,6 +627,7 @@ export async function repairComposition(input: {
   script: ReelScript;
   mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
   hasLogo: boolean;
+  logoProfile?: LogoProfile;
   hasFooter?: boolean;
   hasMusic: boolean;
   timeoutMs?: number;
@@ -741,6 +768,7 @@ export async function editComposition(input: {
   script: ReelScript;
   mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
   hasLogo: boolean;
+  logoProfile?: LogoProfile;
   hasFooter?: boolean;
   hasMusic: boolean;
   timeoutMs?: number;
@@ -778,7 +806,7 @@ RULES:
 4. staticFile("media/<file>") / staticFile("music/track.mp3") — NEVER prefix with "public/". Only reference files in the list above.
 5. VIDEO (.mp4/.mov) uses <Video> from "@remotion/media" with style={{ width:"100%", height:"100%", objectPosition:"X% Y%" }} and objectFit="cover" as a PROP (never objectFit in style). Trim with trimBefore/trimAfter (frames = sec×30); startFrom/endAt do NOT exist. Images use <Img> from "remotion".
 6. The result must be COMPLETE, COMPILABLE TypeScript.
-${input.hasLogo ? `7. If the logo is shown, size the LOGO <Img> ITSELF (not a wrapping card) so its longest visible edge is ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (never tiny). Use width/height:"auto" + maxWidth/maxHeight + objectFit:"contain". The logo may be rectangular — do NOT box it inside a padded square card (that letterboxes it and makes it look tiny).` : ""}
+${input.hasLogo ? `7. If the logo is shown, size the LOGO <Img> ITSELF (not a wrapping card) so its longest visible edge is ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px on the 1080px canvas (never tiny). Use width/height:"auto" + maxWidth/maxHeight + objectFit:"contain". The logo may be rectangular — do NOT box it inside a padded square card (that letterboxes it and makes it look tiny).\n${logoContrastLine(input.logoProfile)}` : ""}
 8. Keep text/logo/graphics inside the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom) and use NO font smaller than ${MIN_FONT_PX}px. Background media stays full-bleed (no padding on it).
 
 OUTPUT: the COMPLETE updated Reel.tsx inside a single \`\`\`tsx code fence.

@@ -24,6 +24,7 @@ import { runCreativeAgent } from "./agent-creative";
 import { evaluatePoster, refineAndRegenerate } from "./agent-generation";
 import type { UnderstandingOutput, UploadedImage } from "./agent-understanding";
 import { transcribeVideo, type TranscriptSegment } from "./transcribe";
+import { analyzeLogo, extractBrandColors, type LogoProfile } from "./logo-analysis";
 import type { VariationBrief } from "./agent-creative";
 import {
   fetchContext,
@@ -40,46 +41,6 @@ import type { ReelScript } from "./agent-creative-reel";
 type PosterType = "single" | "carousel";
 
 type Worst = { score: number; feedback: string; pageIndex: number };
-
-/**
- * Extract a few dominant anchor colours (hex) from a logo image, so the creative
- * director can keep palettes on-brand. Downscales to a tiny grid, ignores
- * transparent/near-white/near-black pixels, buckets the rest, returns the most
- * common. Best-effort — returns [] on any failure.
- */
-async function extractBrandColors(buffer: Buffer, max = 3): Promise<string[]> {
-  try {
-    const sharp = (await import("sharp")).default;
-    const { data, info } = await sharp(buffer)
-      .resize(24, 24, { fit: "inside" })
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const ch = info.channels;
-    const buckets = new Map<string, { r: number; g: number; b: number; n: number }>();
-    for (let i = 0; i < data.length; i += ch) {
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      const a = ch >= 4 ? data[i + 3] : 255;
-      if (a < 128) continue;                       // transparent
-      const hi = Math.max(r, g, b), lo = Math.min(r, g, b);
-      if (hi > 240 && lo > 240) continue;          // near-white (background)
-      if (hi < 24) continue;                        // near-black
-      const key = `${Math.round(r / 32)},${Math.round(g / 32)},${Math.round(b / 32)}`;
-      const e = buckets.get(key) ?? { r: 0, g: 0, b: 0, n: 0 };
-      e.r += r; e.g += g; e.b += b; e.n++;
-      buckets.set(key, e);
-    }
-    return [...buckets.values()]
-      .sort((x, y) => y.n - x.n)
-      .slice(0, max)
-      .map((e) => {
-        const c = (v: number) => Math.round(v / e.n).toString(16).padStart(2, "0");
-        return `#${c(e.r)}${c(e.g)}${c(e.b)}`;
-      });
-  } catch {
-    return [];
-  }
-}
 
 /**
  * Evaluate the latest variation's pages (re-implements aiPipelineEvaluate
@@ -880,15 +841,23 @@ export async function runReelPipeline(
 
     // Extract brand anchor colours from the logo so palettes stay on-brand.
     let brandColors: string[] = [];
+    let logoProfile: LogoProfile | undefined;
     const logoForColors = ctx.brandAssets.find((a) => a.assetType === "logo");
     if (logoForColors?.storagePath) {
       try {
         const { data } = await admin.storage.from("school-assets").download(logoForColors.storagePath);
-        if (data) brandColors = await extractBrandColors(Buffer.from(await data.arrayBuffer()));
+        if (data) {
+          const logoBuf = Buffer.from(await data.arrayBuffer());
+          brandColors = await extractBrandColors(logoBuf);
+          logoProfile = (await analyzeLogo(logoBuf)) ?? undefined;
+        }
       } catch { /* best-effort */ }
     }
     if (brandColors.length) {
       console.log(`[Worker] Reel ${jobId} | Brand colours from logo: ${brandColors.join(", ")}`);
+    }
+    if (logoProfile) {
+      console.log(`[Worker] Reel ${jobId} | Logo profile: tone=${logoProfile.tone}, transparency=${logoProfile.hasTransparency}, needs ${logoProfile.requiredBackground} background`);
     }
 
     const a2Costs = new CostTracker();
@@ -905,6 +874,7 @@ export async function runReelPipeline(
       schoolGuidelines: ctx.schoolGuidelines,
       curatedMedia: curatedMediaForDirector,
       brandColors,
+      logoProfile,
     }, a2Costs);
     await appendCosts(jobId, a2Costs.toJSON());
 
@@ -1016,6 +986,7 @@ export async function runReelPipeline(
         script,
         mediaManifest,
         hasLogo,
+        logoProfile,
         hasFooter,
         hasMusic: music.buffer.length > 0,
       });
@@ -1028,7 +999,7 @@ export async function runReelPipeline(
       const { renderResult, composition: workingComposition, usedFallback } = await renderWithRepair({
         composition,
         script,
-        assets: { mediaFiles, mediaManifest, musicFile, hasLogo, hasFooter, hasMusic: music.buffer.length > 0 },
+        assets: { mediaFiles, mediaManifest, musicFile, hasLogo, logoProfile, hasFooter, hasMusic: music.buffer.length > 0 },
         label: `V${script.variationIndex}`,
       });
       composition = workingComposition;
@@ -1118,6 +1089,7 @@ export async function runReelPipeline(
               script,
               mediaManifest,
               hasLogo,
+              logoProfile,
               hasMusic: music.buffer.length > 0,
             });
 

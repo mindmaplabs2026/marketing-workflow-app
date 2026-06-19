@@ -82,6 +82,8 @@ type ReelAgent2Input = {
   curatedMedia?: { path: string; url: string; mediaType: "image" | "video"; description: string }[];
   /** Brand anchor colors extracted from the school logo, to keep palettes on-brand. */
   brandColors?: string[];
+  /** Measured logo tone/transparency, so logoPlacement specifies a contrasting backing. */
+  logoProfile?: { tone: string; hasTransparency: boolean; requiredBackground: "light" | "dark" | "any" };
 };
 
 const SYSTEM_PROMPT = `You are an expert creative director specializing in short-form vertical video (Instagram Reels) for school marketing.
@@ -290,11 +292,15 @@ export async function runReelCreativeAgent(
   const brandColorsLine = input.brandColors?.length
     ? `## Brand colours (anchor palettes to these): ${input.brandColors.join(", ")}`
     : "";
+  const logoBgLine = input.logoProfile && input.logoProfile.requiredBackground !== "any"
+    ? `## Logo: it is ${input.logoProfile.tone}${input.logoProfile.hasTransparency ? " with transparency" : ""} — in logoPlacement, specify it sits on a ${input.logoProfile.requiredBackground === "light" ? "LIGHT/WHITE" : "DARK"} backing/chip (otherwise it is invisible).`
+    : "";
 
   const userMessage = `## School: ${input.schoolName}
 ## Requested duration: ${input.requestedDurationSec} seconds
 ## Media: ${imageCount} images, ${videoCount} videos (${input.understanding.curatedImages.length} total curated)
 ${brandColorsLine}
+${logoBgLine}
 
 ## Theme Analysis (from prior agent)
 - Theme: ${input.understanding.theme}

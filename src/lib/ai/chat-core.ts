@@ -296,11 +296,16 @@ async function runReelChatEdit(
     .in("asset_type", ["logo", "footer"]);
   let hasLogo = false;
   let hasFooter = false;
+  let logoProfile: import("./logo-analysis").LogoProfile | undefined;
   for (const a of brandAssets ?? []) {
     const buf = await downloadWithRetry("school-assets", a.storage_path);
     if (!buf) continue;
-    if (a.asset_type === "logo") { mediaFiles.set("logo.png", buf); hasLogo = true; }
-    else if (a.asset_type === "footer") { mediaFiles.set("footer.png", buf); hasFooter = true; }
+    if (a.asset_type === "logo") {
+      mediaFiles.set("logo.png", buf);
+      hasLogo = true;
+      const { analyzeLogo } = await import("./logo-analysis");
+      logoProfile = (await analyzeLogo(buf)) ?? undefined;
+    } else if (a.asset_type === "footer") { mediaFiles.set("footer.png", buf); hasFooter = true; }
   }
 
   // Music — reuse the persisted track so the soundtrack stays identical across
@@ -374,6 +379,7 @@ async function runReelChatEdit(
     script: reelScript,
     mediaManifest,
     hasLogo,
+    logoProfile,
     hasFooter,
     hasMusic,
   });
