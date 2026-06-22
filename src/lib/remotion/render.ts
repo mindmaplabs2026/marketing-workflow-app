@@ -142,21 +142,26 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       `[remotion-render] Rendered in ${renderTimeSec.toFixed(1)}s — ${rawSizeMb.toFixed(1)} MB (raw)`,
     );
 
-    // Compress with ffmpeg — reduces ~70MB → ~15-20MB without visible quality loss.
-    // CRF 28 is a good balance for Instagram Reels (viewed on mobile screens).
+    // Compress with ffmpeg. Quality is set by CRF (LOWER = higher quality + bigger file).
+    // We no longer optimise for a tiny <25MB file (Supabase Pro lifts the upload limit):
+    // the default is now CRF 20 (visually crisp for a 1080×1920 reel). Tune with
+    // REEL_VIDEO_CRF (e.g. 18 = near-lossless/bigger, 28 = old small-file behaviour).
+    const crf = process.env.REEL_VIDEO_CRF ?? "20";
+    const preset = process.env.REEL_VIDEO_PRESET ?? "fast";
+    const audioBitrate = process.env.REEL_AUDIO_BITRATE ?? "192k";
     const compressedPath = path.join(workDir, "output-compressed.mp4");
-    console.log("[remotion-render] Compressing with ffmpeg (crf=28)...");
+    console.log(`[remotion-render] Compressing with ffmpeg (crf=${crf}, preset=${preset})...`);
     const compressStart = Date.now();
 
     await new Promise<void>((resolve, reject) => {
-      const { spawn: spawnProc } = require("node:child_process");
-      const child = spawnProc("ffmpeg", [
+      const child = spawn("ffmpeg", [
         "-i", rawPath,
         "-c:v", "libx264",
-        "-crf", "28",
-        "-preset", "fast",
+        "-crf", crf,
+        "-preset", preset,
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", audioBitrate,
         "-movflags", "+faststart",
         "-y", compressedPath,
       ], { stdio: ["ignore", "pipe", "pipe"] });
