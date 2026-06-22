@@ -91,7 +91,7 @@ type ReelAgent2Input = {
   schoolGuidelines?: string | null;
   /** Actual curated media (image URL / a video keyframe) so the director can SEE
    *  the footage and choose a palette/mood that complements it — not direct blind. */
-  curatedMedia?: { path: string; url: string; mediaType: "image" | "video"; description: string }[];
+  curatedMedia?: { path: string; url: string; mediaType: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }[];
   /** Brand anchor colors extracted from the school logo, to keep palettes on-brand. */
   brandColors?: string[];
   /** Measured logo tone/transparency, so logoPlacement specifies a contrasting backing. */
@@ -124,11 +124,13 @@ CREATIVE PROCESS:
    - Add 4s for title card + 4s for closing card.
    - Total should not exceed 180 seconds regardless of teacher's request.
    - If the calculated max is less than the teacher's request, use the calculated max.
-3. Design 3 DIFFERENT visual registers for the reel.
-   You MUST pick 3 DIFFERENT styles from this list. Do NOT pick the same style twice.
-   Do NOT default to scrapbook/polaroid — that style is overused. Pick others.
+3. Design 3 visual registers for the reel. You are the creative director — these are YOUR
+   choices. There is NO hard rule that you must use a framed style, a full-bleed style, or any
+   particular mix. Choose whatever genuinely serves THIS footage and makes the strongest reel.
 
-   FRAMED styles (photo sits inside a frame with breathing room):
+   This is a MENU to spark ideas, not a set of buckets you must fill:
+
+   FRAMED looks (media sits inside a frame with breathing room):
    A. Magazine editorial: photos in rounded white cards, serif typography, glossy yearbook feel
    B. Film strip: photos inside sprocket-hole film frames, dark background, retro cinema
    C. Postcard stack: photos as postcards dropped onto a wooden table, stamps and handwritten notes
@@ -137,25 +139,33 @@ CREATIVE PROCESS:
    F. Scrapbook/notebook: warm, handwritten feel, photos as polaroids taped on a notebook page
    G. College bulletin: clean cards, navy/gold header band, formal event recap
 
-   FULL-BLEED styles (photo fills the entire screen):
+   FULL-BLEED looks (media fills the screen):
    H. Bold overlay: full-bleed photo/video with large text overlaid, gradient darken at bottom
-   I. Cinematic letterbox: full-bleed with black bars top/bottom (21:9 feel), minimal text
+   I. Cinematic letterbox: full-bleed with bars top/bottom (21:9 feel), minimal text
    J. Story slides: full-bleed with Instagram-story-style text stickers, emoji, color blocks
    K. Kinetic typography: bold word stamps synced to beats, high energy, hard cuts
    L. iPhone POV: handheld camera simulation, notification cards as captions
+   …or any tasteful look you invent. You may also MIX treatments within one reel
+   (e.g. some scenes full-bleed, others framed) if that serves the story.
 
-   IMPORTANT: When using full-bleed styles, ALWAYS set objectPosition using the focusX/focusY
-   values from the curated list so the subject stays centered even when cropped to 9:16.
-   When using framed styles (cards, strips, grids), this is less critical since the frame
-   preserves the photo's natural composition.
+   SOFT GUIDANCE (not hard rules):
+   - The 3 variations SHOULD feel distinctly different from each other — different look and mood.
+     Avoid shipping three near-identical reels, and don't lazily default to scrapbook/polaroid
+     for all of them. But you are NOT forced into specific buckets — diversity by judgement, not quota.
+   - Name the look you chose in the "direction" field (e.g., "Film Strip Chronicle" or your own).
 
-   VARIETY RULES (MANDATORY):
-   - Your 3 variations MUST use 3 DIFFERENT letter codes from the list above (e.g., A, H, D — not A, A, F)
-   - At least 1 variation MUST be a framed style (A-G)
-   - At least 1 variation MUST be a full-bleed style (H-L)
-   - The 3rd variation can be either — but it MUST be different from the other two
-   - Each variation should feel DISTINCTLY different in look and mood
-   - State which letter code you chose in the "direction" field (e.g., "B — Film Strip Chronicle")
+   MEDIA SHAPE drives how each clip should be PRESENTED (this is the important part):
+   - Each curated VIDEO is tagged landscape / portrait / square. Choose a treatment that shows it
+     WELL instead of cropping the subject away:
+     • PORTRAIT/vertical clip → full-bleed cover is ideal (it already fits 9:16).
+     • LANDSCAPE clip → full-bleed cover crops away ~60% of its width (people on the edges vanish).
+       Prefer a treatment that keeps the whole frame: a landscape-shaped framed card, a cinematic
+       letterbox, or a blur-fill backdrop (the clip fit-to-width over a blurred copy of itself).
+       Only go full-bleed on a landscape clip if its subject is dead-centre.
+     • SQUARE clip → either works.
+   - For full-bleed treatments, ALWAYS set objectPosition from focusX/focusY so the subject stays in
+     frame. Describe your intended treatment per scene in the scene's style/notes so the composition
+     writer implements it.
 4. For each variation, sequence the scenes chronologically or thematically.
 5. Assign transitions that match the mood:
    - "fade" for contemplative, slow content
@@ -392,7 +402,7 @@ Create 3 different reel script variations. Each should use a DISTINCT visual reg
     for (const m of curatedMedia) {
       userContent.push({
         type: "text",
-        text: `[${m.mediaType}: ${m.path.split("/").pop()}${m.mediaType === "video" ? " (keyframe)" : ""}]`,
+        text: `[${m.mediaType}: ${m.path.split("/").pop()}${m.mediaType === "video" ? ` (keyframe${m.orientation ? `, ${m.orientation.toUpperCase()}` : ""})` : ""}]`,
       });
       userContent.push({
         type: "image_url",

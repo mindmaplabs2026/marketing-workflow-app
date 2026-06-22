@@ -11,7 +11,7 @@ import type { RenderResult } from "@/lib/remotion/render";
 /** Assets needed to render a composition (shared by generation + chat-edit). */
 export type RenderAssets = {
   mediaFiles: Map<string, Buffer>;
-  mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
+  mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>;
   musicFile?: { name: string; buffer: Buffer };
   hasLogo: boolean;
   logoProfile?: LogoProfile;
@@ -179,7 +179,7 @@ export type CompositionCode = {
 export async function generateComposition(input: {
   script: ReelScript;
   /** Map of local media filenames (key) to description (value). */
-  mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
+  mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>;
   /** Whether a logo file is available in media/. */
   hasLogo: boolean;
   /** Measured logo tone/transparency so the writer can guarantee contrast. */
@@ -208,9 +208,11 @@ export async function generateComposition(input: {
     }
 
     // Build media manifest text
+    const orient = (info: { type: string; orientation?: string }) =>
+      info.type === "video" && info.orientation ? ` [${info.orientation.toUpperCase()}]` : "";
     const mediaLines: string[] = [];
     for (const [filename, info] of input.mediaManifest) {
-      mediaLines.push(`- media/${filename} (${info.type}) — ${info.description}`);
+      mediaLines.push(`- media/${filename} (${info.type})${orient(info)} — ${info.description}`);
     }
     if (input.hasLogo) mediaLines.push(`- media/logo.png (image) — school logo`);
     if (input.hasFooter) mediaLines.push(`- media/footer.png (image) — school footer/branding strip`);
@@ -266,7 +268,7 @@ export async function generateComposition(input: {
  */
 export function generateFallbackComposition(
   script: ReelScript,
-  mediaManifest: Map<string, { type: "image" | "video"; description: string }>,
+  mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>,
   hasMusic: boolean,
 ): CompositionCode {
   const FPS = 30;
@@ -523,12 +525,36 @@ ${audioMixGuidance(script, hasMusic)}
          style={{ width: "100%", height: "100%", objectPosition: \`\${focusX}% \${focusY}%\` }}
        />
      </AbsoluteFill>
-   For a FRAMED video (inside a card/frame): the media area that holds the video MUST have a DEFINITE
-   pixel height (e.g. height: 1000) or aspectRatio with overflow:"hidden", and the <Video> inside it
-   MUST be width:"100%", height:"100%", objectFit="cover". Setting only width (height auto) makes the
-   video sit at its natural size and leaves empty card/background space below it — this is WRONG.
-   ANTI-PATTERN (never do this): a video that fills the width but shows blank/background space above or
-   below it. The video must completely fill its media box (cropping via cover), with NO empty gaps.
+   VIDEO TREATMENT — CHOOSE per clip; there is NO single mandated treatment. A media file tagged
+   [LANDSCAPE]/[PORTRAIT]/[SQUARE] in the list tells you its shape — pick the treatment that shows
+   it WELL rather than cropping the subject away. Your options (all valid — use whichever the
+   creative direction + the clip's shape call for):
+     a) FULL-BLEED COVER — <Video> fills 1080×1920 via objectFit="cover" (style width/height 100%),
+        objectPosition at the focal point. Great for PORTRAIT/vertical clips. For a LANDSCAPE clip
+        this crops away ~60% of the width — only do it when the subject is dead-center.
+     b) FRAMED — the <Video> sits in a card/box with breathing room. The media box needs a DEFINITE
+        size (pixel height/width or aspectRatio + overflow:"hidden"); inside it the <Video> is
+        width/height 100% + objectFit="cover". Pick a box shape that matches the clip (a LANDSCAPE
+        clip in a ~16:9 / ~3:2 card crops very little).
+     c) BLUR-FILL BACKDROP (best for LANDSCAPE in this vertical frame) — show the WHOLE clip, no
+        cropped-out faces, no ugly bars: a back layer = the SAME video scaled up + heavily blurred
+        to cover 1080×1920, and a front layer = the same video fit to width (objectFit="contain")
+        centered. Example:
+          <AbsoluteFill>
+            <Video src={staticFile("media/clip.mp4")} muted objectFit="cover"
+              style={{ width:"100%", height:"100%", filter:"blur(40px)", transform:"scale(1.2)" }} />
+            <AbsoluteFill style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <Video src={staticFile("media/clip.mp4")} muted objectFit="contain"
+                style={{ width:"100%", height:"100%" }} />
+            </AbsoluteFill>
+          </AbsoluteFill>
+        (Use the SAME trimBefore/trimAfter on both layers. For a SPEECH clip, keep \`muted\` on the
+        blurred back layer and OMIT it on the sharp front layer so the voice plays once.)
+     d) LETTERBOX / designed bars — fit-to-width with intentional solid/gradient bands (in palette
+        colours) above and below, used as a deliberate design element (captions/branding can live
+        in the bands). This is NOT a bug — empty-looking gaps are only wrong when they are accidental.
+   The earlier "video must fill its box, no gaps" rule applies ONLY to treatment (b); treatments
+   (c) and (d) intentionally show the whole frame and are fully allowed.
    TRIMMING: use trimBefore / trimAfter (values in FRAMES, = seconds × 30). The props startFrom / endAt
    do NOT exist on @remotion/media's <Video> and are silently ignored — never use them.
    Image files (.jpg, .png) use <Img> from "remotion"; for images objectFit IN style is fine.
@@ -542,7 +568,7 @@ ${audioMixGuidance(script, hasMusic)}
    - If focusY is 40-60 (centered): place text high or low (within the safe area), NEVER dead-center over the subject.
    - For full-bleed scenes: use a gradient overlay (transparent→dark) on the side WHERE TEXT IS,
      to ensure readability without covering the subject on the opposite side.
-   - For framed scenes: place text OUTSIDE the photo frame (above or below the card).
+   - For framed scenes: place text OUTSIDE the photo frame (above/below the card) OR over the media on the side away from the subject with a scrim/chip behind it — whichever looks more designed.
    - Text should be SHORT (3-6 words). Long text blocks = more photo coverage = bad.
 
 OUTPUT FORMAT:
@@ -634,7 +660,7 @@ export async function refineReelComposition(input: {
   feedback: string;
   weaknesses: string[];
   script: ReelScript;
-  mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
+  mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>;
   hasLogo: boolean;
   logoProfile?: LogoProfile;
   hasMusic: boolean;
@@ -701,7 +727,7 @@ export async function repairComposition(input: {
   /** The compile/render error message from the renderer. */
   errorMessage: string;
   script: ReelScript;
-  mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
+  mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>;
   hasLogo: boolean;
   logoProfile?: LogoProfile;
   hasFooter?: boolean;
@@ -842,7 +868,7 @@ export async function editComposition(input: {
   /** The user's natural-language edit request. */
   instruction: string;
   script: ReelScript;
-  mediaManifest: Map<string, { type: "image" | "video"; description: string }>;
+  mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>;
   hasLogo: boolean;
   logoProfile?: LogoProfile;
   hasFooter?: boolean;
@@ -855,7 +881,8 @@ export async function editComposition(input: {
 
   const mediaLines: string[] = [];
   for (const [filename, info] of input.mediaManifest) {
-    mediaLines.push(`- media/${filename} (${info.type}) — ${info.description}`);
+    const orientTag = info.type === "video" && info.orientation ? ` [${info.orientation.toUpperCase()}]` : "";
+    mediaLines.push(`- media/${filename} (${info.type})${orientTag} — ${info.description}`);
   }
   if (input.hasLogo) mediaLines.push(`- media/logo.png (image)`);
   if (input.hasFooter) mediaLines.push(`- media/footer.png (image)`);

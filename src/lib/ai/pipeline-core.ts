@@ -452,6 +452,10 @@ export async function runReelPipeline(
     // Per-video timestamped transcripts (Whisper). Best-effort; empty if Whisper
     // is not installed. Fed to Agent 1 so it can pick segments by content.
     const videoTranscripts: Record<string, TranscriptSegment[]> = {};
+    // Per-video orientation (from ffprobe dimensions) — NON-binding context for the
+    // creative director + composition writer so they can choose a treatment that
+    // doesn't crop a landscape clip to a sliver. Keyed by the video's storage path.
+    const videoOrientations: Record<string, "landscape" | "portrait" | "square"> = {};
     if (videoUploads.length > 0) {
       const fsPromises = await import("node:fs").then((m) => m.promises);
       const pathMod = await import("node:path");
@@ -488,13 +492,15 @@ export async function runReelPipeline(
             }
           } catch { /* best-effort */ }
 
-          // Get video duration with ffprobe
+          // Get video duration + dimensions with ffprobe (one JSON probe).
           let durationSec = 0;
           try {
             const probeResult = await new Promise<{ out: string; err: string }>((resolve, reject) => {
               const child = spawnProc("ffprobe", [
-                "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", vidPath,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height:format=duration",
+                "-of", "json", vidPath,
               ], { stdio: ["ignore", "pipe", "pipe"] });
               let out = "", err = "";
               child.stdout.on("data", (d) => (out += d.toString()));
@@ -503,7 +509,19 @@ export async function runReelPipeline(
               child.on("error", reject);
               setTimeout(() => { child.kill(); reject(new Error("ffprobe timeout")); }, 10000);
             });
-            durationSec = Math.round(parseFloat(probeResult.out) * 10) / 10;
+            const probe = JSON.parse(probeResult.out) as {
+              format?: { duration?: string };
+              streams?: { width?: number; height?: number }[];
+            };
+            durationSec = Math.round(parseFloat(probe.format?.duration ?? "0") * 10) / 10;
+            const w = probe.streams?.[0]?.width ?? 0;
+            const h = probe.streams?.[0]?.height ?? 0;
+            if (w > 0 && h > 0) {
+              // 10% tolerance band counts near-square as square.
+              const orientation = w > h * 1.1 ? "landscape" : h > w * 1.1 ? "portrait" : "square";
+              videoOrientations[vid.path] = orientation;
+              console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: ${w}x${h} → ${orientation}`);
+            }
           } catch (probeErr) {
             console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: ffprobe failed — ${probeErr instanceof Error ? probeErr.message : probeErr}`);
           }
@@ -822,7 +840,7 @@ export async function runReelPipeline(
 
     // Give the creative director the ACTUAL footage to look at: one image URL per
     // unique curated path (a video uses one of its keyframes). Low detail; capped.
-    const curatedMediaForDirector: { path: string; url: string; mediaType: "image" | "video"; description: string }[] = [];
+    const curatedMediaForDirector: { path: string; url: string; mediaType: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }[] = [];
     {
       const seen = new Set<string>();
       for (const c of understanding.curatedImages) {
@@ -832,7 +850,13 @@ export async function runReelPipeline(
           ? videoThumbnails.find((v) => v.path === c.path && v.signedUrl)?.signedUrl
           : ctx.images.find((i) => i.path === c.path)?.signedUrl;
         if (url) {
-          curatedMediaForDirector.push({ path: c.path, url, mediaType: c.mediaType ?? "image", description: c.description });
+          curatedMediaForDirector.push({
+            path: c.path,
+            url,
+            mediaType: c.mediaType ?? "image",
+            description: c.description,
+            orientation: c.mediaType === "video" ? videoOrientations[c.path] : undefined,
+          });
         }
         if (curatedMediaForDirector.length >= 15) break;
       }
@@ -888,7 +912,7 @@ export async function runReelPipeline(
     //     chance of a later variation rendering with missing media (the earlier
     //     per-variation download could expire/fail mid-job). ---
     const mediaFiles = new Map<string, Buffer>();
-    const mediaManifest = new Map<string, { type: "image" | "video"; description: string }>();
+    const mediaManifest = new Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>();
     const allMediaPaths = new Set<string>();
     for (const v of reelCreative.variations) {
       for (const s of v.scenes) if (s.mediaPath) allMediaPaths.add(s.mediaPath);
@@ -917,6 +941,7 @@ export async function runReelPipeline(
         mediaManifest.set(filename, {
           type: isVideo ? "video" : "image",
           description: curatedInfo?.description ?? "uploaded media",
+          orientation: isVideo ? videoOrientations[mediaPath] : undefined,
         });
         console.log(`[Worker] Reel ${jobId} | Downloaded: ${filename} (${isVideo ? "video" : "image"}, ${(buf.length / 1024).toFixed(0)} KB)`);
       } catch {

@@ -270,7 +270,7 @@ async function runReelChatEdit(
   // more chances for a `terminated` stream error). Fetch each unique file ONCE.
   const scenes = (brief.scenes as Array<{ mediaPath: string; mediaType?: "image" | "video" }>) ?? [];
   const mediaFiles = new Map<string, Buffer>();
-  const mediaManifest = new Map<string, { type: "image" | "video"; description: string }>();
+  const mediaManifest = new Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>();
   const seenPaths = new Set<string>();
   for (const scene of scenes) {
     if (!scene.mediaPath || seenPaths.has(scene.mediaPath)) continue;
