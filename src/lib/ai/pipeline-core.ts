@@ -412,7 +412,6 @@ export async function runReelPipeline(
   const { findAndTrimMusic } = await import("./agent-music");
   const { generateComposition, refineReelComposition, renderWithRepair } = await import("./agent-composition");
   const { evaluateReel } = await import("./agent-reel-evaluator");
-  const { renderReel } = await import("@/lib/remotion/render");
 
   const admin = createAdminClient();
   console.log(`[Worker] Reel Job ${jobId} | START (request ${requestId})`);
@@ -1078,14 +1077,25 @@ export async function runReelPipeline(
         await appendCosts(jobId, evalCosts.toJSON());
         console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score: ${evaluation.score}/10`);
 
-        // Refine if score < 7 (max 1 refinement round)
-        if (evaluation.score < 7) {
-          console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score below 7, refining composition`);
+        // Refine loop: up to MAX_REFINE_ROUNDS, RE-EVALUATING after each round and
+        // stopping as soon as we clear PASS_SCORE (hard stop). We KEEP THE BEST-scoring
+        // render across all rounds — a refine can come back worse, and we never ship a
+        // regression. Only the best is left uploaded in storage + the variation record.
+        const PASS_SCORE = 7;
+        const MAX_REFINE_ROUNDS = 2;
+        let bestScore = evaluation.score;
+        let bestComposition = currentComposition;
+        let bestFeedback = evaluation.feedback;
+        let bestWeaknesses = evaluation.weaknesses;
+
+        for (let round = 1; round <= MAX_REFINE_ROUNDS && bestScore < PASS_SCORE; round++) {
+          console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score ${bestScore}/10 < ${PASS_SCORE}, refine round ${round}/${MAX_REFINE_ROUNDS}`);
           try {
+            // Refine from the BEST composition so far, using its evaluation feedback.
             const refined = await refineReelComposition({
-              originalCode: currentComposition.reelTsx,
-              feedback: evaluation.feedback,
-              weaknesses: evaluation.weaknesses,
+              originalCode: bestComposition.reelTsx,
+              feedback: bestFeedback,
+              weaknesses: bestWeaknesses,
               script,
               mediaManifest,
               hasLogo,
@@ -1093,53 +1103,75 @@ export async function runReelPipeline(
               hasMusic: music.buffer.length > 0,
             });
 
-            // Re-render with refined code
-            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Re-rendering with refined composition`);
-            const refinedRender = await renderReel({
-              reelTsx: refined.reelTsx,
-              dataTsx: refined.dataTsx,
-              mediaFiles,
-              musicFile: music.buffer.length > 0
-                ? { name: "track.mp3", buffer: music.buffer }
-                : undefined,
+            // Re-render (with self-repair so a compile slip doesn't abort the round).
+            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Re-rendering (round ${round})`);
+            const { renderResult: refinedRender, composition: refinedComposition } = await renderWithRepair({
+              composition: refined,
+              script,
+              assets: { mediaFiles, mediaManifest, musicFile, hasLogo, logoProfile, hasFooter, hasMusic: music.buffer.length > 0 },
+              label: `V${script.variationIndex} refine r${round}`,
             });
 
-            // Upload refined version, replacing the original
-            const refinedTimestamp = Date.now();
-            const refinedPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-refined-${refinedTimestamp}.mp4`;
-            const refinedBuffer = await import("node:fs").then((f) => f.promises.readFile(refinedRender.outputPath));
+            // Re-EVALUATE the refined render — this is what makes the loop real.
+            const refinedEvalCosts = new CostTracker();
+            const refinedEval = await evaluateReel({
+              mp4Path: refinedRender.outputPath,
+              schoolName: ctx.schoolName,
+              reelDirection: script.direction,
+              artDirection: {
+                visualRegister: script.visualRegister,
+                colorPalette: script.colorPalette,
+                typography: script.typography,
+              },
+              costTracker: refinedEvalCosts,
+            });
+            await appendCosts(jobId, refinedEvalCosts.toJSON());
+            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Round ${round} score: ${refinedEval.score}/10 (best so far ${bestScore}/10)`);
 
-            const { error: refinedUploadErr } = await admin.storage
-              .from("designs")
-              .upload(refinedPath, refinedBuffer, { contentType: "video/mp4", upsert: true });
-            if (refinedUploadErr) {
-              console.error(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined upload FAILED: ${refinedUploadErr.message}`);
+            if (refinedEval.score > bestScore) {
+              // New best — upload it and point the variation record at it.
+              const refinedPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-refined-r${round}-${Date.now()}.mp4`;
+              const refinedBuffer = await import("node:fs").then((f) => f.promises.readFile(refinedRender.outputPath));
+              const { error: refinedUploadErr } = await admin.storage
+                .from("designs")
+                .upload(refinedPath, refinedBuffer, { contentType: "video/mp4", upsert: true });
+              if (refinedUploadErr) {
+                console.error(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined upload FAILED (keeping best): ${refinedUploadErr.message}`);
+                await refinedRender.cleanup();
+              } else {
+                await admin.from("ai_variations")
+                  .update({
+                    storage_paths: [refinedPath],
+                    creative_brief: {
+                      ...script,
+                      _compositionCode: refinedComposition.reelTsx,
+                      _compositionDataCode: refinedComposition.dataTsx,
+                      _musicSource: music.source,
+                      _musicPath: musicPath,
+                      _musicAttribution: music.attribution ?? null,
+                      _refinement: { rounds: round, originalScore: evaluation.score, score: refinedEval.score, feedback: refinedEval.feedback },
+                    } as unknown as Record<string, unknown>,
+                  })
+                  .eq("job_id", jobId)
+                  .eq("variation_index", script.variationIndex);
+                console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Round ${round} improved ${bestScore}→${refinedEval.score}, re-uploaded: ${refinedPath}`);
+                // Swap the kept render to the new best; drop the previous one.
+                await currentCleanup();
+                currentOutputPath = refinedRender.outputPath;
+                currentCleanup = refinedRender.cleanup;
+                bestScore = refinedEval.score;
+                bestComposition = refinedComposition;
+                bestFeedback = refinedEval.feedback;
+                bestWeaknesses = refinedEval.weaknesses;
+              }
+            } else {
+              // Not better — discard the refined render, keep the current best.
+              console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Round ${round} did not improve (${refinedEval.score} ≤ ${bestScore}), keeping best`);
+              await refinedRender.cleanup();
             }
-
-            // Update variation with refined path and code
-            await admin.from("ai_variations")
-              .update({
-                storage_paths: [refinedPath],
-                creative_brief: {
-                  ...script,
-                  _compositionCode: refined.reelTsx,
-                  _compositionDataCode: refined.dataTsx,
-                  _musicSource: music.source,
-                  _musicPath: musicPath,
-                  _refinement: { originalScore: evaluation.score, feedback: evaluation.feedback },
-                } as unknown as Record<string, unknown>,
-              })
-              .eq("job_id", jobId)
-              .eq("variation_index", script.variationIndex);
-
-            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined and re-uploaded: ${refinedPath}`);
-
-            // Cleanup old render, switch to new
-            await currentCleanup();
-            currentOutputPath = refinedRender.outputPath;
-            currentCleanup = refinedRender.cleanup;
           } catch (refineErr) {
-            console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refinement failed (keeping original): ${refineErr instanceof Error ? refineErr.message : refineErr}`);
+            console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refine round ${round} failed (keeping best): ${refineErr instanceof Error ? refineErr.message : refineErr}`);
+            break;
           }
         }
       } catch (err) {

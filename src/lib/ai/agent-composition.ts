@@ -668,14 +668,15 @@ CREATIVE DIRECTION — this is the spec the render MUST match (fix any drift fro
 - TYPOGRAPHY (use these EXACT fonts): heading ${input.script.typography.heading}, body ${input.script.typography.body}${input.script.typography.accent ? `, accent ${input.script.typography.accent}` : ""}
 
 RULES:
-1. Fix the specific weaknesses listed above. If the feedback flags palette/font/register drift, that is the FIRST thing to correct — make the colours and fonts match the spec above exactly.
-2. Keep the same overall structure and creative direction; do NOT regress to a generic/stock look.
-3. Export "Reel" (React.FC) and "REEL_DURATION" (number in frames)
-4. Canvas: 1080x1920, 30fps. Keep text/logo/graphics within the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom); no text below ${MIN_FONT_PX}px; logo sized to its bounds (never tiny, never in a big padded square).
-${input.hasLogo ? `5. LOGO CONTRAST: ${logoContrastLine(input.logoProfile).replace(/^- /, "")}` : ""}
-6. Use only: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
-7. Media paths: use staticFile("media/filename.ext") and staticFile("music/track.mp3") — NEVER include "public/" in the path
-8. Write COMPLETE, COMPILABLE TypeScript
+1. Fix the specific weaknesses listed above. If the feedback flags palette/font/register DRIFT (the render used the wrong colours/fonts), that is the FIRST thing to correct — make the colours and fonts match the spec above exactly.
+2. BUT if the feedback says the result is FLAT, MUTED, LIFELESS, STATIC, GENERIC, or LOW-ENERGY, do NOT just re-apply the same palette — that will not fix it. You MAY and SHOULD push the design BOLDER than the brief: deepen/saturate the palette, add strong light/dark contrast and vivid accent colours, add gradients/scrims/accent shapes/texture, and add or intensify MOTION (spring entrances/exits, continuous Ken Burns on images, animated text, varied transitions). Staying on-brand matters (keep at least one brand colour), but VIBRANCY beats literal palette adherence here. A refine that comes back equally flat is a failure.
+3. Keep the same overall creative direction and structure; do NOT regress to a generic/stock look.
+4. Export "Reel" (React.FC) and "REEL_DURATION" (number in frames)
+5. Canvas: 1080x1920, 30fps. Keep text/logo/graphics within the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom); no text below ${MIN_FONT_PX}px; logo sized to its bounds (never tiny, never in a big padded square).
+${input.hasLogo ? `6. LOGO CONTRAST: ${logoContrastLine(input.logoProfile).replace(/^- /, "")}` : ""}
+7. Use only: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
+8. Media paths: use staticFile("media/filename.ext") and staticFile("music/track.mp3") — NEVER include "public/" in the path
+9. Write COMPLETE, COMPILABLE TypeScript
 
 OUTPUT: Write the COMPLETE improved Reel.tsx inside a single \`\`\`tsx code fence.
 
