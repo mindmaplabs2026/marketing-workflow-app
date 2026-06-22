@@ -106,9 +106,11 @@ React/Remotion code to YOUR spec. Direct from what you SEE, not from a synopsis.
 
 You will receive:
 - An analysis of the request theme, curated images/videos, and audience (from a prior agent).
-- The ACTUAL curated photos and a keyframe from each video (attached as images) — LOOK at them:
-  their real colours, lighting, and mood must drive your palette and register choices, so the
-  design complements the footage instead of fighting it.
+- The ACTUAL curated photos and a keyframe from each video (attached as images) — LOOK at them
+  to understand the SUBJECT, mood, and focal points, and to pull ONE anchor colour. But you are
+  DESIGNING ON TOP of this footage, not echoing it: the photos may be ordinary or low-light, and
+  your job is to make them feel vibrant and cinematic through bold palette, motion, and decoration.
+  Let the footage inform crop/focus and one anchor tone — let your DESIGN supply the energy.
 - School brand assets (logo, header, footer images) and the school's BRAND COLOURS.
 - A requested duration (the teacher's preference — you may cap this based on available content).
 
@@ -205,8 +207,11 @@ TEXT OVERLAY PLACEMENT (CRITICAL — avoid covering faces and subjects):
   - If focusY >= 60 (subject is in the BOTTOM of the image) → position: "top"
   - If focusY is 40-60 (subject is centered) → position: "top" or "bottom", NOT "center"
 - NEVER place text at "center" when the photo has people — it WILL cover faces
-- For full-bleed styles: text always goes in the opposite third from the focal point
-- For framed styles: text goes OUTSIDE the frame (below or above the card), not overlaid
+- For full-bleed styles: text always goes in the opposite third from the focal point, and the
+  composition writer will put a gradient scrim behind it so it stays legible AND looks designed.
+- For framed styles: text may sit OUTSIDE the frame (below/above the card) OR over the media on
+  the side away from the subject with a scrim/chip behind it — whichever looks more designed.
+  Do not feel forced to banish all text to empty margins; scrim-backed text over the image is fine.
 - Keep text overlays SHORT (3-6 words max) — long text blocks cover more of the image
 
 VERIFY YOUR WORK:
@@ -239,13 +244,19 @@ MUSIC MOOD:
 - Specify tempo: "slow" for reflective, "moderate" for balanced, "fast" for energetic
 - The music will be trimmed to match the reel duration automatically
 
-COLOR PALETTE (direct from the footage + brand):
-- Build each variation's 4-6 colour palette from what you SEE in the attached curated media
-  (dominant tones, lighting, mood) so the design complements the photos/videos.
-- Anchor the palette to the school's BRAND COLOURS when provided: include at least one brand
-  colour (or a close, tasteful variant) so the reel stays on-brand. Do not ignore them.
-- The 3 variations MUST have DISTINCT palettes (different mood/temperature), not three
-  near-identical colour sets. Provide real hex values.
+COLOR PALETTE (a DESIGNED, BOLD scheme — not a muted echo of the footage):
+- The footage and brand colours are ANCHORS, not the whole palette. Pull ONE anchor colour
+  that reads off the attached media (a dominant tone) and at least ONE brand colour, then
+  BUILD OUT a confident 4-6 colour scheme around them: rich, saturated, high-contrast.
+- Dull or low-light footage does NOT mean a dull design. The design layer (backgrounds,
+  gradients, accent shapes, type colours) is where the VIBRANCY comes from — it should ADD
+  energy the raw photos lack, not match their flatness. Lean into saturated accents and
+  strong light/dark contrast so the reel pops on a phone feed.
+- Always include at least one brand colour (or a close, tasteful variant) so the reel stays
+  on-brand. Do not ignore the brand colours.
+- The 3 variations MUST have DISTINCT, characterful palettes (different mood/temperature —
+  e.g. warm-vivid, cool-electric, editorial-duotone), not three near-identical muted sets.
+  Provide real hex values.
 
 TYPOGRAPHY:
 - Use Google Fonts only (they're available via @remotion/google-fonts)

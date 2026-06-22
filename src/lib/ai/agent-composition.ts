@@ -53,6 +53,20 @@ const SAFE_BOTTOM_PX = Number(process.env.REEL_SAFE_BOTTOM_PX ?? 280);
 const MIN_FONT_PX = Number(process.env.REEL_MIN_FONT_PX ?? 28);
 
 /** Prompt block: safe-area padding + minimum legible font size. */
+function motionEnergyGuidance(script: ReelScript): string {
+  return [
+    `MOTION & VISUAL ENERGY (this is what makes a reel feel alive — do NOT skimp):`,
+    `- Animation style for this reel: ${script.animationStyle || "energetic, spring-driven"}. Express it in EVERY scene.`,
+    `- NO scene may be static. Every scene needs an ENTRANCE and an EXIT animation — drive them with spring() (for snappy, physical motion) or interpolate() (for eased fades/slides). A scene that just appears and sits there is WRONG.`,
+    `- IMAGES must always move: apply a continuous Ken Burns (slow scale 1.0→1.08 plus a gentle pan) for the scene's whole duration. A still image held perfectly still reads as a broken slideshow.`,
+    `- TEXT must animate IN, not just fade: stagger words/lines, slide-up + fade, spring pop, letter-spacing settle, or a wipe/mask reveal. Title and closing cards especially deserve a designed, animated treatment — not centered text that fades in.`,
+    `- VARY TRANSITIONS across the reel: do NOT use the same transition (e.g. cross-fade) for every scene. Mix the ones called for in the SCENES list (slide, wipe, whip-pan, dissolve, cut) using TransitionSeries so the pacing has rhythm.`,
+    `- ADD A DESIGNED LAYER on top of the media — this is where "vibrant" comes from: gradient scrims, accent bars/shapes in palette colors, progress ticks, chips/labels, subtle grain/texture, depth via shadows. Decoration should animate too (slide/grow/fade), not sit frozen.`,
+    `- Pace it to feel fast: prefer shorter holds with motion over long static holds. Energy comes from continuous movement, not from cramming content.`,
+    `- Match the polish level of the EXAMPLE COMPOSITIONS below — they are the bar. If your reel has less motion and decoration than the examples, push it further.`,
+  ].join("\n");
+}
+
 function layoutSafetyGuidance(): string {
   return [
     `SAFE AREA & TEXT LEGIBILITY (mobile — enforce strictly):`,
@@ -60,6 +74,7 @@ function layoutSafetyGuidance(): string {
     `- Keep ALL text, the logo, and graphic elements within the safe area: ≥${SAFE_TOP_PX}px from the TOP, ≥${SAFE_SIDE_PX}px from the LEFT, ≥${SAFE_RIGHT_PX}px from the RIGHT, and ≥${SAFE_BOTTOM_PX}px from the BOTTOM. The large bottom margin keeps elements clear of the Instagram caption/controls; the right margin clears the action buttons. Nothing should ever sit flush to an edge.`,
     `- Easiest implementation: wrap your text/element layer in an AbsoluteFill with paddingTop:${SAFE_TOP_PX}, paddingLeft:${SAFE_SIDE_PX}, paddingRight:${SAFE_RIGHT_PX}, paddingBottom:${SAFE_BOTTOM_PX} (background media sits in a separate full-frame layer behind it, with NO padding).`,
     `- MINIMUM FONT SIZE: no text anywhere smaller than ${MIN_FONT_PX}px — this is a 1080px-wide canvas, so ${MIN_FONT_PX}px is already small on a phone. Captions/body text ≥36px; headlines much larger. NEVER render labels, credits, dates, or footnotes below ${MIN_FONT_PX}px.`,
+    `- TEXT OVER MEDIA IS ENCOURAGED (it looks more designed than text banished to empty margins) — but ALWAYS put a legibility layer behind it so it never fights the photo: a gradient scrim (e.g. linear-gradient from transparent to rgba(0,0,0,0.55) at the text's edge), a solid/blurred color shape, or a chip. Place the text on the side AWAY from the subject (use the scene's focus point) so the scrim darkens empty space, not faces. With a scrim, text on top of the image is preferred over pushing all text outside the frame.`,
   ].join("\n");
 }
 
@@ -388,8 +403,10 @@ function buildPrompt(
   return `You are writing a Remotion composition (React/TypeScript component) for an Instagram Reel video.
 
 Build the reel's VISUAL IDENTITY from the CREATIVE DIRECTION, COLOR PALETTE, and
-TYPOGRAPHY below — that is the binding spec. The example compositions near the end
-are TECHNIQUE references only; never copy their colors, fonts, text, or layout.
+TYPOGRAPHY below — that is the binding spec for COLORS, FONTS, TEXT, and MEDIA. The
+example compositions near the end are your CRAFT reference: borrow their motion design,
+layering, transitions, and decorative energy, then reskin them with this reel's identity.
+Aim high — a flat, static result is a failure even if the colors and fonts are correct.
 
 ## CREATIVE DIRECTION (the BINDING spec for how this reel must look — build THIS, from scratch)
 - Direction: ${script.direction}
@@ -441,21 +458,31 @@ ${apiRef}
 ${helpers}
 \`\`\`
 
-## EXAMPLE COMPOSITIONS — TECHNIQUE REFERENCE ONLY (do NOT copy their look)
-These exist to show you HOW to use Remotion — the mechanics ONLY: how to structure
-Sequences/Series, drive animation with spring()/interpolate(), use TransitionSeries,
-load fonts, layer elements, time scenes. Learn the CODE TECHNIQUE from them.
+## MOTION & VISUAL ENERGY
+${motionEnergyGuidance(script)}
 
-You MUST NOT reproduce their visual identity. Do NOT copy from the examples:
-- their colors / palette → use the COLOR PALETTE above (those exact hex values)
-- their fonts → use the TYPOGRAPHY above
-- their text / copy / headlines → use the SCENES + title/closing cards above
-- their specific layouts, backgrounds, decorative motifs, or graphic flourishes
-An example may be in a COMPLETELY different style than this reel's CREATIVE DIRECTION —
-that is expected and fine. Your output must look like the CREATIVE DIRECTION + VISUAL
-REGISTER + COLOR PALETTE + TYPOGRAPHY above, NOT like any example. If your result
-resembles an example's colors, fonts, or layout, you have done it WRONG — rebuild the
-described register from scratch, using the example purely for Remotion technique.
+## EXAMPLE COMPOSITIONS — YOUR CRAFT REFERENCE (borrow the motion & layout craft; reskin the content)
+These are polished, hand-built reels. They are your bar for quality. STUDY them and
+BORROW their craft — this is where the vibrancy comes from:
+- their MOTION: spring()-driven entrances/exits, staggered reveals, parallax, scale/zoom,
+  beat-synced word stamps, animated counters — reuse these techniques liberally.
+- their LAYOUT CRAFT & STRUCTURE: how they layer media + scrims + type + decorative shapes,
+  how they frame photos, how they compose title/closing cards, how they use negative space.
+- their TRANSITIONS: TransitionSeries usage, slides/wipes/whip-pans/dissolves — vary them.
+- their DECORATIVE ENERGY: gradient overlays, accent bars, tape/stickers/chips, texture,
+  motion-blur, shadow depth — the "designed" feel. Adapt these to THIS reel's register.
+
+Think of it as RE-SKINNING a great template, not avoiding it: take a layout/motion pattern
+you like, then swap in THIS reel's identity. ONLY these four things must come from the spec
+above, never from an example:
+- COLORS → use the COLOR PALETTE above (those exact hex values), not the example's colors
+- FONTS → use the TYPOGRAPHY above, not the example's fonts
+- TEXT / copy → use the SCENES + title/closing cards above, not the example's words
+- MEDIA → use the MEDIA FILES listed above, not the example's photos
+Everything else — motion design, layering, decoration, structural layout — you SHOULD lift and
+adapt. A flat result (centered text on a plain background, every scene a simple cross-fade, no
+decorative layer, no spring motion) is a FAILURE even if the palette/fonts are correct. Match
+the example's level of motion and polish, expressed in THIS reel's register, palette, and fonts.
 
 ${examples.join("\n\n")}
 

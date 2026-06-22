@@ -69,7 +69,7 @@ Below are ${keyframes.length} evenly-spaced keyframes from the rendered video. E
 2. TEXT READABILITY (0-10): Can text overlays be read clearly? Proper contrast? No text smaller than ~28px? Nothing flush to the frame edges?
 3. BRAND PRESENCE (0-10): Is the school logo/name visible and a reasonable size (not tiny, not boxed in a big padded square)?
 4. VISUAL COHERENCE (0-10): Do the keyframes look like they belong to the same video? Consistent style?
-5. ENGAGEMENT (0-10): Would this stop a scroll on Instagram? Is it visually interesting?
+5. VISUAL ENERGY & RICHNESS (0-10): Would this stop a scroll? Does it look DESIGNED and vibrant, or flat and templatey? Score LOW if frames look static and bare — plain backgrounds, centered text with no treatment, no decorative layer (gradient scrims, accent shapes, chips, depth), washed-out/muted colour, or a generic slideshow feel. Score HIGH for bold saturated colour, layered composition, designed type treatment, and frames that imply motion/dynamism. In weaknesses, say specifically what would make it more vibrant (e.g. "backgrounds are flat grey — add gradient + accent bars", "title is plain centered text — needs animated, designed treatment").
 6. DIRECTION ADHERENCE (0-10): Does the render MATCH the intended visual register, colour palette, and typography above? Score LOW if it ignored the palette/fonts, looks generic, or resembles a stock template instead of the specified register. Name the specific mismatch in weaknesses (e.g. "palette is blue/grey but spec was warm terracotta", "headings are a default sans, spec was Playfair Display").
 
 Return JSON:
