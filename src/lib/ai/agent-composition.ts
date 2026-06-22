@@ -61,7 +61,7 @@ function motionEnergyGuidance(script: ReelScript): string {
     `- IMAGES must always move: apply a continuous Ken Burns (slow scale 1.0→1.08 plus a gentle pan) for the scene's whole duration. A still image held perfectly still reads as a broken slideshow.`,
     `- TEXT must animate IN, not just fade: stagger words/lines, slide-up + fade, spring pop, letter-spacing settle, or a wipe/mask reveal. Title and closing cards especially deserve a designed, animated treatment — not centered text that fades in.`,
     `- VARY TRANSITIONS across the reel: do NOT use the same transition (e.g. cross-fade) for every scene. Mix the ones called for in the SCENES list (slide, wipe, whip-pan, dissolve, cut) using TransitionSeries so the pacing has rhythm.`,
-    `- ADD A DESIGNED LAYER on top of the media — this is where "vibrant" comes from: gradient scrims, accent bars/shapes in palette colors, progress ticks, chips/labels, subtle grain/texture, depth via shadows. Decoration should animate too (slide/grow/fade), not sit frozen.`,
+    `- ADD A DESIGNED LAYER on top of the media — this is where "vibrant" comes from: gradient scrims, accent bars/shapes in palette colors, chips/labels, subtle grain/texture, depth via shadows. Decoration should animate too (slide/grow/fade), not sit frozen. (Do NOT add a slide/scene counter or "N of M" progress unless the creative direction explicitly asks for one — see the counter note below.)`,
     `- Pace it to feel fast: prefer shorter holds with motion over long static holds. Energy comes from continuous movement, not from cramming content.`,
     `- Match the polish level of the EXAMPLE COMPOSITIONS below — they are the bar. If your reel has less motion and decoration than the examples, push it further.`,
   ].join("\n");
@@ -467,12 +467,19 @@ ${motionEnergyGuidance(script)}
 These are polished, hand-built reels. They are your bar for quality. STUDY them and
 BORROW their craft — this is where the vibrancy comes from:
 - their MOTION: spring()-driven entrances/exits, staggered reveals, parallax, scale/zoom,
-  beat-synced word stamps, animated counters — reuse these techniques liberally.
+  beat-synced word stamps — reuse these techniques liberally.
 - their LAYOUT CRAFT & STRUCTURE: how they layer media + scrims + type + decorative shapes,
   how they frame photos, how they compose title/closing cards, how they use negative space.
 - their TRANSITIONS: TransitionSeries usage, slides/wipes/whip-pans/dissolves — vary them.
 - their DECORATIVE ENERGY: gradient overlays, accent bars, tape/stickers/chips, texture,
   motion-blur, shadow depth — the "designed" feel. Adapt these to THIS reel's register.
+
+DO NOT auto-copy the SLIDE/SCENE COUNTER. Several examples show a running counter
+("01 / 09", "FRAME 03 / 12", a page/issue number, or a story-style progress bar). That is a
+register-SPECIFIC gimmick belonging to those examples (bulletin/editorial/film-strip) — it is
+NOT a default element and must NOT appear in every reel. Include a counter or progress bar ONLY
+when THIS reel's CREATIVE DIRECTION explicitly calls for a structured recap / countdown / "story"
+feel. If the direction does not mention it, OMIT it entirely — no slide numbers, no "N of M".
 
 Think of it as RE-SKINNING a great template, not avoiding it: take a layout/motion pattern
 you like, then swap in THIS reel's identity. ONLY these four things must come from the spec

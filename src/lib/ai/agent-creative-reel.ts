@@ -153,6 +153,10 @@ CREATIVE PROCESS:
      Avoid shipping three near-identical reels, and don't lazily default to scrapbook/polaroid
      for all of them. But you are NOT forced into specific buckets — diversity by judgement, not quota.
    - Name the look you chose in the "direction" field (e.g., "Film Strip Chronicle" or your own).
+   - A slide/scene COUNTER or progress bar ("01/09", "FRAME 03/12", story-style ticks) is an
+     OPTIONAL device, NOT a default. Only ask for it when the look genuinely benefits (a
+     structured recap, a countdown, a story-style reel). If you want one, say so explicitly in
+     the "direction"/"visualRegister" text; otherwise the reel will have NO slide numbering.
 
    MEDIA SHAPE drives how each clip should be PRESENTED (this is the important part):
    - Each curated VIDEO is tagged landscape / portrait / square. Choose a treatment that shows it
