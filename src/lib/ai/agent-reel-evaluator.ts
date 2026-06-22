@@ -56,9 +56,11 @@ export async function evaluateReel(input: {
     > = [
       {
         type: "text",
-        text: `You are the CREATIVE DIRECTOR reviewing the rendered Instagram Reel for a school named "${input.schoolName}" against the art direction you specified.
+        text: `You are a DEMANDING, INDEPENDENT social-media art director. You did NOT make this reel — you are seeing it cold, for the first time, for a school named "${input.schoolName}". Your job is to judge it HARSHLY against the best school/brand Reels on Instagram, NOT to be kind to it. Assume it is mediocre until the frames prove otherwise. Most first drafts are flat and templatey; if this one is, say so and score it low — a generous score that lets weak work ship is a failure on YOUR part.
 
-Creative direction: "${input.reelDirection}"
+Do NOT grade it merely on whether it "follows the brief". A reel can follow a brief perfectly and still be lifeless. Judge whether it is genuinely VIBRANT, polished, and scroll-stopping in its own right. The brief below is context for what was INTENDED — use it only for the adherence axis, never as the bar for quality.
+
+Intended creative direction (context only): "${input.reelDirection}"
 ${input.artDirection?.visualRegister ? `Intended visual register: ${input.artDirection.visualRegister}` : ""}
 ${input.artDirection?.colorPalette?.length ? `Intended COLOUR PALETTE (the reel should clearly use these): ${input.artDirection.colorPalette.join(", ")}` : ""}
 ${input.artDirection?.typography ? `Intended TYPOGRAPHY — heading: ${input.artDirection.typography.heading}, body: ${input.artDirection.typography.body}${input.artDirection.typography.accent ? `, accent: ${input.artDirection.typography.accent}` : ""}` : ""}
@@ -70,7 +72,7 @@ Below are ${keyframes.length} evenly-spaced keyframes from the rendered video. E
 3. BRAND PRESENCE (0-10): Is the school logo/name visible and a reasonable size (not tiny, not boxed in a big padded square)?
 4. VISUAL COHERENCE (0-10): Do the keyframes look like they belong to the same video? Consistent style?
 5. VISUAL ENERGY & RICHNESS (0-10): Would this stop a scroll? Does it look DESIGNED and vibrant, or flat and templatey? Score LOW if frames look static and bare — plain backgrounds, centered text with no treatment, no decorative layer (gradient scrims, accent shapes, chips, depth), washed-out/muted colour, or a generic slideshow feel. Score HIGH for bold saturated colour, layered composition, designed type treatment, and frames that imply motion/dynamism. In weaknesses, say specifically what would make it more vibrant (e.g. "backgrounds are flat grey — add gradient + accent bars", "title is plain centered text — needs animated, designed treatment").
-6. DIRECTION ADHERENCE (0-10): Does the render MATCH the intended visual register, colour palette, and typography above? Score LOW if it ignored the palette/fonts, looks generic, or resembles a stock template instead of the specified register. Name the specific mismatch in weaknesses (e.g. "palette is blue/grey but spec was warm terracotta", "headings are a default sans, spec was Playfair Display").
+6. DIRECTION ADHERENCE (0-10): Does the render honour the intended palette, typography, and register as a STARTING POINT? Score LOW only when it ignored the brand/palette/fonts or looks like a generic stock template. Do NOT penalise a render for being bolder, more animated, or more polished than the brief implied — exceeding the brief is GOOD. Penalise drift that hurts the result or goes off-brand (e.g. "palette is blue/grey but brand + spec were warm terracotta", "headings are a default sans, spec was Playfair Display"), not improvement.
 
 Return JSON:
 {
