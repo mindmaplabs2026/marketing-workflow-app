@@ -36,6 +36,9 @@ const REMOTION_RENDERER_DIR =
 const LOGO_MIN_PX = Number(process.env.REEL_LOGO_MIN_PX ?? 128);
 const LOGO_MAX_PX = Number(process.env.REEL_LOGO_MAX_PX ?? 320);
 
+/** Per-attempt timeout for a Codex composition/edit/refine call (env-tunable). */
+const COMPOSITION_TIMEOUT_MS = Number(process.env.CODEX_COMPOSITION_TIMEOUT_MS ?? 300_000);
+
 /**
  * Safe-area margins (px) on the 1080×1920 canvas for TEXT / LOGO / GRAPHIC
  * elements — NOT for background media (full-bleed photos/videos still reach the
@@ -172,7 +175,7 @@ export async function generateComposition(input: {
   hasMusic: boolean;
   timeoutMs?: number;
 }): Promise<CompositionCode> {
-  const timeoutMs = input.timeoutMs ?? 300_000; // 5 minutes
+  const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS; // 5 minutes
   const workDir = path.join(os.tmpdir(), "codex-composition", `${process.pid}-${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
 
@@ -610,7 +613,7 @@ export async function refineReelComposition(input: {
   hasMusic: boolean;
   timeoutMs?: number;
 }): Promise<CompositionCode> {
-  const timeoutMs = input.timeoutMs ?? 300_000;
+  const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS;
   const workDir = path.join(os.tmpdir(), "codex-refine", `${process.pid}-${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
 
@@ -651,16 +654,8 @@ OUTPUT: Write the COMPLETE improved Reel.tsx inside a single \`\`\`tsx code fenc
 
 BEGIN:`;
 
-    const outFile = path.join(workDir, "out.txt");
     console.log(`[Refine] Asking Codex to fix composition — ${prompt.length} chars`);
-
-    await runCodexCapture(prompt, outFile, workDir, timeoutMs);
-    const raw = (await fs.readFile(outFile, "utf8")).trim();
-    if (!raw) throw new Error("Codex returned empty refinement output");
-
-    const code = extractCode(raw);
-    if (!code.reelTsx) throw new Error("Could not extract refined Reel.tsx");
-
+    const code = await runCodexForCode("Refine", prompt, workDir, timeoutMs);
     console.log(`[Refine] Got ${code.reelTsx.length} chars refined Reel.tsx`);
     return code;
   } finally {
@@ -685,7 +680,7 @@ export async function repairComposition(input: {
   hasMusic: boolean;
   timeoutMs?: number;
 }): Promise<CompositionCode> {
-  const timeoutMs = input.timeoutMs ?? 300_000;
+  const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS;
   const workDir = path.join(os.tmpdir(), "codex-repair", `${process.pid}-${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
 
@@ -826,7 +821,7 @@ export async function editComposition(input: {
   hasMusic: boolean;
   timeoutMs?: number;
 }): Promise<CompositionCode> {
-  const timeoutMs = input.timeoutMs ?? 300_000;
+  const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS;
   const workDir = path.join(os.tmpdir(), "codex-edit", `${process.pid}-${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
 
@@ -869,16 +864,8 @@ OUTPUT: the COMPLETE updated Reel.tsx inside a single \`\`\`tsx code fence.
 
 BEGIN:`;
 
-    const outFile = path.join(workDir, "out.txt");
     console.log(`[Edit] Asking Codex to apply edit — ${prompt.length} chars prompt`);
-
-    await runCodexCapture(prompt, outFile, workDir, timeoutMs);
-    const raw = (await fs.readFile(outFile, "utf8")).trim();
-    if (!raw) throw new Error("Codex returned empty edit output");
-
-    const code = extractCode(raw);
-    if (!code.reelTsx) throw new Error("Could not extract edited Reel.tsx");
-
+    const code = await runCodexForCode("Edit", prompt, workDir, timeoutMs);
     console.log(`[Edit] Got ${code.reelTsx.length} chars edited Reel.tsx`);
     return code;
   } finally {
@@ -887,6 +874,38 @@ BEGIN:`;
 }
 
 /** Spawn codex exec, write prompt to stdin, capture output to file. */
+/**
+ * Run a Codex code-generation call with ONE retry, returning the extracted code.
+ * Edit/refine were single-shot, so a transient Codex stall (network blip, backend
+ * hiccup → the 300s timeout) killed the whole operation. Generation already
+ * retries; this gives edit/refine the same resilience. The 2nd attempt usually
+ * lands after the blip clears. Stops early on a usage-limit (retry won't help).
+ */
+async function runCodexForCode(
+  label: string,
+  prompt: string,
+  workDir: string,
+  timeoutMs: number,
+): Promise<CompositionCode> {
+  const outFile = path.join(workDir, "out.txt");
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await runCodexCapture(prompt, outFile, workDir, timeoutMs);
+      const raw = (await fs.readFile(outFile, "utf8")).trim();
+      if (!raw) throw new Error("Codex returned empty output");
+      const code = extractCode(raw);
+      if (!code.reelTsx) throw new Error("Could not extract Reel.tsx from Codex output");
+      return code;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[${label}] attempt ${attempt}/2 failed: ${err instanceof Error ? err.message : err}`);
+      if (err instanceof CodexUsageLimitError) break; // retrying a quota error is pointless
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`${label} failed`);
+}
+
 function runCodexCapture(
   prompt: string,
   outFile: string,
