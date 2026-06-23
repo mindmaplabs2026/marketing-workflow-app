@@ -52,7 +52,7 @@ export async function evaluateReel(input: {
 
     const userContent: Array<
       | { type: "text"; text: string }
-      | { type: "image_url"; image_url: { url: string; detail: "low" } }
+      | { type: "image_url"; image_url: { url: string; detail: "high" } }
     > = [
       {
         type: "text",
@@ -67,9 +67,9 @@ ${input.artDirection?.typography ? `Intended TYPOGRAPHY — heading: ${input.art
 
 Below are ${keyframes.length} evenly-spaced keyframes from the rendered video. Evaluate the reel on:
 
-1. VISUAL QUALITY (0-10): Is it visually polished? Good composition, no rendering artifacts?
-2. TEXT READABILITY (0-10): Can text overlays be read clearly? Proper contrast? No text smaller than ~28px? Nothing flush to the frame edges?
-3. BRAND PRESENCE (0-10): Is the school logo/name visible and a reasonable size (not tiny, not boxed in a big padded square)?
+1. VISUAL QUALITY (0-10): Is it visually polished? Good composition, no rendering artifacts? Look HARD for OVERLAPPING or COLLIDING elements — e.g. a bottom ticker/marquee running into a notification/"now playing" card, two text boxes on top of each other, chrome clipped by the frame edge. Any visible overlap/collision is a serious defect — score LOW and name exactly which elements overlap in weaknesses.
+2. TEXT READABILITY (0-10): Can text overlays be read clearly? Proper contrast? No text smaller than ~28px? Nothing flush to the frame edges? No text colliding with other text/elements?
+3. BRAND PRESENCE (0-10): Is the school logo visible and a reasonable size (NOT tiny, not boxed in a big padded square)? CHECK FOR DUPLICATION: if the logo image already contains the school name as text, the composition must NOT also print the school name beside/under it — a doubled school name is a defect; flag it and score low. A logo shrunk into a small notification card is "too tiny" — flag it.
 4. VISUAL COHERENCE (0-10): Do the keyframes look like they belong to the same video? Consistent style?
 5. VISUAL ENERGY & RICHNESS (0-10): Would this stop a scroll? Does it look DESIGNED and vibrant, or flat and templatey? Score LOW if frames look static and bare — plain backgrounds, centered text with no treatment, no decorative layer (gradient scrims, accent shapes, chips, depth), washed-out/muted colour, or a generic slideshow feel. Score HIGH for bold saturated colour, layered composition, designed type treatment, and frames that imply motion/dynamism. In weaknesses, say specifically what would make it more vibrant (e.g. "backgrounds are flat grey — add gradient + accent bars", "title is plain centered text — needs animated, designed treatment").
 6. DIRECTION ADHERENCE (0-10): Does the render honour the intended palette, typography, and register as a STARTING POINT? Score LOW only when it ignored the brand/palette/fonts or looks like a generic stock template. Do NOT penalise a render for being bolder, more animated, or more polished than the brief implied — exceeding the brief is GOOD. Penalise drift that hurts the result or goes off-brand (e.g. "palette is blue/grey but brand + spec were warm terracotta", "headings are a default sans, spec was Playfair Display"), not improvement.
@@ -98,7 +98,7 @@ Return JSON:
         type: "image_url",
         image_url: {
           url: `data:image/png;base64,${b64}`,
-          detail: "low",
+          detail: "high",
         },
       });
     }

@@ -19,12 +19,24 @@ export type LogoProfile = {
    *  - "any":   opaque logo carries its own background → fine anywhere
    */
   requiredBackground: "light" | "dark" | "any";
+  /** width / height of the source image. */
+  aspectRatio: number;
+  /**
+   * True when the logo is a WIDE horizontal lockup (aspect ≳ 2.2), which almost
+   * always means it already contains the school NAME as text. Callers must then
+   * NOT render the school name again next to it (that double-prints the name).
+   */
+  likelyContainsName: boolean;
 };
 
 /** Classify a logo's tone + transparency so callers can guarantee contrast. */
 export async function analyzeLogo(buffer: Buffer): Promise<LogoProfile | null> {
   try {
     const sharp = (await import("sharp")).default;
+    const meta = await sharp(buffer).metadata();
+    const aspectRatio = meta.width && meta.height ? meta.width / meta.height : 1;
+    // A wide lockup (≳2.2:1) is almost always logo-mark + school name text.
+    const likelyContainsName = aspectRatio >= 2.2;
     const { data, info } = await sharp(buffer)
       .resize(48, 48, { fit: "inside" })
       .ensureAlpha()
@@ -59,7 +71,7 @@ export async function analyzeLogo(buffer: Buffer): Promise<LogoProfile | null> {
     else if (tone === "light") requiredBackground = "dark";
     else requiredBackground = "light";
 
-    return { tone, hasTransparency, requiredBackground };
+    return { tone, hasTransparency, requiredBackground, aspectRatio, likelyContainsName };
   } catch {
     return null;
   }

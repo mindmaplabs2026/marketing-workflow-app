@@ -75,6 +75,8 @@ function layoutSafetyGuidance(): string {
     `- Easiest implementation: wrap your text/element layer in an AbsoluteFill with paddingTop:${SAFE_TOP_PX}, paddingLeft:${SAFE_SIDE_PX}, paddingRight:${SAFE_RIGHT_PX}, paddingBottom:${SAFE_BOTTOM_PX} (background media sits in a separate full-frame layer behind it, with NO padding).`,
     `- MINIMUM FONT SIZE: no text anywhere smaller than ${MIN_FONT_PX}px — this is a 1080px-wide canvas, so ${MIN_FONT_PX}px is already small on a phone. Captions/body text ≥36px; headlines much larger. NEVER render labels, credits, dates, or footnotes below ${MIN_FONT_PX}px.`,
     `- TEXT OVER MEDIA IS ENCOURAGED (it looks more designed than text banished to empty margins) — but ALWAYS put a legibility layer behind it so it never fights the photo: a gradient scrim (e.g. linear-gradient from transparent to rgba(0,0,0,0.55) at the text's edge), a solid/blurred color shape, or a chip. Place the text on the side AWAY from the subject (use the scene's focus point) so the scrim darkens empty space, not faces. With a scrim, text on top of the image is preferred over pushing all text outside the frame.`,
+    `- NO OVERLAPPING / COLLIDING ELEMENTS. You are positioning elements blind — you cannot see the result, so reason carefully about each element's pixel box and keep them from overlapping. In particular: a bottom marquee/ticker and a "now playing"/notification card MUST NOT occupy the same vertical band — give each its own band with a clear gap, or use only one of them. Two absolutely-positioned boxes with overlapping top/bottom ranges WILL collide.`,
+    `- KEEP CHROME MINIMAL. Persistent HUD overlays (ticker, notification card, watermark logo, checkboxes/labels, progress bar) are cumulatively cluttered. Use at MOST one or two persistent overlays at a time; do not fill every band with a widget. Empty space reads as designed; a crowded HUD reads as broken.`,
   ].join("\n");
 }
 
@@ -158,6 +160,9 @@ function logoSizingGuidance(profile?: LogoProfile): string {
     `- If a backing is needed for contrast, it must HUG the logo: a tight rounded-rect with ≤12px uniform padding, matching the logo's own shape — never a big empty square with the logo floating small in the middle.`,
     `- Corner / persistent watermark: longest edge near ${LOGO_MIN_PX}–${mid}px. Hero logo (title card / closing card): longest edge near ${mid}–${LOGO_MAX_PX}px — USE THE UPPER END, there is plenty of empty space on those cards.`,
     `- Keep a ≥40px safe-area margin from the frame edges. Never stretch or distort the logo.`,
+    profile?.likelyContainsName
+      ? `- THIS LOGO ALREADY CONTAINS THE SCHOOL NAME AS TEXT (it is a wide wordmark lockup, aspect ≈ ${profile.aspectRatio.toFixed(1)}:1). So do NOT also print the school name beside, under, or over the logo — that double-prints the name and looks broken. Wherever you show this logo, show the LOGO ALONE (no adjacent school-name text). Use the school name as text ONLY on cards where the logo is NOT present.`
+      : `- This logo is a compact mark/emblem (it may NOT contain the school name). It is fine to place the school name as text near it when helpful.`,
   ].join("\n");
 }
 
@@ -508,7 +513,7 @@ ${audioMixGuidance(script, hasMusic)}
 3. Media files: use staticFile("media/filename.ext") — NEVER include "public/" in the path. staticFile() resolves relative to the public/ folder automatically. CORRECT: staticFile("media/photo.jpg"). WRONG: staticFile("public/media/photo.jpg")
 4. Music: use staticFile("music/track.mp3")
 5. Canvas: 1080×1920 pixels, 30fps — ALWAYS
-6. Include school branding (logo, name) as described above — the logo MUST respect the LOGO SIZE bounds in the BRANDING section (never render it tiny)
+6. Include school branding — the logo MUST respect the LOGO SIZE bounds in the BRANDING section (never render it tiny). Do NOT print the school name next to a logo that already contains it (see the logo note in BRANDING). Show the school name as text only where the logo is absent.
 7. Respect the LAYOUT SAFETY rules above: text/logo/graphics inside the safe-area margins (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom), and NO text smaller than ${MIN_FONT_PX}px. Background media stays full-bleed.
 8. Write COMPLETE, COMPILABLE TypeScript — every import, every type, every component
 9. ONLY use files listed in "MEDIA FILES AVAILABLE" above — do NOT reference any other filenames. If a file is not listed, it does NOT exist. Do NOT use external assets or URLs.
