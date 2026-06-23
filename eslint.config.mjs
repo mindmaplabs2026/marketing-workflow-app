@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored Remotion skill — reference material read at runtime by Codex, not app
+    // code. Its example .tsx import "remotion" (not an app dep) and must not be
+    // type-checked or linted by the Next build.
+    "remotion-skill/**",
   ]),
 ]);
 
