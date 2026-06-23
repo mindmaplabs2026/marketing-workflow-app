@@ -24,6 +24,36 @@ const REMOTION_RENDERER_DIR =
   path.resolve(__dirname, "../../../../remotion-renderer");
 
 /**
+ * The vendored official "remotion-best-practices" skill (SKILL.md + rules/*.md).
+ * Codex runs with full filesystem access, so we hand it the absolute path and tell
+ * it to consult the relevant rule files — the same domain-expertise the original
+ * test_remotion project had on hand. Overridable via REMOTION_SKILL_DIR.
+ */
+const REMOTION_SKILL_DIR =
+  process.env.REMOTION_SKILL_DIR ??
+  path.resolve(__dirname, "../../../remotion-skill/remotion-best-practices");
+
+/** True if the vendored skill is present on disk (checked once, lazily). */
+async function skillAvailable(): Promise<boolean> {
+  return fs.stat(path.join(REMOTION_SKILL_DIR, "SKILL.md")).then(() => true).catch(() => false);
+}
+
+/** Prompt block pointing Codex at the skill. Empty string when the skill is absent. */
+function skillGuidance(present: boolean): string {
+  if (!present) return "";
+  return `## REMOTION BEST-PRACTICES SKILL (authoritative — consult it)
+You have an expert Remotion knowledge base on disk at:
+  ${REMOTION_SKILL_DIR}
+BEFORE you write the composition, READ ${path.join(REMOTION_SKILL_DIR, "SKILL.md")} (its index),
+then READ the specific rule files under rules/ that apply to THIS reel. At minimum consult the
+ones relevant here: videos.md, trimming.md, fonts.md, timing.md, animations.md, text-animations.md,
+transitions.md, measuring-text.md, sequencing.md, images.md, assets.md. These rules are
+AUTHORITATIVE for Remotion APIs and patterns — when they conflict with your instinct, follow the
+skill. Apply them (correct <Video>/<Img> usage, font loading, spring/interpolate timing, fitting
+text without overflow, TransitionSeries) rather than guessing.`;
+}
+
+/**
  * Logo sizing band, in pixels of the logo's LONGEST edge on the fixed 1080×1920
  * canvas. Expressed as a bounding box (not a fixed width) because logos are not
  * always square — some are wide wordmarks, some are tall crests. Sizing by width
@@ -229,7 +259,9 @@ export async function generateComposition(input: {
       "utf8",
     ).catch(() => "");
 
-    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers, input.hasLogo, input.logoProfile, input.hasMusic);
+    const hasSkill = await skillAvailable();
+    const prompt = buildPrompt(input.script, mediaLines, readme, exampleContents, helpers, input.hasLogo, input.logoProfile, input.hasMusic, hasSkill);
+    if (hasSkill) console.log(`[Composition] remotion-best-practices skill available → Codex will consult it`);
 
     // Run Codex
     const outFile = path.join(workDir, "out.txt");
@@ -406,14 +438,17 @@ function buildPrompt(
   hasLogo: boolean,
   logoProfile?: LogoProfile,
   hasMusic = false,
+  hasSkill = false,
 ): string {
-  return `You are writing a Remotion composition (React/TypeScript component) for an Instagram Reel video.
+  return `You are an EXPERT Remotion engineer writing a production composition (React/TypeScript) for an Instagram Reel video. You write correct, idiomatic Remotion and you know the APIs cold — and you have the remotion-best-practices skill on disk to confirm details.
 
 Build the reel's VISUAL IDENTITY from the CREATIVE DIRECTION, COLOR PALETTE, and
 TYPOGRAPHY below — that is the binding spec for COLORS, FONTS, TEXT, and MEDIA. The
 example compositions near the end are your CRAFT reference: borrow their motion design,
 layering, transitions, and decorative energy, then reskin them with this reel's identity.
 Aim high — a flat, static result is a failure even if the colors and fonts are correct.
+
+${skillGuidance(hasSkill)}
 
 ## CREATIVE DIRECTION (the BINDING spec for how this reel must look — build THIS, from scratch)
 - Direction: ${script.direction}
@@ -706,8 +741,11 @@ export async function refineReelComposition(input: {
   await fs.mkdir(workDir, { recursive: true });
 
   try {
+    const skillNote = (await skillAvailable())
+      ? `\nYou are an expert Remotion engineer. The remotion-best-practices skill is on disk at ${REMOTION_SKILL_DIR} — consult the relevant rules/*.md (videos, timing, text-animations, transitions, measuring-text, fonts) to get the APIs and patterns right.\n`
+      : "";
     const prompt = `You are refining a Remotion composition (React/TypeScript) for an Instagram Reel.
-
+${skillNote}
 The reel was rendered and evaluated. Here is the evaluation feedback:
 
 SCORE: Below passing threshold
@@ -782,7 +820,10 @@ export async function repairComposition(input: {
   if (input.hasMusic) mediaLines.push(`- music/track.mp3 (audio)`);
 
   try {
-    const prompt = `You are fixing a Remotion composition (React/TypeScript) for an Instagram Reel that FAILED to compile/render.
+    const skillNote = (await skillAvailable())
+      ? `You are an expert Remotion engineer. The remotion-best-practices skill is on disk at ${REMOTION_SKILL_DIR} — if the error involves a Remotion API (Video/Img, fonts, trimming, sequencing, transitions), read the matching rules/*.md to fix it correctly rather than guessing.\n\n`
+      : "";
+    const prompt = `${skillNote}You are fixing a Remotion composition (React/TypeScript) for an Instagram Reel that FAILED to compile/render.
 
 The renderer reported this error:
 \`\`\`
