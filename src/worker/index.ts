@@ -21,6 +21,26 @@ import { getModelEngineKind } from "@/lib/config/engine";
 import { checkFfmpegAvailable } from "@/lib/ai/agent-music";
 import { checkWhisperAvailable, whisperBackend } from "@/lib/ai/transcribe";
 
+// Prefix EVERY console line with a timestamp. The pipeline logs through plain
+// console.* in dozens of places (no timestamps by default), which makes it hard to
+// see how long each step took — renders alone run for minutes. One patch here covers
+// all call sites. Set WORKER_LOG_TIMESTAMPS=0 to disable.
+if (process.env.WORKER_LOG_TIMESTAMPS !== "0") {
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  const stamp = () => {
+    const d = new Date();
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+  };
+  const wrap =
+    (fn: (...a: unknown[]) => void) =>
+    (...args: unknown[]) =>
+      fn(`[${stamp()}]`, ...args);
+  console.log = wrap(console.log.bind(console));
+  console.info = wrap(console.info.bind(console));
+  console.warn = wrap(console.warn.bind(console));
+  console.error = wrap(console.error.bind(console));
+}
+
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 
 let running = true;
