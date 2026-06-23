@@ -142,26 +142,18 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       `[remotion-render] Rendered in ${renderTimeSec.toFixed(1)}s — ${rawSizeMb.toFixed(1)} MB (raw)`,
     );
 
-    // Compress with ffmpeg. Quality is set by CRF (LOWER = higher quality + bigger file).
-    // We no longer optimise for a tiny <25MB file (Supabase Pro lifts the upload limit):
-    // the default is now CRF 20 (visually crisp for a 1080×1920 reel). Tune with
-    // REEL_VIDEO_CRF (e.g. 18 = near-lossless/bigger, 28 = old small-file behaviour).
-    const crf = process.env.REEL_VIDEO_CRF ?? "20";
-    const preset = process.env.REEL_VIDEO_PRESET ?? "fast";
-    const audioBitrate = process.env.REEL_AUDIO_BITRATE ?? "192k";
-    const compressedPath = path.join(workDir, "output-compressed.mp4");
-    console.log(`[remotion-render] Compressing with ffmpeg (crf=${crf}, preset=${preset})...`);
+    // The renderer (remotion-renderer/render.ts) now encodes h264 at the target CRF
+    // directly, so we DON'T re-encode here (that was a wasteful 2nd pass). We only
+    // REMUX to move the moov atom to the front (+faststart) for instant web playback
+    // — a stream copy, no re-encode, so it's ~1-2s instead of ~25s.
+    const compressedPath = path.join(workDir, "output-faststart.mp4");
+    console.log(`[remotion-render] Remuxing for faststart (stream copy, no re-encode)...`);
     const compressStart = Date.now();
 
     await new Promise<void>((resolve, reject) => {
       const child = spawn("ffmpeg", [
         "-i", rawPath,
-        "-c:v", "libx264",
-        "-crf", crf,
-        "-preset", preset,
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", audioBitrate,
+        "-c", "copy",
         "-movflags", "+faststart",
         "-y", compressedPath,
       ], { stdio: ["ignore", "pipe", "pipe"] });
@@ -170,19 +162,19 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
       child.on("close", (code: number | null) => {
         if (code === 0) resolve();
-        else reject(new Error(`ffmpeg compress exit ${code}: ${stderr.slice(0, 300)}`));
+        else reject(new Error(`ffmpeg remux exit ${code}: ${stderr.slice(0, 300)}`));
       });
       child.on("error", reject);
-      setTimeout(() => { child.kill(); reject(new Error("ffmpeg compress timeout")); }, 120000);
+      setTimeout(() => { child.kill(); reject(new Error("ffmpeg remux timeout")); }, 60000);
     });
 
     const compressedSizeMb = (await fs.stat(compressedPath)).size / 1024 / 1024;
     const compressSec = ((Date.now() - compressStart) / 1000).toFixed(1);
     console.log(
-      `[remotion-render] Compressed in ${compressSec}s: ${rawSizeMb.toFixed(1)} MB → ${compressedSizeMb.toFixed(1)} MB (${Math.round((1 - compressedSizeMb / rawSizeMb) * 100)}% reduction)`,
+      `[remotion-render] Faststart remux in ${compressSec}s: ${compressedSizeMb.toFixed(1)} MB (rendered at target quality, no re-encode)`,
     );
 
-    // Use compressed version as the output
+    // Use the faststart version as the output
     const outputPath = compressedPath;
 
     const cleanupPublic = async () => {
