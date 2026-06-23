@@ -729,6 +729,10 @@ export async function refineReelComposition(input: {
   originalCode: string;
   feedback: string;
   weaknesses: string[];
+  /** Precise, located defects from the evaluator (timestamp/area/issue/fix). */
+  findings?: { timestamp: number; area: string; issue: string; fix: string; severity: string }[];
+  /** Keyframes of the rendered result (base64 data URLs + timestamp) so Codex can SEE the defects. */
+  keyframes?: { timestamp: number; dataUrl: string }[];
   script: ReelScript;
   mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>;
   hasLogo: boolean;
@@ -744,11 +748,34 @@ export async function refineReelComposition(input: {
     const skillNote = (await skillAvailable())
       ? `\nYou are an expert Remotion engineer. The remotion-best-practices skill is on disk at ${REMOTION_SKILL_DIR} — consult the relevant rules/*.md (videos, timing, text-animations, transitions, measuring-text, fonts) to get the APIs and patterns right.\n`
       : "";
+
+    // Write the evaluator's keyframes to disk so we can hand them to Codex as images —
+    // the refiner can then SEE the rendered defects instead of guessing from prose.
+    const imagePaths: string[] = [];
+    for (let i = 0; i < (input.keyframes?.length ?? 0); i++) {
+      const kf = input.keyframes![i];
+      const b64 = kf.dataUrl.replace(/^data:image\/\w+;base64,/, "");
+      const p = path.join(workDir, `kf_${String(i).padStart(2, "0")}_${kf.timestamp}s.png`);
+      await fs.writeFile(p, Buffer.from(b64, "base64"));
+      imagePaths.push(p);
+    }
+
+    // Located, actionable defects — the precise instructions to act on.
+    const findingsBlock = input.findings?.length
+      ? `PRECISE DEFECTS TO FIX (located by timestamp — the attached keyframes show them; the timestamp tells you WHICH scene/Sequence in the timeline to edit):\n${input.findings
+          .map((f) => `- @${f.timestamp}s [${f.severity}] ${f.area}: ${f.issue}\n    → FIX: ${f.fix}`)
+          .join("\n")}\n`
+      : "";
+    const framesNote = imagePaths.length
+      ? `\nATTACHED: ${imagePaths.length} keyframes from the CURRENT render (labelled by filename with their timestamp). LOOK at them — they show exactly what is wrong. Map each defect's timestamp to the matching <Sequence>/scene in the code and fix it there.\n`
+      : "";
+
     const prompt = `You are refining a Remotion composition (React/TypeScript) for an Instagram Reel.
-${skillNote}
-The reel was rendered and evaluated. Here is the evaluation feedback:
+${skillNote}${framesNote}
+The reel was rendered and evaluated. Here is the evaluation:
 
 SCORE: Below passing threshold
+${findingsBlock}
 FEEDBACK: ${input.feedback}
 WEAKNESSES:
 ${input.weaknesses.map((w) => `- ${w}`).join("\n")}
@@ -767,6 +794,7 @@ CREATIVE DIRECTION — this is the spec the render MUST match (fix any drift fro
 - TYPOGRAPHY (use these EXACT fonts): heading ${input.script.typography.heading}, body ${input.script.typography.body}${input.script.typography.accent ? `, accent ${input.script.typography.accent}` : ""}
 
 RULES:
+0. Address EVERY "PRECISE DEFECT TO FIX" above (if any) — those are located by timestamp and shown in the attached keyframes. They are the priority; apply the suggested fix to the scene/Sequence at that timestamp.
 1. Fix the specific weaknesses listed above. If the feedback flags palette/font/register DRIFT (the render used the wrong colours/fonts), that is the FIRST thing to correct — make the colours and fonts match the spec above exactly.
 2. BUT if the feedback says the result is FLAT, MUTED, LIFELESS, STATIC, GENERIC, or LOW-ENERGY, do NOT just re-apply the same palette — that will not fix it. You MAY and SHOULD push the design BOLDER than the brief: deepen/saturate the palette, add strong light/dark contrast and vivid accent colours, add gradients/scrims/accent shapes/texture, and add or intensify MOTION (spring entrances/exits, continuous Ken Burns on images, animated text, varied transitions). Staying on-brand matters (keep at least one brand colour), but VIBRANCY beats literal palette adherence here. A refine that comes back equally flat is a failure.
 3. Keep the same overall creative direction and structure; do NOT regress to a generic/stock look.
@@ -781,8 +809,8 @@ OUTPUT: Write the COMPLETE improved Reel.tsx inside a single \`\`\`tsx code fenc
 
 BEGIN:`;
 
-    console.log(`[Refine] Asking Codex to fix composition — ${prompt.length} chars`);
-    const code = await runCodexForCode("Refine", prompt, workDir, timeoutMs);
+    console.log(`[Refine] Asking Codex to fix composition — ${prompt.length} chars, ${imagePaths.length} keyframes, ${input.findings?.length ?? 0} located findings`);
+    const code = await runCodexForCode("Refine", prompt, workDir, timeoutMs, imagePaths);
     console.log(`[Refine] Got ${code.reelTsx.length} chars refined Reel.tsx`);
     return code;
   } finally {
@@ -1017,12 +1045,13 @@ async function runCodexForCode(
   prompt: string,
   workDir: string,
   timeoutMs: number,
+  imagePaths: string[] = [],
 ): Promise<CompositionCode> {
   const outFile = path.join(workDir, "out.txt");
   let lastErr: unknown;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      await runCodexCapture(prompt, outFile, workDir, timeoutMs);
+      await runCodexCapture(prompt, outFile, workDir, timeoutMs, imagePaths);
       const raw = (await fs.readFile(outFile, "utf8")).trim();
       if (!raw) throw new Error("Codex returned empty output");
       const code = extractCode(raw);
@@ -1042,6 +1071,7 @@ function runCodexCapture(
   outFile: string,
   cwd: string,
   timeoutMs: number,
+  imagePaths: string[] = [],
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -1050,8 +1080,10 @@ function runCodexCapture(
       "--skip-git-repo-check",
       "-C", `"${cwd}"`,
       "-o", `"${outFile}"`,
-      "-",
     ];
+    // Attach images (e.g. the evaluator's keyframes) so Codex can SEE the render.
+    for (const p of imagePaths) args.push("-i", `"${p}"`);
+    args.push("-");
 
     const child = spawn("codex", args, { cwd, shell: true });
     let stderr = "";

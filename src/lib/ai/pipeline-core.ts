@@ -1121,10 +1121,15 @@ export async function runReelPipeline(
         let bestFeedback = evaluation.feedback;
         let bestWeaknesses = evaluation.weaknesses;
         let bestStoragePath = storagePath;
+        // Located findings + the rendered keyframes that show them — handed to the refiner
+        // so it acts on precise, visual defects (kept in memory; keyframes are NOT stored).
+        let bestFindings = evaluation.findings;
+        let bestKeyframes = evaluation.keyframes;
 
         // Full audit trail of every evaluation + the exact instructions handed to the
         // refiner each round. Persisted to creative_brief._evaluations below so you can
         // inspect, in the DB, what the evaluator said and what the refiner was told.
+        // (Keyframes are excluded — too large for the row.)
         const evaluations: Array<Record<string, unknown>> = [
           {
             round: 0,
@@ -1132,6 +1137,7 @@ export async function runReelPipeline(
             dimensions: evaluation.dimensions,
             strengths: evaluation.strengths,
             weaknesses: evaluation.weaknesses,
+            findings: evaluation.findings,
             feedback: evaluation.feedback,
           },
         ];
@@ -1140,12 +1146,14 @@ export async function runReelPipeline(
           console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score ${bestScore}/10 < ${PASS_SCORE}, refine round ${round}/${MAX_REFINE_ROUNDS}`);
           try {
             // The exact instructions handed to the refiner THIS round (captured for the audit trail).
-            const instructionsToRefiner = { feedback: bestFeedback, weaknesses: bestWeaknesses };
-            // Refine from the BEST composition so far, using its evaluation feedback.
+            const instructionsToRefiner = { feedback: bestFeedback, weaknesses: bestWeaknesses, findings: bestFindings };
+            // Refine from the BEST composition so far, using its located findings + keyframes.
             const refined = await refineReelComposition({
               originalCode: bestComposition.reelTsx,
               feedback: bestFeedback,
               weaknesses: bestWeaknesses,
+              findings: bestFindings,
+              keyframes: bestKeyframes,
               script,
               mediaManifest,
               hasLogo,
@@ -1184,6 +1192,7 @@ export async function runReelPipeline(
               dimensions: refinedEval.dimensions,
               strengths: refinedEval.strengths,
               weaknesses: refinedEval.weaknesses,
+              findings: refinedEval.findings,
               feedback: refinedEval.feedback,
               accepted: refinedEval.score > bestScore,
             });
@@ -1223,6 +1232,8 @@ export async function runReelPipeline(
                 bestComposition = refinedComposition;
                 bestFeedback = refinedEval.feedback;
                 bestWeaknesses = refinedEval.weaknesses;
+                bestFindings = refinedEval.findings;
+                bestKeyframes = refinedEval.keyframes;
                 bestStoragePath = refinedPath;
               }
             } else {
