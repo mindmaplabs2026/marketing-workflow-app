@@ -24,10 +24,21 @@ type Status = {
   state: "idle" | "running" | "done" | "failed";
 };
 
-const C = {
-  reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m",
-  bg: "\x1b[44m", fg: "\x1b[97m", green: "\x1b[92m", red: "\x1b[91m", yellow: "\x1b[93m",
-};
+// Theme. Default "light": a soft light-grey bar with BLACK text + dark accents, so it
+// stays readable on a white/light terminal. Set WORKER_STATUS_BAR_THEME=dark for the
+// old white-on-blue bar (better on dark terminals).
+const DARK = process.env.WORKER_STATUS_BAR_THEME === "dark";
+const C = DARK
+  ? {
+      reset: "\x1b[0m", bold: "\x1b[1m",
+      bg: "\x1b[44m", fg: "\x1b[97m",        // blue bg, bright-white text
+      run: "\x1b[93m", done: "\x1b[92m", fail: "\x1b[91m", idle: "\x1b[37m", sep: "\x1b[90m",
+    }
+  : {
+      reset: "\x1b[0m", bold: "\x1b[1m",
+      bg: "\x1b[48;5;253m", fg: "\x1b[30m",  // light-grey bg, BLACK text
+      run: "\x1b[34m", done: "\x1b[32m", fail: "\x1b[31m", idle: "\x1b[90m", sep: "\x1b[90m",
+    };
 
 let enabled = false;
 let rows = 0;
@@ -53,16 +64,17 @@ function elapsed(): string {
 }
 
 function renderBar(cols: number): string {
-  const dot = s.state === "failed" ? `${C.red}●` : s.state === "done" ? `${C.green}●` : s.state === "running" ? `${C.yellow}●` : `${C.dim}○`;
+  const dot = s.state === "failed" ? `${C.fail}●` : s.state === "done" ? `${C.done}●` : s.state === "running" ? `${C.run}●` : `${C.idle}○`;
   const segs = [
-    `${dot}${C.fg} ${s.label.slice(0, 28)}`,
+    `${dot}${C.fg}${C.bold} ${s.label.slice(0, 28)}${C.reset}${C.bg}${C.fg}`,
     `⏱ ${elapsed()}`,
     `▸ ${s.stage}`,
     `in ${s.inVid}🎬 ${s.inImg}🖼 ${s.brand}🏷`,
     `out ${s.varsDone}/${s.varsTotal || "?"}🎞`,
     s.score != null ? `★ ${s.score.toFixed(1)}` : "",
   ].filter(Boolean);
-  let text = " " + segs.join("  │  ") + " ";
+  const sep = `${C.sep}│${C.fg}`;
+  let text = " " + segs.join(`  ${sep}  `) + " ";
   // Strip ANSI when measuring width, then pad/truncate the visible text to cols.
   const visible = text.replace(/\x1b\[[0-9;]*m/g, "");
   if (visible.length > cols) {
