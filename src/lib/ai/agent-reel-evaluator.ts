@@ -12,6 +12,8 @@ export type ReelEvaluation = {
   feedback: string;
   strengths: string[];
   weaknesses: string[];
+  /** Per-dimension scores (0-10), so you can see WHICH axis drove the overall score. */
+  dimensions: Record<string, number>;
 };
 
 /**
@@ -44,6 +46,7 @@ export async function evaluateReel(input: {
         feedback: "Could not extract keyframes — video may be corrupted or too short.",
         strengths: [],
         weaknesses: ["No keyframes extractable"],
+        dimensions: {},
       };
     }
 
@@ -130,16 +133,34 @@ Return JSON:
       feedback?: string;
       strengths?: string[];
       weaknesses?: string[];
+      visual_quality?: number;
+      text_readability?: number;
+      brand_presence?: number;
+      visual_coherence?: number;
+      engagement?: number;
+      direction_adherence?: number;
     };
 
     const score = parsed.overall_score ?? 5;
-    console.log(`[ReelEval] Score: ${score}/10 — ${parsed.feedback?.slice(0, 100)}...`);
+    // Keep the per-dimension scores (previously discarded) so the low axis is visible.
+    const dimensions: Record<string, number> = {};
+    for (const k of ["visual_quality", "text_readability", "brand_presence", "visual_coherence", "engagement", "direction_adherence"] as const) {
+      if (typeof parsed[k] === "number") dimensions[k] = parsed[k] as number;
+    }
+    const weaknesses = parsed.weaknesses ?? [];
+    const feedback = parsed.feedback ?? "No feedback provided.";
+    // Log the FULL breakdown (not a truncated snippet) so it's auditable in the worker log.
+    const dimStr = Object.entries(dimensions).map(([k, v]) => `${k}=${v}`).join(" ");
+    console.log(`[ReelEval] Score: ${score}/10  [${dimStr}]`);
+    console.log(`[ReelEval] Feedback: ${feedback}`);
+    if (weaknesses.length) console.log(`[ReelEval] Weaknesses → refiner: ${weaknesses.map((w) => `• ${w}`).join("  ")}`);
 
     return {
       score,
-      feedback: parsed.feedback ?? "No feedback provided.",
+      feedback,
       strengths: parsed.strengths ?? [],
-      weaknesses: parsed.weaknesses ?? [],
+      weaknesses,
+      dimensions,
     };
   } finally {
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});

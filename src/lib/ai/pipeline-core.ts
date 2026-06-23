@@ -1120,10 +1120,27 @@ export async function runReelPipeline(
         let bestComposition = currentComposition;
         let bestFeedback = evaluation.feedback;
         let bestWeaknesses = evaluation.weaknesses;
+        let bestStoragePath = storagePath;
+
+        // Full audit trail of every evaluation + the exact instructions handed to the
+        // refiner each round. Persisted to creative_brief._evaluations below so you can
+        // inspect, in the DB, what the evaluator said and what the refiner was told.
+        const evaluations: Array<Record<string, unknown>> = [
+          {
+            round: 0,
+            score: evaluation.score,
+            dimensions: evaluation.dimensions,
+            strengths: evaluation.strengths,
+            weaknesses: evaluation.weaknesses,
+            feedback: evaluation.feedback,
+          },
+        ];
 
         for (let round = 1; round <= MAX_REFINE_ROUNDS && bestScore < PASS_SCORE; round++) {
           console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score ${bestScore}/10 < ${PASS_SCORE}, refine round ${round}/${MAX_REFINE_ROUNDS}`);
           try {
+            // The exact instructions handed to the refiner THIS round (captured for the audit trail).
+            const instructionsToRefiner = { feedback: bestFeedback, weaknesses: bestWeaknesses };
             // Refine from the BEST composition so far, using its evaluation feedback.
             const refined = await refineReelComposition({
               originalCode: bestComposition.reelTsx,
@@ -1160,6 +1177,16 @@ export async function runReelPipeline(
             });
             await appendCosts(jobId, refinedEvalCosts.toJSON());
             console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Round ${round} score: ${refinedEval.score}/10 (best so far ${bestScore}/10)`);
+            evaluations.push({
+              round,
+              instructionsToRefiner,
+              score: refinedEval.score,
+              dimensions: refinedEval.dimensions,
+              strengths: refinedEval.strengths,
+              weaknesses: refinedEval.weaknesses,
+              feedback: refinedEval.feedback,
+              accepted: refinedEval.score > bestScore,
+            });
 
             if (refinedEval.score > bestScore) {
               // New best — upload it and point the variation record at it.
@@ -1196,6 +1223,7 @@ export async function runReelPipeline(
                 bestComposition = refinedComposition;
                 bestFeedback = refinedEval.feedback;
                 bestWeaknesses = refinedEval.weaknesses;
+                bestStoragePath = refinedPath;
               }
             } else {
               // Not better — discard the refined render, keep the current best.
@@ -1207,6 +1235,27 @@ export async function runReelPipeline(
             break;
           }
         }
+
+        // Authoritative final write: persist the BEST composition + the FULL eval/refine
+        // audit trail (every round's scores, weaknesses, feedback, and the exact
+        // instructions handed to the refiner). Inspect it in Supabase →
+        // ai_variations.creative_brief._evaluations.
+        await admin.from("ai_variations")
+          .update({
+            storage_paths: [bestStoragePath],
+            creative_brief: {
+              ...script,
+              _compositionCode: bestComposition.reelTsx,
+              _compositionDataCode: bestComposition.dataTsx,
+              _musicSource: music.source,
+              _musicPath: musicPath,
+              _musicAttribution: music.attribution ?? null,
+              _refinement: { rounds: evaluations.length - 1, originalScore: evaluation.score, finalScore: bestScore },
+              _evaluations: evaluations,
+            } as unknown as Record<string, unknown>,
+          })
+          .eq("job_id", jobId)
+          .eq("variation_index", script.variationIndex);
       } catch (err) {
         console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Eval failed (non-fatal): ${err instanceof Error ? err.message : err}`);
       }
