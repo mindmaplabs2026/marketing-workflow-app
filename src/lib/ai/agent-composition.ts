@@ -503,7 +503,8 @@ ${audioMixGuidance(script, hasMusic)}
 
 ## RULES
 1. Export a React.FC named "Reel" and a number constant "REEL_DURATION" (total frames at 30fps)
-2. Use only these packages: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions
+2. Use only these packages: remotion, @remotion/media, @remotion/google-fonts, @remotion/transitions.
+   IMPORT EVERY SYMBOL BY NAME — e.g. import { AbsoluteFill, Sequence, Img, useCurrentFrame, useVideoConfig, interpolate, spring, staticFile } from "remotion". NEVER reference a bare \`remotion.\` namespace (e.g. remotion.useCurrentFrame() or <remotion.AbsoluteFill>) — there is no \`remotion\` object in scope and it crashes with "remotion is not defined".
 3. Media files: use staticFile("media/filename.ext") — NEVER include "public/" in the path. staticFile() resolves relative to the public/ folder automatically. CORRECT: staticFile("media/photo.jpg"). WRONG: staticFile("public/media/photo.jpg")
 4. Music: use staticFile("music/track.mp3")
 5. Canvas: 1080×1920 pixels, 30fps — ALWAYS
@@ -566,7 +567,10 @@ ${audioMixGuidance(script, hasMusic)}
    do NOT exist on @remotion/media's <Video> and are silently ignored — never use them.
    Image files (.jpg, .png) use <Img> from "remotion"; for images objectFit IN style is fine.
    NEVER use <Img> for a .mp4/.mov file. NEVER use <Video> for a .jpg/.png file.
-11. Load Google Fonts via @remotion/google-fonts (e.g., import { loadFont } from "@remotion/google-fonts/Poppins")
+11. Load Google Fonts via @remotion/google-fonts. ALWAYS pass the specific weights you use and silence the request-count warning, e.g.:
+      import { loadFont } from "@remotion/google-fonts/Poppins";
+      const { fontFamily } = loadFont("normal", { weights: ["400", "700"], ignoreTooManyRequestsWarning: true });
+    Load ONLY the 2-3 weights you actually use — loading a font without a weights list fetches every weight (dozens of network requests) and slows/can stall the render.
 12. Calculate REEL_DURATION precisely from your timing constants
 13. TEXT PLACEMENT — NEVER cover the subject, and stay inside the safe area:
    - Each scene has focusX/focusY values (0-100) indicating where the subject is.
@@ -593,18 +597,37 @@ function sanitizeStaticFilePaths(code: string): string {
   return code.replace(/staticFile\(\s*["']public\//g, 'staticFile("');
 }
 
+/**
+ * The model sometimes references a bare `remotion.X` namespace (e.g.
+ * `remotion.useCurrentFrame()`, `<remotion.AbsoluteFill>`) without importing it,
+ * which crashes the render with "remotion is not defined". If the code uses such
+ * a namespace and hasn't imported it, inject the namespace import — it coexists
+ * fine with the named imports the code also uses. Same guard for @remotion/media.
+ */
+function sanitizeRemotionNamespace(code: string): string {
+  let out = code;
+  if (/\bremotion\.[A-Za-z]/.test(out) && !/import\s+\*\s+as\s+remotion\s+from\s+["']remotion["']/.test(out)) {
+    out = `import * as remotion from "remotion";\n${out}`;
+  }
+  return out;
+}
+
+function sanitizeGeneratedCode(code: string): string {
+  return sanitizeRemotionNamespace(sanitizeStaticFilePaths(code));
+}
+
 function extractCode(raw: string): CompositionCode {
   const fences = [...raw.matchAll(/```(?:tsx?)\s*\n([\s\S]*?)```/g)];
 
   if (fences.length === 0) {
     if (raw.includes("export") && raw.includes("Reel")) {
-      return { reelTsx: sanitizeStaticFilePaths(raw) };
+      return { reelTsx: sanitizeGeneratedCode(raw) };
     }
     return { reelTsx: "" };
   }
 
-  const reelTsx = sanitizeStaticFilePaths(fences[0][1].trim());
-  const dataTsx = fences.length > 1 ? sanitizeStaticFilePaths(fences[1][1].trim()) : undefined;
+  const reelTsx = sanitizeGeneratedCode(fences[0][1].trim());
+  const dataTsx = fences.length > 1 ? sanitizeGeneratedCode(fences[1][1].trim()) : undefined;
 
   return { reelTsx, dataTsx };
 }
