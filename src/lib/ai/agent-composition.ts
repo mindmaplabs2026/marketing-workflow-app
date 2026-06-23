@@ -31,7 +31,7 @@ const REMOTION_RENDERER_DIR =
  */
 const REMOTION_SKILL_DIR =
   process.env.REMOTION_SKILL_DIR ??
-  path.resolve(__dirname, "../../../remotion-skill/remotion-best-practices");
+  path.join(REMOTION_RENDERER_DIR, "skill", "remotion-best-practices");
 
 /** True if the vendored skill is present on disk (checked once, lazily). */
 async function skillAvailable(): Promise<boolean> {
