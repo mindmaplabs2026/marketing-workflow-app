@@ -531,7 +531,7 @@ export async function runReelPipeline(
           // with duration so a long clip is still covered end-to-end within a bounded
           // frame budget — a fixed 2s step + a 10-frame cap previously only sampled the
           // first ~20s. Never denser than every 2s; never more than MAX_FRAMES total.
-          const MAX_FRAMES = Number(process.env.REEL_UNDERSTANDING_MAX_FRAMES ?? 16);
+          const MAX_FRAMES = Number(process.env.REEL_UNDERSTANDING_MAX_FRAMES ?? 50);
           const frameInterval = durationSec > 0 ? Math.max(2, Math.ceil(durationSec / MAX_FRAMES)) : 2;
           const frameCount = durationSec > 0 ? Math.max(1, Math.min(MAX_FRAMES, Math.ceil(durationSec / frameInterval))) : 1;
           const framePattern = pathMod.join(thumbDir, `${safeBase}_frame_%02d.jpg`);
