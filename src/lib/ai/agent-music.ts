@@ -86,7 +86,7 @@ export async function findAndTrimMusic(input: {
       console.log(`[Music] Attempt ${attempt + 1}/3: searching Jamendo for "${keywords}"`);
 
       try {
-        const found = await discoverFromJamendo(keywords, input.durationSec, workDir, input.timeoutMs ?? 60_000, input.excludeKeys);
+        const found = await discoverFromJamendo(keywords, input.durationSec, input.musicTempo, attempt, workDir, input.timeoutMs ?? 60_000, input.excludeKeys);
         if (found) {
           // Archive the ORIGINAL (untrimmed) track into our permanent library so
           // it's reusable at any duration and feeds the curated fallback over time.
@@ -162,6 +162,8 @@ export async function generateSilentTrack(durationSec: number): Promise<Buffer> 
 async function discoverFromJamendo(
   keywords: string,
   durationSec: number,
+  tempo: "slow" | "moderate" | "fast",
+  attempt: number,
   workDir: string,
   timeoutMs: number,
   excludeKeys?: Set<string>,
@@ -174,38 +176,62 @@ async function discoverFromJamendo(
 
   const downloadPath = path.join(workDir, "downloaded.mp3");
   const tags = encodeURIComponent(keywords.trim().replace(/\s+/g, "+"));
-  // mp32 = full 320kbps MP3; audiodownload_allowed=true ensures the track is
-  // legally downloadable; order by popularity for quality; fuzzytags matches mood.
-  const apiUrl =
-    `https://api.jamendo.com/v3.0/tracks/?client_id=${clientId}` +
-    `&format=json&limit=20&fuzzytags=${tags}` +
-    `&audioformat=mp32&audiodownload_allowed=true&include=musicinfo+licenses&order=popularity_total`;
 
-  // Pull the candidate list from the JSON API.
-  const listJson = await fetchWithTimeout(apiUrl, timeoutMs).then((r) => r.json());
-  if (listJson?.headers?.status !== "success") {
-    console.warn(`[Music] Jamendo API error: ${listJson?.headers?.error_message ?? "unknown"}`);
-    return null;
+  // VARIETY: rotate the ordering per attempt so we don't surface the same most-
+  // popular tracks every time (popularity_total alone made every reel repeat).
+  const orderRotation = ["popularity_month", "listens_total", "buzzrate"];
+  const order = orderRotation[attempt % orderRotation.length];
+  // TEMPO → Jamendo speed filter (only on the first, tightest attempt so later
+  // broadening attempts aren't over-constrained).
+  const speedMap: Record<string, string> = { slow: "low", moderate: "medium", fast: "high" };
+  const speedParam = attempt === 0 ? `&speed=${speedMap[tempo] ?? "medium"}` : "";
+
+  // mp32 = full 320kbps MP3; audiodownload_allowed=true = legally downloadable.
+  // limit=50 gives a deep pool to sample from (we shuffle, not take the top).
+  const buildUrl = (instrumentalOnly: boolean) =>
+    `https://api.jamendo.com/v3.0/tracks/?client_id=${clientId}` +
+    `&format=json&limit=50&fuzzytags=${tags}` +
+    `&audioformat=mp32&audiodownload_allowed=true&include=musicinfo+licenses` +
+    `&order=${order}${speedParam}` +
+    // HARD instrumental filter (BGM must not have lyrics). Dropped only as a last
+    // resort below if the catalog has no instrumental match for these tags.
+    (instrumentalOnly ? `&vocalinstrumental=instrumental` : "");
+
+  // Query instrumental-only FIRST. Broaden to include vocal tracks ONLY if there
+  // are zero instrumental matches, so lyrics never sneak in when an instrumental
+  // option exists.
+  let results: JamendoTrack[] = [];
+  for (const instrumentalOnly of [true, false]) {
+    const listJson = await fetchWithTimeout(buildUrl(instrumentalOnly), timeoutMs).then((r) => r.json());
+    if (listJson?.headers?.status !== "success") {
+      console.warn(`[Music] Jamendo API error: ${listJson?.headers?.error_message ?? "unknown"}`);
+      continue;
+    }
+    const r: JamendoTrack[] = Array.isArray(listJson.results) ? listJson.results : [];
+    if (r.length) {
+      results = r;
+      console.log(
+        instrumentalOnly
+          ? `[Music] Jamendo: ${r.length} instrumental matches for "${keywords}" (order=${order}${speedParam ? `, ${speedParam.slice(1)}` : ""})`
+          : `[Music] Jamendo: no instrumental match for "${keywords}" — broadened to ${r.length} (may include vocals)`,
+      );
+      break;
+    }
   }
-  const results: JamendoTrack[] = Array.isArray(listJson.results) ? listJson.results : [];
   if (results.length === 0) return null;
 
-  // Prefer instrumental tracks at least as long as the reel; otherwise take the
-  // longest available so ffmpeg has enough material to trim to durationSec.
-  const isInstrumental = (t: JamendoTrack) =>
-    String(t?.musicinfo?.vocalinstrumental ?? "").toLowerCase() === "instrumental";
+  // Prefer tracks at least as long as the reel so ffmpeg has enough to trim.
   const longEnough = results.filter((t) => Number(t.duration) >= durationSec);
   const pool = longEnough.length ? longEnough : results;
-  pool.sort((a, b) => {
-    const ai = isInstrumental(a) ? 0 : 1;
-    const bi = isInstrumental(b) ? 0 : 1;
-    if (ai !== bi) return ai - bi; // instrumental first
-    return Number(b.duration) - Number(a.duration); // then longest
-  });
+  // SHUFFLE (Fisher–Yates): with a deep, mood-matched pool, random sampling is
+  // what actually breaks the repetition — never just take the top result.
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
 
   // Skip tracks already used by sibling variations so each variation gets
-  // DIFFERENT audio (popular tracks otherwise win every keyword set). Scan deeper
-  // than the top 5 since exclusions may knock out the most-popular picks.
+  // DIFFERENT audio.
   const trackKeyOf = (t: JamendoTrack) => String(t.id ?? t.audiodownload ?? `${t.artist_name}-${t.name}`);
   const candidates = pool.filter((t) => !excludeKeys?.has(trackKeyOf(t)));
   if (candidates.length === 0) {
