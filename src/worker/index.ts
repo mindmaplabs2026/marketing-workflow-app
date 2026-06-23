@@ -20,6 +20,7 @@ import { runChatEdit } from "@/lib/ai/chat-core";
 import { getModelEngineKind } from "@/lib/config/engine";
 import { checkFfmpegAvailable } from "@/lib/ai/agent-music";
 import { checkWhisperAvailable, whisperBackend } from "@/lib/ai/transcribe";
+import { initStatusBar, noteLogLine } from "@/worker/status-bar";
 
 // Prettify EVERY console line: a dim timestamp, a colour-coded [tag], and a status
 // glyph (✓/✗/⚠). The pipeline logs through plain console.* in dozens of places, so
@@ -51,6 +52,7 @@ if (process.env.WORKER_LOG_TIMESTAMPS !== "0") {
     const ts = paint(stamp(), C.dim);
     if (typeof args[0] !== "string") return [paint(`[${stamp()}]`, C.dim), ...args];
     const raw = args[0];
+    noteLogLine(raw); // feed the floating status bar from the (uncoloured) line
     // Colour the leading [tag].
     let msg = raw.replace(/^\[([^\]]+)\]/, (_m, tag: string) =>
       paint(`[${tag}]`, TAG_COLOR[tag] ?? C.grey, C.bold),
@@ -181,6 +183,7 @@ async function processChatEdit(edit: ClaimedChatEdit) {
 }
 
 async function loop() {
+  initStatusBar(); // pin the floating status bar (no-op unless a TTY)
   // Startup checks
   const hasFfmpeg = await checkFfmpegAvailable();
   const hasWhisper = await checkWhisperAvailable();
