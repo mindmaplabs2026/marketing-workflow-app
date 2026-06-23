@@ -1106,8 +1106,11 @@ export async function runReelPipeline(
         // stopping as soon as we clear PASS_SCORE (hard stop). We KEEP THE BEST-scoring
         // render across all rounds — a refine can come back worse, and we never ship a
         // regression. Only the best is left uploaded in storage + the variation record.
-        const PASS_SCORE = 7;
-        const MAX_REFINE_ROUNDS = 2;
+        // Env-tunable: renders are slow (~5 min each), so each refine round adds
+        // real wall-clock. Lower MAX_REFINE_ROUNDS to 0 to disable refinement, or
+        // lower PASS_SCORE so "good enough" reels skip the extra renders.
+        const PASS_SCORE = Number(process.env.REEL_PASS_SCORE ?? 7);
+        const MAX_REFINE_ROUNDS = Number(process.env.REEL_MAX_REFINE_ROUNDS ?? 2);
         let bestScore = evaluation.score;
         let bestComposition = currentComposition;
         let bestFeedback = evaluation.feedback;
