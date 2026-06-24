@@ -19,6 +19,65 @@ import { runPosterPipeline, runReelPipeline } from "@/lib/ai/pipeline-core";
 import { runChatEdit } from "@/lib/ai/chat-core";
 import { getModelEngineKind } from "@/lib/config/engine";
 import { checkFfmpegAvailable } from "@/lib/ai/agent-music";
+import { checkWhisperAvailable, whisperBackend } from "@/lib/ai/transcribe";
+import { initStatusBar, noteLogLine } from "@/worker/status-bar";
+
+// Prettify EVERY console line: a dim timestamp, a colour-coded [tag], and a status
+// glyph (✓/✗/⚠). The pipeline logs through plain console.* in dozens of places, so
+// one patch here makes the whole stream scannable without touching call sites.
+// Colours are emitted only to a real TTY (piped/redirected logs stay plain); honours
+// NO_COLOR. Disable timestamps with WORKER_LOG_TIMESTAMPS=0, colour with WORKER_LOG_COLOR=0.
+if (process.env.WORKER_LOG_TIMESTAMPS !== "0") {
+  const color =
+    process.env.WORKER_LOG_COLOR !== "0" && !process.env.NO_COLOR && !!process.stdout.isTTY;
+  const C = {
+    reset: "\x1b[0m", dim: "\x1b[2m", bold: "\x1b[1m",
+    red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", blue: "\x1b[34m",
+    magenta: "\x1b[35m", cyan: "\x1b[36m", grey: "\x1b[90m",
+  };
+  const paint = (s: string, ...codes: string[]) => (color ? `${codes.join("")}${s}${C.reset}` : s);
+  // Per-source colours so each agent's lines are instantly recognisable.
+  const TAG_COLOR: Record<string, string> = {
+    Worker: C.cyan, Pipeline: C.blue, Music: C.magenta,
+    Composition: C.yellow, Repair: C.yellow, "render-repair": C.yellow, Edit: C.yellow, Refine: C.yellow,
+    ReelAgent2: C.green, ReelEval: C.green,
+    remotion: C.grey, "remotion-err": C.grey, "remotion-render": C.grey, "codex-text": C.grey, "model-client": C.grey,
+  };
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  const stamp = () => {
+    const d = new Date();
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+  };
+  const decorate = (level: "log" | "warn" | "error", args: unknown[]): unknown[] => {
+    const ts = paint(stamp(), C.dim);
+    if (typeof args[0] !== "string") return [paint(`[${stamp()}]`, C.dim), ...args];
+    const raw = args[0];
+    noteLogLine(raw); // feed the floating status bar from the (uncoloured) line
+    // Colour the leading [tag].
+    let msg = raw.replace(/^\[([^\]]+)\]/, (_m, tag: string) =>
+      paint(`[${tag}]`, TAG_COLOR[tag] ?? C.grey, C.bold),
+    );
+    // Bold section headers (── Agent 1 ──, ── Variation 2 ──).
+    if (raw.includes("──")) msg = paint(msg, C.bold);
+    // Status glyph from level + keywords.
+    let glyph: string;
+    if (level === "error" || /\b(FAIL|FAILED|FATAL|Error|exit 1)\b/.test(raw)) glyph = paint("✗", C.red, C.bold);
+    else if (/\b(Success|COMPLETED|Uploaded|Rendered in|Compressed|improved|Got \d)\b/.test(raw)) glyph = paint("✓", C.green);
+    else if (level === "warn") glyph = paint("⚠", C.yellow);
+    else glyph = paint("·", C.dim);
+    return [`${ts} ${glyph}`, msg, ...args.slice(1)];
+  };
+  // Wrap the bound originals so Node's native multi-arg/object formatting is preserved.
+  const orig = {
+    log: console.log.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+  };
+  console.log = ((...a: unknown[]) => orig.log(...decorate("log", a))) as typeof console.log;
+  console.info = console.log;
+  console.warn = ((...a: unknown[]) => orig.warn(...decorate("warn", a))) as typeof console.warn;
+  console.error = ((...a: unknown[]) => orig.error(...decorate("error", a))) as typeof console.error;
+}
 
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 
@@ -124,13 +183,18 @@ async function processChatEdit(edit: ClaimedChatEdit) {
 }
 
 async function loop() {
+  initStatusBar(); // pin the floating status bar (no-op unless a TTY)
   // Startup checks
   const hasFfmpeg = await checkFfmpegAvailable();
+  const hasWhisper = await checkWhisperAvailable();
   console.log(
-    `[Worker] started — engine='local', MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms, ffmpeg=${hasFfmpeg ? "yes" : "NOT FOUND (reel generation will fail)"}`,
+    `[Worker] started — engine='local', MODEL_ENGINE=${getModelEngineKind()}, poll=${POLL_INTERVAL_MS}ms, ffmpeg=${hasFfmpeg ? "yes" : "NOT FOUND (reel generation will fail)"}, whisper=${hasWhisper ? `yes (${whisperBackend()})` : "no (video transcription disabled)"}`,
   );
   if (!hasFfmpeg) {
     console.warn("[Worker] WARNING: ffmpeg is required for reel generation (music trimming + keyframe extraction). Install with: brew install ffmpeg");
+  }
+  if (!hasWhisper) {
+    console.warn("[Worker] NOTE: Whisper not found — video transcription disabled (Agent 1 uses keyframes only). whisper.cpp: brew install whisper-cpp + set WHISPER_CPP_MODEL; or openai-whisper: pipx install openai-whisper");
   }
 
   while (running) {

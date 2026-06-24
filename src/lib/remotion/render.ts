@@ -142,21 +142,18 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       `[remotion-render] Rendered in ${renderTimeSec.toFixed(1)}s — ${rawSizeMb.toFixed(1)} MB (raw)`,
     );
 
-    // Compress with ffmpeg — reduces ~70MB → ~15-20MB without visible quality loss.
-    // CRF 28 is a good balance for Instagram Reels (viewed on mobile screens).
-    const compressedPath = path.join(workDir, "output-compressed.mp4");
-    console.log("[remotion-render] Compressing with ffmpeg (crf=28)...");
+    // The renderer (remotion-renderer/render.ts) now encodes h264 at the target CRF
+    // directly, so we DON'T re-encode here (that was a wasteful 2nd pass). We only
+    // REMUX to move the moov atom to the front (+faststart) for instant web playback
+    // — a stream copy, no re-encode, so it's ~1-2s instead of ~25s.
+    const compressedPath = path.join(workDir, "output-faststart.mp4");
+    console.log(`[remotion-render] Remuxing for faststart (stream copy, no re-encode)...`);
     const compressStart = Date.now();
 
     await new Promise<void>((resolve, reject) => {
-      const { spawn: spawnProc } = require("node:child_process");
-      const child = spawnProc("ffmpeg", [
+      const child = spawn("ffmpeg", [
         "-i", rawPath,
-        "-c:v", "libx264",
-        "-crf", "28",
-        "-preset", "fast",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-c", "copy",
         "-movflags", "+faststart",
         "-y", compressedPath,
       ], { stdio: ["ignore", "pipe", "pipe"] });
@@ -165,19 +162,19 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
       child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
       child.on("close", (code: number | null) => {
         if (code === 0) resolve();
-        else reject(new Error(`ffmpeg compress exit ${code}: ${stderr.slice(0, 300)}`));
+        else reject(new Error(`ffmpeg remux exit ${code}: ${stderr.slice(0, 300)}`));
       });
       child.on("error", reject);
-      setTimeout(() => { child.kill(); reject(new Error("ffmpeg compress timeout")); }, 120000);
+      setTimeout(() => { child.kill(); reject(new Error("ffmpeg remux timeout")); }, 60000);
     });
 
     const compressedSizeMb = (await fs.stat(compressedPath)).size / 1024 / 1024;
     const compressSec = ((Date.now() - compressStart) / 1000).toFixed(1);
     console.log(
-      `[remotion-render] Compressed in ${compressSec}s: ${rawSizeMb.toFixed(1)} MB → ${compressedSizeMb.toFixed(1)} MB (${Math.round((1 - compressedSizeMb / rawSizeMb) * 100)}% reduction)`,
+      `[remotion-render] Faststart remux in ${compressSec}s: ${compressedSizeMb.toFixed(1)} MB (rendered at target quality, no re-encode)`,
     );
 
-    // Use compressed version as the output
+    // Use the faststart version as the output
     const outputPath = compressedPath;
 
     const cleanupPublic = async () => {
@@ -204,6 +201,22 @@ export async function renderReel(input: RenderInput): Promise<RenderResult> {
     await fs.rm(pubMusic, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
+}
+
+/**
+ * Pull the meaningful compile/render error out of the renderer's output so it
+ * can be fed back to Codex for self-correction. Remotion/webpack print the root
+ * cause near the FIRST "error"; the noise above it (font/objectFit warnings) is
+ * irrelevant. Falls back to the tail if no "error" token is present.
+ */
+function extractRenderError(stdout: string, stderr: string): string {
+  const combined = `${stderr}\n${stdout}`.trim();
+  const idx = combined.toLowerCase().indexOf("error");
+  const slice =
+    idx >= 0
+      ? combined.slice(Math.max(0, idx - 80), idx - 80 + 1800)
+      : combined.slice(-1800);
+  return slice.trim() || "(no renderer output)";
 }
 
 function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
@@ -253,7 +266,7 @@ function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
       } else {
         reject(
           new Error(
-            `Remotion render exited with code ${code}: ${stderr.slice(0, 500)}`,
+            `Remotion render exited with code ${code}: ${extractRenderError(stdout, stderr)}`,
           ),
         );
       }

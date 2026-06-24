@@ -9,6 +9,7 @@
     "lint": "eslint",
     "engine:smoke": "tsx scripts/engine-smoke.ts",
     "model:smoke": "tsx scripts/model-smoke.ts",
+    "preflight": "node --env-file=.env.local --import tsx scripts/preflight.ts",
     "worker": "node --env-file=.env.local --conditions=react-server --import tsx src/worker/index.ts"
   },
   "dependencies": {

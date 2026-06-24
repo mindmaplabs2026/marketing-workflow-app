@@ -14,6 +14,9 @@ export type SceneBeat = {
   trimEndSec?: number;
   focusX: number;
   focusY: number;
+  /** Video scene whose clip contains spoken words → play the clip's own audio and
+   *  duck the background music during this scene. Carried from the curated entry. */
+  containsSpeech?: boolean;
   kenBurns?: {
     direction: "in" | "out" | "left" | "right";
     intensity: "subtle" | "moderate" | "dramatic";
@@ -36,6 +39,15 @@ export type ReelScript = {
   durationSec: number;
   musicMood: string[];
   musicTempo: "slow" | "moderate" | "fast";
+  /**
+   * The reel's audio intent, decided by the creative director:
+   *  - "bgm-only": visuals/activity carry it; clips muted, music plays full (ignore
+   *    any incidental talking).
+   *  - "voice-led": built around what people say (interview/commentary/statement);
+   *    speaker audio leads, music is a low bed ducked hard under speech.
+   *  - "mixed": mostly visual + music, but a few key spoken moments should be heard.
+   */
+  audioStyle: "bgm-only" | "voice-led" | "mixed";
   scenes: SceneBeat[];
   titleCard: {
     headline: string;
@@ -77,13 +89,29 @@ type ReelAgent2Input = {
   requestedDurationSec: number;
   schoolName: string;
   schoolGuidelines?: string | null;
+  /** Actual curated media (image URL / a video keyframe) so the director can SEE
+   *  the footage and choose a palette/mood that complements it — not direct blind. */
+  curatedMedia?: { path: string; url: string; mediaType: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }[];
+  /** Brand anchor colors extracted from the school logo, to keep palettes on-brand. */
+  brandColors?: string[];
+  /** Measured logo tone/transparency, so logoPlacement specifies a contrasting backing. */
+  logoProfile?: { tone: string; hasTransparency: boolean; requiredBackground: "light" | "dark" | "any" };
 };
 
 const SYSTEM_PROMPT = `You are an expert creative director specializing in short-form vertical video (Instagram Reels) for school marketing.
 
+You are a CREATIVE DIRECTOR, not just a scriptwriter. The colour palette, typography,
+and visual register you choose are BINDING — a downstream agent writes the actual
+React/Remotion code to YOUR spec. Direct from what you SEE, not from a synopsis.
+
 You will receive:
 - An analysis of the request theme, curated images/videos, and audience (from a prior agent).
-- School brand assets (logo, header, footer images).
+- The ACTUAL curated photos and a keyframe from each video (attached as images) — LOOK at them
+  to understand the SUBJECT, mood, and focal points, and to pull ONE anchor colour. But you are
+  DESIGNING ON TOP of this footage, not echoing it: the photos may be ordinary or low-light, and
+  your job is to make them feel vibrant and cinematic through bold palette, motion, and decoration.
+  Let the footage inform crop/focus and one anchor tone — let your DESIGN supply the energy.
+- School brand assets (logo, header, footer images) and the school's BRAND COLOURS.
 - A requested duration (the teacher's preference — you may cap this based on available content).
 
 Your job is to produce 3 different creative direction "reel scripts" — each is a detailed blueprint for an AI to write a Remotion (React) composition that renders a vertical 9:16 MP4 video.
@@ -96,11 +124,13 @@ CREATIVE PROCESS:
    - Add 4s for title card + 4s for closing card.
    - Total should not exceed 180 seconds regardless of teacher's request.
    - If the calculated max is less than the teacher's request, use the calculated max.
-3. Design 3 DIFFERENT visual registers for the reel.
-   You MUST pick 3 DIFFERENT styles from this list. Do NOT pick the same style twice.
-   Do NOT default to scrapbook/polaroid — that style is overused. Pick others.
+3. Design 3 visual registers for the reel. You are the creative director — these are YOUR
+   choices. There is NO hard rule that you must use a framed style, a full-bleed style, or any
+   particular mix. Choose whatever genuinely serves THIS footage and makes the strongest reel.
 
-   FRAMED styles (photo sits inside a frame with breathing room):
+   This is a MENU to spark ideas, not a set of buckets you must fill:
+
+   FRAMED looks (media sits inside a frame with breathing room):
    A. Magazine editorial: photos in rounded white cards, serif typography, glossy yearbook feel
    B. Film strip: photos inside sprocket-hole film frames, dark background, retro cinema
    C. Postcard stack: photos as postcards dropped onto a wooden table, stamps and handwritten notes
@@ -109,25 +139,37 @@ CREATIVE PROCESS:
    F. Scrapbook/notebook: warm, handwritten feel, photos as polaroids taped on a notebook page
    G. College bulletin: clean cards, navy/gold header band, formal event recap
 
-   FULL-BLEED styles (photo fills the entire screen):
+   FULL-BLEED looks (media fills the screen):
    H. Bold overlay: full-bleed photo/video with large text overlaid, gradient darken at bottom
-   I. Cinematic letterbox: full-bleed with black bars top/bottom (21:9 feel), minimal text
+   I. Cinematic letterbox: full-bleed with bars top/bottom (21:9 feel), minimal text
    J. Story slides: full-bleed with Instagram-story-style text stickers, emoji, color blocks
    K. Kinetic typography: bold word stamps synced to beats, high energy, hard cuts
    L. iPhone POV: handheld camera simulation, notification cards as captions
+   …or any tasteful look you invent. You may also MIX treatments within one reel
+   (e.g. some scenes full-bleed, others framed) if that serves the story.
 
-   IMPORTANT: When using full-bleed styles, ALWAYS set objectPosition using the focusX/focusY
-   values from the curated list so the subject stays centered even when cropped to 9:16.
-   When using framed styles (cards, strips, grids), this is less critical since the frame
-   preserves the photo's natural composition.
+   SOFT GUIDANCE (not hard rules):
+   - The 3 variations SHOULD feel distinctly different from each other — different look and mood.
+     Avoid shipping three near-identical reels, and don't lazily default to scrapbook/polaroid
+     for all of them. But you are NOT forced into specific buckets — diversity by judgement, not quota.
+   - Name the look you chose in the "direction" field (e.g., "Film Strip Chronicle" or your own).
+   - A slide/scene COUNTER or progress bar ("01/09", "FRAME 03/12", story-style ticks) is an
+     OPTIONAL device, NOT a default. Only ask for it when the look genuinely benefits (a
+     structured recap, a countdown, a story-style reel). If you want one, say so explicitly in
+     the "direction"/"visualRegister" text; otherwise the reel will have NO slide numbering.
 
-   VARIETY RULES (MANDATORY):
-   - Your 3 variations MUST use 3 DIFFERENT letter codes from the list above (e.g., A, H, D — not A, A, F)
-   - At least 1 variation MUST be a framed style (A-G)
-   - At least 1 variation MUST be a full-bleed style (H-L)
-   - The 3rd variation can be either — but it MUST be different from the other two
-   - Each variation should feel DISTINCTLY different in look and mood
-   - State which letter code you chose in the "direction" field (e.g., "B — Film Strip Chronicle")
+   MEDIA SHAPE drives how each clip should be PRESENTED (this is the important part):
+   - Each curated VIDEO is tagged landscape / portrait / square. Choose a treatment that shows it
+     WELL instead of cropping the subject away:
+     • PORTRAIT/vertical clip → full-bleed cover is ideal (it already fits 9:16).
+     • LANDSCAPE clip → full-bleed cover crops away ~60% of its width (people on the edges vanish).
+       Prefer a treatment that keeps the whole frame: a landscape-shaped framed card, a cinematic
+       letterbox, or a blur-fill backdrop (the clip fit-to-width over a blurred copy of itself).
+       Only go full-bleed on a landscape clip if its subject is dead-centre.
+     • SQUARE clip → either works.
+   - For full-bleed treatments, ALWAYS set objectPosition from focusX/focusY so the subject stays in
+     frame. Describe your intended treatment per scene in the scene's style/notes so the composition
+     writer implements it.
 4. For each variation, sequence the scenes chronologically or thematically.
 5. Assign transitions that match the mood:
    - "fade" for contemplative, slow content
@@ -151,9 +193,14 @@ DURATION RULES:
 - NEVER exceed 300 seconds (5 minutes) total regardless of requested duration.
 
 MEDIA ASSIGNMENT RULES:
-- Every curated image/video MUST appear in exactly ONE scene
-- Do NOT duplicate media across scenes
-- MANDATORY VIDEO USAGE: If the curated list contains videos, you MUST use ALL of them.
+- The curated list is a list of ENTRIES. Each entry becomes exactly ONE scene.
+- A long video may appear as SEVERAL entries, each with a DIFFERENT suggested trim
+  window (e.g. the same .mp4 at 0-8s, then 40-48s, then 95-103s). This is intentional:
+  treat each entry as its own distinct scene using ITS OWN trim window. Do NOT collapse
+  them into one scene, and do NOT reuse the same trim window twice.
+- Do NOT reuse the SAME still IMAGE in more than one scene.
+- MANDATORY VIDEO USAGE: If the curated list contains videos, you MUST use ALL of them
+  (every entry, including the multiple trim windows of a long video).
   Videos are MORE valuable than images for reels — they show movement, action, and life.
   A reel with only still images feels like a slideshow. Videos make it feel alive.
   Aim for at least 40-60% of scenes to be video clips when videos are available.
@@ -174,24 +221,62 @@ TEXT OVERLAY PLACEMENT (CRITICAL — avoid covering faces and subjects):
   - If focusY >= 60 (subject is in the BOTTOM of the image) → position: "top"
   - If focusY is 40-60 (subject is centered) → position: "top" or "bottom", NOT "center"
 - NEVER place text at "center" when the photo has people — it WILL cover faces
-- For full-bleed styles: text always goes in the opposite third from the focal point
-- For framed styles: text goes OUTSIDE the frame (below or above the card), not overlaid
+- For full-bleed styles: text always goes in the opposite third from the focal point, and the
+  composition writer will put a gradient scrim behind it so it stays legible AND looks designed.
+- For framed styles: text may sit OUTSIDE the frame (below/above the card) OR over the media on
+  the side away from the subject with a scrim/chip behind it — whichever looks more designed.
+  Do not feel forced to banish all text to empty margins; scrim-backed text over the image is fine.
 - Keep text overlays SHORT (3-6 words max) — long text blocks cover more of the image
 
 VERIFY YOUR WORK:
-1. Count videos in the curated list. Count videos in your scenes. They must match.
+1. Count the curated video ENTRIES (a long video split into N trim windows counts as N).
+   Count the video scenes you created. They MUST match — one scene per entry.
 2. Every scene with a .mp4 or .mov file MUST have mediaType: "video", trimStartSec, and trimEndSec.
-3. If you have 8 curated items and 3 are videos, your scenes MUST include exactly 3 video scenes.
+3. If a video has 3 curated trim windows, your scenes MUST include 3 separate scenes for it,
+   each using its own window — never just one.
+
+AUDIO STYLE (decide what KIND of reel this is — set "audioStyle"):
+First judge where this reel's value lives, then choose ONE:
+- "bgm-only": the reel is carried by the VISUALS / activity / showcase (events, sports,
+  crafts, campus life, b-roll). What anyone happens to be saying does NOT matter. The
+  clips will be MUTED and the music plays at full level. Choose this even if some clips
+  contain incidental talking — if the talking isn't the point, it's bgm-only.
+- "voice-led": the reel is built around WHAT PEOPLE SAY — an interview, testimonial,
+  student/teacher commentary, a speech or statement. The message is in the words. The
+  speaker's voice leads and the music is only a quiet bed under it.
+- "mixed": mostly visual + music, but ONE or a FEW specific spoken moments are worth
+  hearing (a single quote, a winner's reaction). Those scenes play their audio; the rest
+  are muted.
+Then:
+- Copy "containsSpeech" onto each scene from the curated entry (the composition uses it
+  for voice-led/mixed; it is ignored for bgm-only).
+- For "voice-led", pick a calm, low musicMood and "slow"/"moderate" tempo — never a
+  loud/"fast" track that fights the talking.
 
 MUSIC MOOD:
 - Provide 2-4 keywords for Pixabay music search (e.g., ["upbeat", "acoustic", "school"])
 - Specify tempo: "slow" for reflective, "moderate" for balanced, "fast" for energetic
 - The music will be trimmed to match the reel duration automatically
 
+COLOR PALETTE (a DESIGNED, BOLD scheme — not a muted echo of the footage):
+- The footage and brand colours are ANCHORS, not the whole palette. Pull ONE anchor colour
+  that reads off the attached media (a dominant tone) and at least ONE brand colour, then
+  BUILD OUT a confident 4-6 colour scheme around them: rich, saturated, high-contrast.
+- Dull or low-light footage does NOT mean a dull design. The design layer (backgrounds,
+  gradients, accent shapes, type colours) is where the VIBRANCY comes from — it should ADD
+  energy the raw photos lack, not match their flatness. Lean into saturated accents and
+  strong light/dark contrast so the reel pops on a phone feed.
+- Always include at least one brand colour (or a close, tasteful variant) so the reel stays
+  on-brand. Do not ignore the brand colours.
+- The 3 variations MUST have DISTINCT, characterful palettes (different mood/temperature —
+  e.g. warm-vivid, cool-electric, editorial-duotone), not three near-identical muted sets.
+  Provide real hex values.
+
 TYPOGRAPHY:
 - Use Google Fonts only (they're available via @remotion/google-fonts)
 - Good choices: Poppins, Inter, Caveat (handwriting), Playfair Display (serif), JetBrains Mono (code), Cormorant Garamond (elegant)
 - Specify heading + body fonts, optionally an accent font
+- The 3 variations should use DISTINCT typography (don't reuse the same font pairing for all three)
 
 Return ONLY valid JSON matching this schema:
 {
@@ -204,6 +289,7 @@ Return ONLY valid JSON matching this schema:
     "durationSec": number,
     "musicMood": ["keyword1", "keyword2"],
     "musicTempo": "slow|moderate|fast",
+    "audioStyle": "bgm-only|voice-led|mixed",
     "scenes": [{
       "index": 1,
       "mediaPath": "exact path from curated images list",
@@ -211,6 +297,7 @@ Return ONLY valid JSON matching this schema:
       "durationSec": number,
       "trimStartSec": number (for videos),
       "trimEndSec": number (for videos),
+      "containsSpeech": true_or_false (copy from the curated video entry),
       "focusX": 50, "focusY": 50,
       "kenBurns": { "direction": "in|out|left|right", "intensity": "subtle|moderate|dramatic" },
       "textOverlay": { "text": "optional caption", "position": "top|center|bottom", "style": "bold|handwritten|minimal" },
@@ -238,6 +325,7 @@ export async function runReelCreativeAgent(
         if (img.suggestedTrimStart != null && img.suggestedTrimEnd != null) {
           line += `, suggested trim: ${img.suggestedTrimStart}s-${img.suggestedTrimEnd}s`;
         }
+        if (img.containsSpeech) line += `, SPEECH`;
         line += ")";
       }
       return line;
@@ -259,9 +347,18 @@ export async function runReelCreativeAgent(
     (img) => img.mediaType === "video" || (!img.mediaType && /\.(mp4|mov|webm|avi)$/i.test(img.path)),
   ).length;
 
+  const brandColorsLine = input.brandColors?.length
+    ? `## Brand colours (anchor palettes to these): ${input.brandColors.join(", ")}`
+    : "";
+  const logoBgLine = input.logoProfile && input.logoProfile.requiredBackground !== "any"
+    ? `## Logo: it is ${input.logoProfile.tone}${input.logoProfile.hasTransparency ? " with transparency" : ""} — in logoPlacement, specify it sits on a ${input.logoProfile.requiredBackground === "light" ? "LIGHT/WHITE" : "DARK"} backing/chip (otherwise it is invisible).`
+    : "";
+
   const userMessage = `## School: ${input.schoolName}
 ## Requested duration: ${input.requestedDurationSec} seconds
 ## Media: ${imageCount} images, ${videoCount} videos (${input.understanding.curatedImages.length} total curated)
+${brandColorsLine}
+${logoBgLine}
 
 ## Theme Analysis (from prior agent)
 - Theme: ${input.understanding.theme}
@@ -298,8 +395,28 @@ Create 3 different reel script variations. Each should use a DISTINCT visual reg
     });
   }
 
+  // Attach the ACTUAL curated media so the director chooses palette/mood from the
+  // real footage. Low detail keeps cost down — enough to read colour and mood.
+  const curatedMedia = input.curatedMedia ?? [];
+  if (curatedMedia.length) {
+    userContent.push({
+      type: "text",
+      text: `\n[CURATED MEDIA BELOW — look at these to choose palettes/registers that complement the real footage]`,
+    });
+    for (const m of curatedMedia) {
+      userContent.push({
+        type: "text",
+        text: `[${m.mediaType}: ${m.path.split("/").pop()}${m.mediaType === "video" ? ` (keyframe${m.orientation ? `, ${m.orientation.toUpperCase()}` : ""})` : ""}]`,
+      });
+      userContent.push({
+        type: "image_url",
+        image_url: { url: m.url, detail: "low" },
+      });
+    }
+  }
+
   console.log(
-    `[ReelAgent2] ${input.understanding.curatedImages.length} curated media, ${brandWithUrls.length} brand assets, requested ${input.requestedDurationSec}s`,
+    `[ReelAgent2] ${input.understanding.curatedImages.length} curated media, ${curatedMedia.length} shown to director, ${brandWithUrls.length} brand assets, brand colours [${(input.brandColors ?? []).join(", ") || "none"}], requested ${input.requestedDurationSec}s`,
   );
 
   const response = await withRateLimitRetry(() =>
@@ -328,7 +445,7 @@ Create 3 different reel script variations. Each should use a DISTINCT visual reg
     const videoScenes = v.scenes.filter((s) => s.mediaType === "video");
     const imageScenes = v.scenes.filter((s) => s.mediaType === "image");
     console.log(
-      `[ReelAgent2] V${v.variationIndex}: "${v.direction}" — ${v.scenes.length} scenes (${videoScenes.length} video, ${imageScenes.length} image), ${v.durationSec}s, music: [${v.musicMood.join(", ")}] ${v.musicTempo}`,
+      `[ReelAgent2] V${v.variationIndex}: "${v.direction}" — ${v.scenes.length} scenes (${videoScenes.length} video, ${imageScenes.length} image), ${v.durationSec}s, audio=${v.audioStyle ?? "?"}, music: [${v.musicMood.join(", ")}] ${v.musicTempo}`,
     );
     for (const vs of videoScenes) {
       console.log(

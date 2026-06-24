@@ -23,6 +23,8 @@ import { runUnderstandingAgent } from "./agent-understanding";
 import { runCreativeAgent } from "./agent-creative";
 import { evaluatePoster, refineAndRegenerate } from "./agent-generation";
 import type { UnderstandingOutput, UploadedImage } from "./agent-understanding";
+import { transcribeVideo, type TranscriptSegment } from "./transcribe";
+import { analyzeLogo, extractBrandColors, type LogoProfile } from "./logo-analysis";
 import type { VariationBrief } from "./agent-creative";
 import {
   fetchContext,
@@ -408,9 +410,8 @@ export async function runReelPipeline(
   // cannot statically analyze. They only run on the local worker, never Vercel.
   const { runReelCreativeAgent } = await import("./agent-creative-reel");
   const { findAndTrimMusic } = await import("./agent-music");
-  const { generateComposition, refineReelComposition } = await import("./agent-composition");
+  const { generateComposition, refineReelComposition, renderWithRepair } = await import("./agent-composition");
   const { evaluateReel } = await import("./agent-reel-evaluator");
-  const { renderReel } = await import("@/lib/remotion/render");
 
   const admin = createAdminClient();
   console.log(`[Worker] Reel Job ${jobId} | START (request ${requestId})`);
@@ -448,6 +449,13 @@ export async function runReelPipeline(
     // For videos, extract thumbnail frames so Agent 1 can "see" them.
     // Agent 1's vision API only accepts images, not video files.
     const videoThumbnails: UploadedImage[] = [];
+    // Per-video timestamped transcripts (Whisper). Best-effort; empty if Whisper
+    // is not installed. Fed to Agent 1 so it can pick segments by content.
+    const videoTranscripts: Record<string, TranscriptSegment[]> = {};
+    // Per-video orientation (from ffprobe dimensions) — NON-binding context for the
+    // creative director + composition writer so they can choose a treatment that
+    // doesn't crop a landscape clip to a sliver. Keyed by the video's storage path.
+    const videoOrientations: Record<string, "landscape" | "portrait" | "square"> = {};
     if (videoUploads.length > 0) {
       const fsPromises = await import("node:fs").then((m) => m.promises);
       const pathMod = await import("node:path");
@@ -474,13 +482,25 @@ export async function runReelPipeline(
           await fsPromises.writeFile(vidPath, vidBuffer);
           console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: downloaded ${(vidBuffer.length / 1024).toFixed(0)} KB`);
 
-          // Get video duration with ffprobe
+          // Transcribe (best-effort, local Whisper) so Agent 1 can pick segments
+          // by what's said. No-op if Whisper isn't installed.
+          try {
+            const segs = await transcribeVideo(vidPath);
+            if (segs && segs.length) {
+              videoTranscripts[vid.path] = segs;
+              console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: transcribed ${segs.length} segment(s)`);
+            }
+          } catch { /* best-effort */ }
+
+          // Get video duration + dimensions with ffprobe (one JSON probe).
           let durationSec = 0;
           try {
             const probeResult = await new Promise<{ out: string; err: string }>((resolve, reject) => {
               const child = spawnProc("ffprobe", [
-                "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", vidPath,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height:format=duration",
+                "-of", "json", vidPath,
               ], { stdio: ["ignore", "pipe", "pipe"] });
               let out = "", err = "";
               child.stdout.on("data", (d) => (out += d.toString()));
@@ -489,14 +509,31 @@ export async function runReelPipeline(
               child.on("error", reject);
               setTimeout(() => { child.kill(); reject(new Error("ffprobe timeout")); }, 10000);
             });
-            durationSec = Math.round(parseFloat(probeResult.out) * 10) / 10;
+            const probe = JSON.parse(probeResult.out) as {
+              format?: { duration?: string };
+              streams?: { width?: number; height?: number }[];
+            };
+            durationSec = Math.round(parseFloat(probe.format?.duration ?? "0") * 10) / 10;
+            const w = probe.streams?.[0]?.width ?? 0;
+            const h = probe.streams?.[0]?.height ?? 0;
+            if (w > 0 && h > 0) {
+              // 10% tolerance band counts near-square as square.
+              const orientation = w > h * 1.1 ? "landscape" : h > w * 1.1 ? "portrait" : "square";
+              videoOrientations[vid.path] = orientation;
+              console.log(`[Worker] Reel ${jobId} | Video ${vidFilename}: ${w}x${h} → ${orientation}`);
+            }
           } catch (probeErr) {
             console.warn(`[Worker] Reel ${jobId} | Video ${vidFilename}: ffprobe failed — ${probeErr instanceof Error ? probeErr.message : probeErr}`);
           }
 
-          // Extract frames every 2 seconds so Agent 1 can "watch" the whole video
-          const frameInterval = 2;
-          const frameCount = durationSec > 0 ? Math.max(1, Math.min(10, Math.ceil(durationSec / frameInterval))) : 1;
+          // Sample frames EVENLY ACROSS THE WHOLE video so Agent 1 actually "watches"
+          // all of it (and can pick trim windows from anywhere). The interval STRETCHES
+          // with duration so a long clip is still covered end-to-end within a bounded
+          // frame budget — a fixed 2s step + a 10-frame cap previously only sampled the
+          // first ~20s. Never denser than every 2s; never more than MAX_FRAMES total.
+          const MAX_FRAMES = Number(process.env.REEL_UNDERSTANDING_MAX_FRAMES ?? 50);
+          const frameInterval = durationSec > 0 ? Math.max(2, Math.ceil(durationSec / MAX_FRAMES)) : 2;
+          const frameCount = durationSec > 0 ? Math.max(1, Math.min(MAX_FRAMES, Math.ceil(durationSec / frameInterval))) : 1;
           const framePattern = pathMod.join(thumbDir, `${safeBase}_frame_%02d.jpg`);
 
           const ffmpegResult = await new Promise<{ code: number; err: string }>((resolve) => {
@@ -588,10 +625,49 @@ export async function runReelPipeline(
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       schoolGuidelines: ctx.schoolGuidelines,
       maxShortlist,
+      videoTranscripts,
     }, a1Costs);
     await appendCosts(jobId, a1Costs.toJSON());
 
     console.log(`[Worker] Reel ${jobId} | Agent1: theme="${understanding.theme}", ${understanding.curatedImages.length} curated (requested up to ${maxShortlist})`);
+
+    // ─── VALIDATE & CANONICALIZE CURATED PATHS ─────────────────────
+    // Agent 1 is shown the real upload paths, but the model sometimes echoes its
+    // own vision labels instead (e.g. "img11.jpg" — the names the Codex bridge
+    // assigns to attached images), or returns a video keyframe thumbnail as if it
+    // were a still upload. Those phantom paths match no real file, so the media
+    // download logs "Media not found" and the render 404s. Drop any curated item
+    // that maps to no REAL uploaded file, and canonicalize matched items to the
+    // real storage path + correct mediaType.
+    const realUploads = [
+      ...imageUploads.map((u) => ({ path: u.path, mediaType: "image" as const })),
+      ...videoUploads.map((u) => ({ path: u.path, mediaType: "video" as const })),
+    ];
+    const matchRealUpload = (curatedPath: string) => {
+      const fn = curatedPath.split("/").pop() ?? "";
+      return (
+        realUploads.find((u) => u.path === curatedPath) ??
+        realUploads.find((u) => u.path.endsWith(curatedPath) || curatedPath.endsWith(u.path)) ??
+        realUploads.find((u) => (u.path.split("/").pop() ?? "") === fn) ??
+        null
+      );
+    };
+    {
+      const validated: typeof understanding.curatedImages = [];
+      let droppedPhantom = 0;
+      for (const c of understanding.curatedImages) {
+        const real = matchRealUpload(c.path);
+        if (real) {
+          validated.push({ ...c, path: real.path, mediaType: real.mediaType });
+        } else {
+          droppedPhantom++;
+        }
+      }
+      understanding.curatedImages = validated;
+      if (droppedPhantom > 0) {
+        console.log(`[Worker] Reel ${jobId} | Dropped ${droppedPhantom} phantom curated item(s) matching no real upload (likely keyframe/vision labels). ${validated.length} remain.`);
+      }
+    }
 
     // PROGRAMMATIC VIDEO INJECTION: Agent 1 often drops videos from the curated
     // list because still frames look worse than photos. For reels, videos are
@@ -641,48 +717,121 @@ export async function runReelPipeline(
       console.log(`[Worker] Reel ${jobId} | Agent 1 included ${curatedVideoCount}/${videoUploads.length} videos in curated list`);
     }
 
-    // ─── CONTENT-DRIVEN DURATION CALCULATOR ────────────────────────
-    // Calculate natural duration from curated content, then cap it.
-    const TITLE_CLOSING_SEC = 8; // 4s title + 4s closing
-    const IMAGE_SCENE_SEC = 4;   // avg seconds per image scene
-    const VIDEO_TRIM_DEFAULT = 6; // default trim window for videos without suggestion
+    // ─── CONTENT-DRIVEN DURATION CALCULATOR (PER-SCENE) ────────────
+    // The requested duration is a TARGET, not just a ceiling. We measure how much
+    // the curated content can fill, scene by scene, and target min(requested,
+    // capacity) — filling toward the request when there's material, staying short
+    // (no padding) when there isn't.
+    //
+    // The cap is PER SCENE, not per source file. A single long video (e.g. a
+    // 10-min montage of many moments) is therefore not limited to one short clip:
+    // it can supply MANY scenes, each a different trim window. If the model didn't
+    // curate enough segments to reach the target, we deterministically EXPAND —
+    // adding evenly-spaced trim windows across each long video — so one long clip
+    // can fill the whole reel. (The transcript-guided Agent 1 below produces the
+    // best windows; this expansion is the guarantee we never starve the duration.)
+    const TITLE_CLOSING_SEC = 8;   // 4s title + 4s closing
+    const IMAGE_SCENE_SEC = 4;     // seconds per image scene
+    const MIN_VIDEO_SCENE_SEC = Number(process.env.REEL_MIN_VIDEO_SCENE_SEC ?? 4);
+    const MAX_VIDEO_SCENE_SEC = Number(process.env.REEL_MAX_VIDEO_SCENE_SEC ?? 8); // per SCENE
+    const MAX_SEGMENTS_PER_VIDEO = Number(process.env.REEL_MAX_SEGMENTS_PER_VIDEO ?? 24);
+    const VIDEO_TRIM_DEFAULT = 6;  // used when a clip's real length is unknown
+    const target = Math.min(durationCapSec, 300);
 
-    const curatedVideos = understanding.curatedImages.filter((c) => c.mediaType === "video");
-    const curatedImages = understanding.curatedImages.filter((c) => c.mediaType !== "video");
-
-    // Video contribution: use suggested trim or default
-    let videoDurationSec = 0;
-    for (const v of curatedVideos) {
+    // Length one curated video ENTRY occupies as a single scene.
+    const videoSceneLen = (v: { suggestedTrimStart?: number; suggestedTrimEnd?: number; durationSec?: number }): number => {
       if (v.suggestedTrimStart != null && v.suggestedTrimEnd != null) {
-        videoDurationSec += Math.min(v.suggestedTrimEnd - v.suggestedTrimStart, 8);
-      } else if (v.durationSec && v.durationSec <= 10) {
-        videoDurationSec += v.durationSec; // short clip, use whole thing
-      } else {
-        videoDurationSec += VIDEO_TRIM_DEFAULT;
+        return Math.max(MIN_VIDEO_SCENE_SEC, Math.min(v.suggestedTrimEnd - v.suggestedTrimStart, MAX_VIDEO_SCENE_SEC));
+      }
+      if (v.durationSec && v.durationSec > 0) {
+        return Math.max(MIN_VIDEO_SCENE_SEC, Math.min(v.durationSec, MAX_VIDEO_SCENE_SEC));
+      }
+      return VIDEO_TRIM_DEFAULT;
+    };
+    const computeCapacity = () => {
+      const vids = understanding.curatedImages.filter((c) => c.mediaType === "video");
+      const imgs = understanding.curatedImages.filter((c) => c.mediaType !== "video");
+      const v = vids.reduce((s, x) => s + videoSceneLen(x), 0);
+      const i = imgs.length * IMAGE_SCENE_SEC;
+      return { total: TITLE_CLOSING_SEC + v + i, v, i, nVid: vids.length, nImg: imgs.length };
+    };
+
+    let cap = computeCapacity();
+
+    // EXPANSION: under target + videos have unused footage → add spread-out segments.
+    if (cap.total < target) {
+      const videoPaths = [...new Set(
+        understanding.curatedImages.filter((c) => c.mediaType === "video").map((c) => c.path),
+      )];
+      // Precompute evenly-spaced candidate windows per video, skipping any that
+      // overlap a segment the model already curated.
+      const candidates = new Map<string, { start: number; end: number }[]>();
+      for (const vp of videoPaths) {
+        const realDur = videoMeta.get(vp)?.durationSec ?? 0;
+        if (realDur < MIN_VIDEO_SCENE_SEC * 2) continue; // too short to split further
+        const existing = understanding.curatedImages
+          .filter((c) => c.path === vp && c.mediaType === "video")
+          .map((c) => [c.suggestedTrimStart ?? 0, c.suggestedTrimEnd ?? MAX_VIDEO_SCENE_SEC] as const);
+        const n = Math.min(MAX_SEGMENTS_PER_VIDEO, Math.floor(realDur / MAX_VIDEO_SCENE_SEC));
+        const stride = realDur / Math.max(1, n);
+        const wins: { start: number; end: number }[] = [];
+        for (let k = 0; k < n; k++) {
+          const start = Math.round(k * stride);
+          const end = Math.min(Math.round(realDur), start + MAX_VIDEO_SCENE_SEC);
+          if (end - start < MIN_VIDEO_SCENE_SEC) continue;
+          if (existing.some(([s, e]) => start < e && end > s)) continue; // overlaps existing
+          wins.push({ start, end });
+        }
+        if (wins.length) candidates.set(vp, wins);
+      }
+      // Round-robin draw windows across videos until target reached or dry.
+      let added = 0;
+      let progress = true;
+      while (cap.total < target && progress) {
+        progress = false;
+        for (const vp of videoPaths) {
+          if (cap.total >= target) break;
+          const wins = candidates.get(vp);
+          if (!wins || wins.length === 0) continue;
+          const w = wins.shift()!;
+          understanding.curatedImages.push({
+            path: vp,
+            relevanceScore: 60,
+            description: `Additional segment (${w.start}-${w.end}s) from a long video — added to fill the requested ${durationCapSec}s`,
+            quality: "medium",
+            mediaType: "video",
+            durationSec: videoMeta.get(vp)?.durationSec,
+            suggestedTrimStart: w.start,
+            suggestedTrimEnd: w.end,
+          });
+          added++;
+          cap = computeCapacity();
+          progress = true;
+        }
+      }
+      if (added > 0) {
+        console.log(`[Worker] Reel ${jobId} | Expanded ${added} extra video segment(s) from long clip(s) to fill ${target}s.`);
       }
     }
 
-    // Image contribution
-    const imageDurationSec = curatedImages.length * IMAGE_SCENE_SEC;
+    const effectiveDuration = Math.min(target, cap.total);
+    console.log(`[Worker] Reel ${jobId} | Duration calc: ${cap.nVid} video scene(s) (${Math.round(cap.v)}s, ≤${MAX_VIDEO_SCENE_SEC}s each) + ${cap.nImg} image(s) (${Math.round(cap.i)}s) + ${TITLE_CLOSING_SEC}s chrome = ${Math.round(cap.total)}s capacity`);
+    console.log(`[Worker] Reel ${jobId} | Effective duration: ${effectiveDuration}s (requested: ${durationCapSec}s, content capacity: ${Math.round(cap.total)}s)`);
 
-    const naturalDuration = TITLE_CLOSING_SEC + videoDurationSec + imageDurationSec;
-    const effectiveDuration = Math.min(naturalDuration, durationCapSec, 300); // hard cap 5 min
-
-    console.log(`[Worker] Reel ${jobId} | Duration calc: ${curatedVideos.length} videos (${Math.round(videoDurationSec)}s) + ${curatedImages.length} images (${imageDurationSec}s) + ${TITLE_CLOSING_SEC}s chrome = ${Math.round(naturalDuration)}s natural`);
-    console.log(`[Worker] Reel ${jobId} | Effective duration: ${effectiveDuration}s (cap: ${durationCapSec}s, natural: ${Math.round(naturalDuration)}s)`);
-
-    // If natural duration exceeds cap, trim lower-relevance IMAGES (keep all videos)
-    if (naturalDuration > durationCapSec) {
-      const excessSec = naturalDuration - durationCapSec;
+    // If capacity exceeds the target, trim lowest-relevance IMAGES first (keep all
+    // video scenes — videos are the priority for reels).
+    if (cap.total > target) {
+      const excessSec = cap.total - target;
       const imagesToDrop = Math.ceil(excessSec / IMAGE_SCENE_SEC);
-      if (imagesToDrop > 0 && curatedImages.length > imagesToDrop) {
-        // Sort images by relevance ascending, drop lowest
-        const sortedImages = [...curatedImages].sort((a, b) => a.relevanceScore - b.relevanceScore);
+      const imgEntries = understanding.curatedImages.filter((c) => c.mediaType !== "video");
+      if (imagesToDrop > 0 && imgEntries.length > imagesToDrop) {
+        const sortedImages = [...imgEntries].sort((a, b) => a.relevanceScore - b.relevanceScore);
         const dropPaths = new Set(sortedImages.slice(0, imagesToDrop).map((c) => c.path));
         understanding.curatedImages = understanding.curatedImages.filter(
           (c) => c.mediaType === "video" || !dropPaths.has(c.path),
         );
-        console.log(`[Worker] Reel ${jobId} | Trimmed ${imagesToDrop} lowest-relevance images to fit ${durationCapSec}s cap. Now ${understanding.curatedImages.length} curated.`);
+        cap = computeCapacity();
+        console.log(`[Worker] Reel ${jobId} | Trimmed ${imagesToDrop} lowest-relevance image(s) to fit ${target}s. Capacity now ${Math.round(cap.total)}s.`);
       }
     }
 
@@ -693,6 +842,51 @@ export async function runReelPipeline(
 
     // --- Agent 2: Reel Script ---
     console.log(`[Worker] Reel ${jobId} | ── Agent 2: Reel Script ──`);
+
+    // Give the creative director the ACTUAL footage to look at: one image URL per
+    // unique curated path (a video uses one of its keyframes). Low detail; capped.
+    const curatedMediaForDirector: { path: string; url: string; mediaType: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }[] = [];
+    {
+      const seen = new Set<string>();
+      for (const c of understanding.curatedImages) {
+        if (seen.has(c.path)) continue;
+        seen.add(c.path);
+        const url = c.mediaType === "video"
+          ? videoThumbnails.find((v) => v.path === c.path && v.signedUrl)?.signedUrl
+          : ctx.images.find((i) => i.path === c.path)?.signedUrl;
+        if (url) {
+          curatedMediaForDirector.push({
+            path: c.path,
+            url,
+            mediaType: c.mediaType ?? "image",
+            description: c.description,
+            orientation: c.mediaType === "video" ? videoOrientations[c.path] : undefined,
+          });
+        }
+        if (curatedMediaForDirector.length >= 15) break;
+      }
+    }
+
+    // Extract brand anchor colours from the logo so palettes stay on-brand.
+    let brandColors: string[] = [];
+    let logoProfile: LogoProfile | undefined;
+    const logoForColors = ctx.brandAssets.find((a) => a.assetType === "logo");
+    if (logoForColors?.storagePath) {
+      try {
+        const { data } = await admin.storage.from("school-assets").download(logoForColors.storagePath);
+        if (data) {
+          const logoBuf = Buffer.from(await data.arrayBuffer());
+          brandColors = await extractBrandColors(logoBuf);
+          logoProfile = (await analyzeLogo(logoBuf)) ?? undefined;
+        }
+      } catch { /* best-effort */ }
+    }
+    if (brandColors.length) {
+      console.log(`[Worker] Reel ${jobId} | Brand colours from logo: ${brandColors.join(", ")}`);
+    }
+    if (logoProfile) {
+      console.log(`[Worker] Reel ${jobId} | Logo profile: tone=${logoProfile.tone}, transparency=${logoProfile.hasTransparency}, needs ${logoProfile.requiredBackground} background`);
+    }
 
     const a2Costs = new CostTracker();
     const reelCreative = await runReelCreativeAgent({
@@ -706,6 +900,9 @@ export async function runReelPipeline(
       requestedDurationSec: effectiveDuration,
       schoolName: ctx.schoolName,
       schoolGuidelines: ctx.schoolGuidelines,
+      curatedMedia: curatedMediaForDirector,
+      brandColors,
+      logoProfile,
     }, a2Costs);
     await appendCosts(jobId, a2Costs.toJSON());
 
@@ -714,8 +911,80 @@ export async function runReelPipeline(
       .update({ status: "music", agent2_output: reelCreative as unknown as Record<string, unknown> })
       .eq("id", jobId);
 
-    // Process each variation (typically 3, but run sequentially to avoid OOM)
-    for (const script of reelCreative.variations) {
+    // --- Download all curated media + brand assets ONCE (shared by every
+    //     variation). The media set is identical across variations, so fetching
+    //     it a single time up front avoids redundant re-downloads AND removes any
+    //     chance of a later variation rendering with missing media (the earlier
+    //     per-variation download could expire/fail mid-job). ---
+    const mediaFiles = new Map<string, Buffer>();
+    const mediaManifest = new Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>();
+    const allMediaPaths = new Set<string>();
+    for (const v of reelCreative.variations) {
+      for (const s of v.scenes) if (s.mediaPath) allMediaPaths.add(s.mediaPath);
+    }
+    for (const mediaPath of allMediaPaths) {
+      const match = ctx.images.find((img: UploadedImage) => img.path === mediaPath);
+      if (!match) {
+        console.warn(`[Worker] Reel ${jobId} | Media not found: ${mediaPath}`);
+        continue;
+      }
+      // Type from the actual MIME (authoritative), not Agent 2's guess.
+      const isVideo = match.mimeType?.startsWith("video/") ?? /\.(mp4|mov|webm|avi)$/i.test(mediaPath);
+      try {
+        // Admin (service-role) download — no signed-URL expiry on long jobs.
+        const { data: fileData, error: dlErr } = await admin.storage
+          .from("request-uploads")
+          .download(match.path);
+        if (dlErr || !fileData) {
+          console.warn(`[Worker] Reel ${jobId} | Failed to download: ${mediaPath} (${dlErr?.message ?? "no data"})`);
+          continue;
+        }
+        const buf = Buffer.from(await fileData.arrayBuffer());
+        const filename = mediaPath.split("/").pop() ?? "media.bin";
+        mediaFiles.set(filename, buf);
+        const curatedInfo = understanding.curatedImages.find((c) => c.path === mediaPath);
+        mediaManifest.set(filename, {
+          type: isVideo ? "video" : "image",
+          description: curatedInfo?.description ?? "uploaded media",
+          orientation: isVideo ? videoOrientations[mediaPath] : undefined,
+        });
+        console.log(`[Worker] Reel ${jobId} | Downloaded: ${filename} (${isVideo ? "video" : "image"}, ${(buf.length / 1024).toFixed(0)} KB)`);
+      } catch {
+        console.warn(`[Worker] Reel ${jobId} | Failed to download: ${mediaPath}`);
+      }
+    }
+
+    // Brand assets (logo + footer), once.
+    let hasLogo = false;
+    let hasFooter = false;
+    const logoAsset = ctx.brandAssets.find((a) => a.assetType === "logo");
+    if (logoAsset?.storagePath) {
+      try {
+        const { data } = await admin.storage.from("school-assets").download(logoAsset.storagePath);
+        if (data) { mediaFiles.set("logo.png", Buffer.from(await data.arrayBuffer())); hasLogo = true; }
+      } catch { /* skip */ }
+    }
+    const footerAsset = ctx.brandAssets.find((a) => a.assetType === "footer");
+    if (footerAsset?.storagePath) {
+      try {
+        const { data } = await admin.storage.from("school-assets").download(footerAsset.storagePath);
+        if (data) { mediaFiles.set("footer.png", Buffer.from(await data.arrayBuffer())); hasFooter = true; }
+      } catch { /* skip */ }
+    }
+    console.log(`[Worker] Reel ${jobId} | Downloaded ${mediaFiles.size} shared media files (logo=${hasLogo}, footer=${hasFooter}) for ${reelCreative.variations.length} variation(s)`);
+
+    // Tracks Jamendo track keys used across this job's variations, so two
+    // variations never get the same audio (popular tracks otherwise win every
+    // keyword set). Shared by reference into each renderVariation call.
+    const usedMusicKeys = new Set<string>();
+
+    // Render one variation in full isolation. Returns true on success.
+    // A single variation's failure (bad Codex output, render crash, OOM, or a
+    // transient upload error) must NOT abort its siblings or fail the whole job.
+    // Captures the shared mediaFiles/mediaManifest/hasLogo/hasFooter above.
+    const renderVariation = async (
+      script: (typeof reelCreative.variations)[number],
+    ): Promise<boolean> => {
       console.log(`[Worker] Reel ${jobId} | ── Variation ${script.variationIndex} ──`);
 
       // --- Music Discovery ---
@@ -724,7 +993,9 @@ export async function runReelPipeline(
         musicMood: script.musicMood,
         musicTempo: script.musicTempo,
         durationSec: script.durationSec,
+        excludeKeys: usedMusicKeys, // don't reuse a track another variation already used
       });
+      if (music.trackKey) usedMusicKeys.add(music.trackKey);
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Music: ${music.source}, ${(music.buffer.length / 1024).toFixed(0)} KB`);
 
       // Update status to generating for the first variation
@@ -735,84 +1006,33 @@ export async function runReelPipeline(
           .eq("id", jobId);
       }
 
-      // --- Download media from Supabase to local buffers ---
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Downloading ${script.scenes.length} media files`);
-      const mediaFiles = new Map<string, Buffer>();
-      const mediaManifest = new Map<string, { type: "image" | "video"; description: string }>();
-
-      for (const scene of script.scenes) {
-        const match = ctx.images.find((img: UploadedImage) => img.path === scene.mediaPath);
-        if (!match?.signedUrl) {
-          console.warn(`[Worker] Reel ${jobId} | Media not found: ${scene.mediaPath}`);
-          continue;
-        }
-
-        // Validate and correct mediaType based on actual file MIME type
-        const isActuallyVideo = match.mimeType?.startsWith("video/") ?? /\.(mp4|mov|webm|avi)$/i.test(scene.mediaPath);
-        const isActuallyImage = !isActuallyVideo;
-        let effectiveType = scene.mediaType;
-
-        if (isActuallyVideo && scene.mediaType !== "video") {
-          console.warn(`[Worker] Reel ${jobId} | TYPE FIX: ${scene.mediaPath.split("/").pop()} is a video (${match.mimeType}) but Agent 2 said "${scene.mediaType}" → correcting to "video"`);
-          effectiveType = "video";
-        } else if (isActuallyImage && scene.mediaType === "video") {
-          console.warn(`[Worker] Reel ${jobId} | TYPE FIX: ${scene.mediaPath.split("/").pop()} is an image (${match.mimeType}) but Agent 2 said "video" → correcting to "image"`);
-          effectiveType = "image";
-        }
-
-        try {
-          const res = await fetch(match.signedUrl);
-          if (!res.ok) continue;
-          const buf = Buffer.from(await res.arrayBuffer());
-          const filename = scene.mediaPath.split("/").pop() ?? `media-${scene.index}.bin`;
-          mediaFiles.set(filename, buf);
-          const curatedInfo = understanding.curatedImages.find((c) => c.path === scene.mediaPath);
-          mediaManifest.set(filename, {
-            type: effectiveType,
-            description: curatedInfo?.description ?? "uploaded media",
-          });
-          console.log(`[Worker] Reel ${jobId} | Downloaded: ${filename} (${effectiveType}, ${(buf.length / 1024).toFixed(0)} KB)`);
-        } catch {
-          console.warn(`[Worker] Reel ${jobId} | Failed to download: ${scene.mediaPath}`);
-        }
-      }
-
-      // Download logo if available
-      let hasLogo = false;
-      const logoAsset = ctx.brandAssets.find((a) => a.assetType === "logo");
-      if (logoAsset?.signedUrl) {
-        try {
-          const res = await fetch(logoAsset.signedUrl);
-          if (res.ok) {
-            mediaFiles.set("logo.png", Buffer.from(await res.arrayBuffer()));
-            hasLogo = true;
-          }
-        } catch { /* skip */ }
-      }
-
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — ${mediaFiles.size} media files downloaded, logo=${hasLogo}`);
+      // Media + brand assets are downloaded ONCE for the whole job (shared across
+      // all variations) — see the shared download block above the loop.
 
       // --- Composition Generator (Codex writes Reel.tsx) ---
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Generating Remotion composition`);
-      const composition = await generateComposition({
+      let composition = await generateComposition({
         script,
         mediaManifest,
         hasLogo,
+        logoProfile,
+        hasFooter,
         hasMusic: music.buffer.length > 0,
       });
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Composition: ${composition.reelTsx.length} chars Reel.tsx`);
 
-      // --- Remotion Render ---
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendering MP4`);
-      const renderResult = await renderReel({
-        reelTsx: composition.reelTsx,
-        dataTsx: composition.dataTsx,
-        mediaFiles,
-        musicFile: music.buffer.length > 0
-          ? { name: "track.mp3", buffer: music.buffer }
-          : undefined,
+      // --- Remotion Render (self-correcting: feed compile/render errors back to Codex) ---
+      const musicFile = music.buffer.length > 0
+        ? { name: "track.mp3", buffer: music.buffer }
+        : undefined;
+      const { renderResult, composition: workingComposition, usedFallback } = await renderWithRepair({
+        composition,
+        script,
+        assets: { mediaFiles, mediaManifest, musicFile, hasLogo, logoProfile, hasFooter, hasMusic: music.buffer.length > 0 },
+        label: `V${script.variationIndex}`,
       });
-      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendered in ${renderResult.renderTimeSec.toFixed(1)}s`);
+      composition = workingComposition;
+      console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendered in ${renderResult.renderTimeSec.toFixed(1)}s${usedFallback ? " (fallback slideshow)" : ""}`);
 
       // Track render + music costs
       const renderCosts = new CostTracker();
@@ -834,6 +1054,20 @@ export async function runReelPipeline(
       }
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Uploaded: ${storagePath} (${(mp4Buffer.length / 1024 / 1024).toFixed(1)} MB)`);
 
+      // --- Persist the trimmed music track so chat-edits can reuse the exact
+      //     soundtrack (the buffer is otherwise dropped with the temp workdir). ---
+      let musicPath: string | undefined;
+      if (music.buffer.length > 0 && music.source !== "fallback-silent") {
+        musicPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/music.mp3`;
+        const { error: musicUploadErr } = await admin.storage
+          .from("designs")
+          .upload(musicPath, music.buffer, { contentType: "audio/mpeg", upsert: true });
+        if (musicUploadErr) {
+          console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Music persist failed (non-fatal): ${musicUploadErr.message}`);
+          musicPath = undefined;
+        }
+      }
+
       // --- Create variation record ---
       await admin.from("ai_variations").insert({
         job_id: jobId,
@@ -842,7 +1076,10 @@ export async function runReelPipeline(
         creative_brief: {
           ...script,
           _compositionCode: composition.reelTsx,
+          _compositionDataCode: composition.dataTsx,
           _musicSource: music.source,
+          _musicPath: musicPath,
+          _musicAttribution: music.attribution ?? null,
         } as unknown as Record<string, unknown>,
         storage_paths: [storagePath],
         poster_type: "reel",
@@ -852,7 +1089,7 @@ export async function runReelPipeline(
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Evaluating`);
       let currentOutputPath = renderResult.outputPath;
       let currentCleanup = renderResult.cleanup;
-      let currentComposition = composition;
+      const currentComposition = composition;
 
       try {
         const evalCosts = new CostTracker();
@@ -860,79 +1097,206 @@ export async function runReelPipeline(
           mp4Path: currentOutputPath,
           schoolName: ctx.schoolName,
           reelDirection: script.direction,
+          artDirection: {
+            visualRegister: script.visualRegister,
+            colorPalette: script.colorPalette,
+            typography: script.typography,
+          },
           costTracker: evalCosts,
         });
         await appendCosts(jobId, evalCosts.toJSON());
         console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score: ${evaluation.score}/10`);
 
-        // Refine if score < 7 (max 1 refinement round)
-        if (evaluation.score < 7) {
-          console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score below 7, refining composition`);
+        // Refine loop: up to MAX_REFINE_ROUNDS, RE-EVALUATING after each round and
+        // stopping as soon as we clear PASS_SCORE (hard stop). We KEEP THE BEST-scoring
+        // render across all rounds — a refine can come back worse, and we never ship a
+        // regression. Only the best is left uploaded in storage + the variation record.
+        // Env-tunable: renders are slow (~5 min each), so each refine round adds
+        // real wall-clock. Lower MAX_REFINE_ROUNDS to 0 to disable refinement, or
+        // lower PASS_SCORE so "good enough" reels skip the extra renders.
+        const PASS_SCORE = Number(process.env.REEL_PASS_SCORE ?? 7);
+        const MAX_REFINE_ROUNDS = Number(process.env.REEL_MAX_REFINE_ROUNDS ?? 2);
+        let bestScore = evaluation.score;
+        let bestComposition = currentComposition;
+        let bestFeedback = evaluation.feedback;
+        let bestWeaknesses = evaluation.weaknesses;
+        let bestStoragePath = storagePath;
+        // Located findings + the rendered keyframes that show them — handed to the refiner
+        // so it acts on precise, visual defects (kept in memory; keyframes are NOT stored).
+        let bestFindings = evaluation.findings;
+        let bestKeyframes = evaluation.keyframes;
+
+        // Full audit trail of every evaluation + the exact instructions handed to the
+        // refiner each round. Persisted to creative_brief._evaluations below so you can
+        // inspect, in the DB, what the evaluator said and what the refiner was told.
+        // (Keyframes are excluded — too large for the row.)
+        const evaluations: Array<Record<string, unknown>> = [
+          {
+            round: 0,
+            score: evaluation.score,
+            dimensions: evaluation.dimensions,
+            strengths: evaluation.strengths,
+            weaknesses: evaluation.weaknesses,
+            findings: evaluation.findings,
+            feedback: evaluation.feedback,
+          },
+        ];
+
+        for (let round = 1; round <= MAX_REFINE_ROUNDS && bestScore < PASS_SCORE; round++) {
+          console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score ${bestScore}/10 < ${PASS_SCORE}, refine round ${round}/${MAX_REFINE_ROUNDS}`);
           try {
+            // The exact instructions handed to the refiner THIS round (captured for the audit trail).
+            const instructionsToRefiner = { feedback: bestFeedback, weaknesses: bestWeaknesses, findings: bestFindings };
+            // Refine from the BEST composition so far, using its located findings + keyframes.
             const refined = await refineReelComposition({
-              originalCode: currentComposition.reelTsx,
-              feedback: evaluation.feedback,
-              weaknesses: evaluation.weaknesses,
+              originalCode: bestComposition.reelTsx,
+              feedback: bestFeedback,
+              weaknesses: bestWeaknesses,
+              findings: bestFindings,
+              keyframes: bestKeyframes,
               script,
               mediaManifest,
               hasLogo,
+              logoProfile,
               hasMusic: music.buffer.length > 0,
             });
 
-            // Re-render with refined code
-            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Re-rendering with refined composition`);
-            const refinedRender = await renderReel({
-              reelTsx: refined.reelTsx,
-              dataTsx: refined.dataTsx,
-              mediaFiles,
-              musicFile: music.buffer.length > 0
-                ? { name: "track.mp3", buffer: music.buffer }
-                : undefined,
+            // Re-render (with self-repair so a compile slip doesn't abort the round).
+            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Re-rendering (round ${round})`);
+            const { renderResult: refinedRender, composition: refinedComposition } = await renderWithRepair({
+              composition: refined,
+              script,
+              assets: { mediaFiles, mediaManifest, musicFile, hasLogo, logoProfile, hasFooter, hasMusic: music.buffer.length > 0 },
+              label: `V${script.variationIndex} refine r${round}`,
             });
 
-            // Upload refined version, replacing the original
-            const refinedTimestamp = Date.now();
-            const refinedPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-refined-${refinedTimestamp}.mp4`;
-            const refinedBuffer = await import("node:fs").then((f) => f.promises.readFile(refinedRender.outputPath));
+            // Re-EVALUATE the refined render — this is what makes the loop real.
+            const refinedEvalCosts = new CostTracker();
+            const refinedEval = await evaluateReel({
+              mp4Path: refinedRender.outputPath,
+              schoolName: ctx.schoolName,
+              reelDirection: script.direction,
+              artDirection: {
+                visualRegister: script.visualRegister,
+                colorPalette: script.colorPalette,
+                typography: script.typography,
+              },
+              costTracker: refinedEvalCosts,
+            });
+            await appendCosts(jobId, refinedEvalCosts.toJSON());
+            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Round ${round} score: ${refinedEval.score}/10 (best so far ${bestScore}/10)`);
+            evaluations.push({
+              round,
+              instructionsToRefiner,
+              score: refinedEval.score,
+              dimensions: refinedEval.dimensions,
+              strengths: refinedEval.strengths,
+              weaknesses: refinedEval.weaknesses,
+              findings: refinedEval.findings,
+              feedback: refinedEval.feedback,
+              accepted: refinedEval.score > bestScore,
+            });
 
-            const { error: refinedUploadErr } = await admin.storage
-              .from("designs")
-              .upload(refinedPath, refinedBuffer, { contentType: "video/mp4", upsert: true });
-            if (refinedUploadErr) {
-              console.error(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined upload FAILED: ${refinedUploadErr.message}`);
+            if (refinedEval.score > bestScore) {
+              // New best — upload it and point the variation record at it.
+              const refinedPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-refined-r${round}-${Date.now()}.mp4`;
+              const refinedBuffer = await import("node:fs").then((f) => f.promises.readFile(refinedRender.outputPath));
+              const { error: refinedUploadErr } = await admin.storage
+                .from("designs")
+                .upload(refinedPath, refinedBuffer, { contentType: "video/mp4", upsert: true });
+              if (refinedUploadErr) {
+                console.error(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined upload FAILED (keeping best): ${refinedUploadErr.message}`);
+                await refinedRender.cleanup();
+              } else {
+                await admin.from("ai_variations")
+                  .update({
+                    storage_paths: [refinedPath],
+                    creative_brief: {
+                      ...script,
+                      _compositionCode: refinedComposition.reelTsx,
+                      _compositionDataCode: refinedComposition.dataTsx,
+                      _musicSource: music.source,
+                      _musicPath: musicPath,
+                      _musicAttribution: music.attribution ?? null,
+                      _refinement: { rounds: round, originalScore: evaluation.score, score: refinedEval.score, feedback: refinedEval.feedback },
+                    } as unknown as Record<string, unknown>,
+                  })
+                  .eq("job_id", jobId)
+                  .eq("variation_index", script.variationIndex);
+                console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Round ${round} improved ${bestScore}→${refinedEval.score}, re-uploaded: ${refinedPath}`);
+                // Swap the kept render to the new best; drop the previous one.
+                await currentCleanup();
+                currentOutputPath = refinedRender.outputPath;
+                currentCleanup = refinedRender.cleanup;
+                bestScore = refinedEval.score;
+                bestComposition = refinedComposition;
+                bestFeedback = refinedEval.feedback;
+                bestWeaknesses = refinedEval.weaknesses;
+                bestFindings = refinedEval.findings;
+                bestKeyframes = refinedEval.keyframes;
+                bestStoragePath = refinedPath;
+              }
+            } else {
+              // Not better — discard the refined render, keep the current best.
+              console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Round ${round} did not improve (${refinedEval.score} ≤ ${bestScore}), keeping best`);
+              await refinedRender.cleanup();
             }
-
-            // Update variation with refined path and code
-            await admin.from("ai_variations")
-              .update({
-                storage_paths: [refinedPath],
-                creative_brief: {
-                  ...script,
-                  _compositionCode: refined.reelTsx,
-                  _musicSource: music.source,
-                  _refinement: { originalScore: evaluation.score, feedback: evaluation.feedback },
-                } as unknown as Record<string, unknown>,
-              })
-              .eq("job_id", jobId)
-              .eq("variation_index", script.variationIndex);
-
-            console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refined and re-uploaded: ${refinedPath}`);
-
-            // Cleanup old render, switch to new
-            await currentCleanup();
-            currentOutputPath = refinedRender.outputPath;
-            currentCleanup = refinedRender.cleanup;
           } catch (refineErr) {
-            console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refinement failed (keeping original): ${refineErr instanceof Error ? refineErr.message : refineErr}`);
+            console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Refine round ${round} failed (keeping best): ${refineErr instanceof Error ? refineErr.message : refineErr}`);
+            break;
           }
         }
+
+        // Authoritative final write: persist the BEST composition + the FULL eval/refine
+        // audit trail (every round's scores, weaknesses, feedback, and the exact
+        // instructions handed to the refiner). Inspect it in Supabase →
+        // ai_variations.creative_brief._evaluations.
+        await admin.from("ai_variations")
+          .update({
+            storage_paths: [bestStoragePath],
+            creative_brief: {
+              ...script,
+              _compositionCode: bestComposition.reelTsx,
+              _compositionDataCode: bestComposition.dataTsx,
+              _musicSource: music.source,
+              _musicPath: musicPath,
+              _musicAttribution: music.attribution ?? null,
+              _refinement: { rounds: evaluations.length - 1, originalScore: evaluation.score, finalScore: bestScore },
+              _evaluations: evaluations,
+            } as unknown as Record<string, unknown>,
+          })
+          .eq("job_id", jobId)
+          .eq("variation_index", script.variationIndex);
       } catch (err) {
         console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Eval failed (non-fatal): ${err instanceof Error ? err.message : err}`);
       }
 
       // Cleanup render temp dir
       await currentCleanup();
+      return true;
+    };
+
+    // Run variations sequentially (avoids OOM) but isolated — one failure is
+    // logged and skipped so successful variations still complete the job.
+    let succeeded = 0;
+    for (const script of reelCreative.variations) {
+      try {
+        if (await renderVariation(script)) succeeded++;
+      } catch (err) {
+        console.error(
+          `[Worker] Reel ${jobId} | V${script.variationIndex} — FAILED (skipping): ${err instanceof Error ? err.message : err}`,
+        );
+      }
     }
+
+    if (succeeded === 0) {
+      throw new Error(
+        `All ${reelCreative.variations.length} reel variation(s) failed to render`,
+      );
+    }
+    console.log(
+      `[Worker] Reel ${jobId} | ${succeeded}/${reelCreative.variations.length} variation(s) succeeded`,
+    );
 
     // --- Finalize ---
     await admin

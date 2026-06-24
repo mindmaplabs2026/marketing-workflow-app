@@ -15,7 +15,25 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export type CodexTextImage = { dataUrl?: string; buffer?: Buffer };
+export type CodexTextImage = {
+  dataUrl?: string;
+  buffer?: Buffer;
+  /**
+   * Mirrors the OpenAI vision `detail` hint. Codex has no native equivalent, so
+   * we honor it by downscaling before handing files to `codex exec -i`:
+   * "low" → small/cheap (quick-scan passes), "high" → larger (deep analysis).
+   * Without aggressive downscaling, full-res photos × many images make
+   * `codex exec` time out (>300s) or crash (exit 1) under memory pressure.
+   */
+  detail?: "low" | "high";
+};
+
+/** Longest-edge px cap + JPEG quality per detail level. */
+function downscaleParams(detail?: "low" | "high"): { maxEdge: number; quality: number } {
+  return detail === "high"
+    ? { maxEdge: 1024, quality: 82 }
+    : { maxEdge: 512, quality: 68 };
+}
 
 export type CodexTextInput = {
   /** Full combined prompt (system + user text). */
@@ -24,6 +42,36 @@ export type CodexTextInput = {
   images?: CodexTextImage[];
   timeoutMs?: number;
 };
+
+/** Raised when Codex rejects a call because the account's usage limit is hit. */
+export class CodexUsageLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexUsageLimitError";
+  }
+}
+
+/**
+ * Codex stderr is noisy: a banner (workdir/model/...) then an echo of the
+ * prompt, with the REAL failure on the last line(s). Slicing the HEAD captures
+ * only the banner, so surface the `ERROR:` lines (deduped) or, failing that,
+ * the tail. Also flag the usage-limit case so callers can stop retrying.
+ */
+export function extractCodexError(stderr: string): { message: string; usageLimit: boolean } {
+  const errLines = [
+    ...new Set(
+      stderr
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => /^ERROR:/i.test(l)),
+    ),
+  ];
+  const usageLimit = /usage limit|hit your usage|purchase more credits/i.test(stderr);
+  const message = errLines.length
+    ? errLines.join(" ")
+    : stderr.slice(-400).trim() || "(no stderr)";
+  return { message, usageLimit };
+}
 
 function runCodexCapture(
   prompt: string,
@@ -59,8 +107,13 @@ function runCodexCapture(
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`codex exec (text) exited ${code}: ${stderr.slice(0, 400)}`));
+      if (code === 0) return resolve();
+      const { message, usageLimit } = extractCodexError(stderr);
+      if (usageLimit) {
+        reject(new CodexUsageLimitError(`Codex usage limit reached — ${message}`));
+      } else {
+        reject(new Error(`codex exec (text) exited ${code}: ${message}`));
+      }
     });
     child.stdin.write(prompt);
     child.stdin.end();
@@ -105,8 +158,20 @@ export async function codexText(input: CodexTextInput): Promise<string> {
         }
       }
       if (buf && buf.length > 0) {
-        const p = path.join(workDir, `img${i}.png`);
-        await fs.writeFile(p, buf);
+        const { maxEdge, quality } = downscaleParams(imgs[i].detail);
+        const p = path.join(workDir, `img${i}.jpg`);
+        try {
+          const sharp = (await import("sharp")).default;
+          await sharp(buf)
+            .rotate() // honor EXIF orientation
+            .resize({ width: maxEdge, height: maxEdge, fit: "inside", withoutEnlargement: true })
+            .jpeg({ quality })
+            .toFile(p);
+        } catch (resizeErr) {
+          // If sharp can't decode it (rare/odd format), fall back to raw bytes.
+          console.warn(`[codex-text] Image ${i} downscale failed, using original: ${resizeErr instanceof Error ? resizeErr.message : resizeErr}`);
+          await fs.writeFile(p, buf);
+        }
         refPaths.push(p);
       } else {
         const src = imgs[i].dataUrl ? imgs[i].dataUrl!.slice(0, 60) + "..." : "(buffer)";
@@ -125,6 +190,8 @@ export async function codexText(input: CodexTextInput): Promise<string> {
       } catch (err) {
         lastErr = err;
         console.warn(`[codex-text] attempt ${attempt}/2 failed: ${err instanceof Error ? err.message : err}`);
+        // Retrying a usage-limit rejection is pointless — it won't clear until reset.
+        if (err instanceof CodexUsageLimitError) break;
       }
     }
     throw lastErr instanceof Error ? lastErr : new Error("codexText failed");

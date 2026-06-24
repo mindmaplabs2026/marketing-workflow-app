@@ -256,9 +256,18 @@ export default async function RequestDetailPage({
   // Each status change fans out 1 notification per recipient. Collapse those
   // into a single timeline entry keyed by (type, actor, created_at).
   const activityRaw = activityRes.data ?? [];
+  // AI generation is an internal MindMap tool — school-side users (school_admin,
+  // teacher) must not see any trace that a design was AI-generated. Only internal
+  // members (super_admin / designer) see AI activity entries.
+  const isInternalMember = role === "super_admin" || role === "designer";
+  const HIDDEN_FROM_EXTERNAL: NotificationType[] = [
+    "ai_generation_completed",
+    "ai_generation_failed",
+  ];
   const seen = new Set<string>();
   const activity: ActivityRow[] = [];
   for (const row of activityRaw) {
+    if (!isInternalMember && HIDDEN_FROM_EXTERNAL.includes(row.type)) continue;
     const key = `${row.type}|${row.actor_id ?? ""}|${row.created_at}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -412,10 +421,14 @@ export default async function RequestDetailPage({
   // Designer can trigger AI generation when they've picked up the request.
   // Show the button if no AI job is currently running (queued/understanding/creative/generating).
   const aiJobRunning = aiJob && !["completed", "failed"].includes(aiJob.status);
+  // Super admin can trigger AI at ANY status — this mirrors the server action
+  // (triggerLocalAiGeneration), which only restricts *designers* to
+  // in_design/changes_requested. A designer must have picked the request up first.
   const canTriggerAi =
-    (isAssignedDesigner || isSuperAdmin) &&
     !aiJobRunning &&
-    (req.status === "in_design" || req.status === "changes_requested");
+    (isSuperAdmin ||
+      (isAssignedDesigner &&
+        (req.status === "in_design" || req.status === "changes_requested")));
   const canArchive =
     (isCreator || isReviewer) &&
     req.status !== "archived" &&

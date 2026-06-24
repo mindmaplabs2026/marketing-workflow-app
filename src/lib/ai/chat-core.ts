@@ -232,23 +232,10 @@ async function runReelChatEdit(
   const assistantText = chatResponse.choices[0]?.message?.content ?? "Re-rendering your reel with the requested changes...";
   console.log(`[reel-chat] Confirmation: "${assistantText}"`);
 
-  // Step 2: Ask Codex to modify the composition code
-  const { refineReelComposition } = await import("./agent-composition");
-  const refined = await refineReelComposition({
-    originalCode: compositionCode,
-    feedback: `User requested edit: "${message}"`,
-    weaknesses: [message],
-    script: brief as unknown as import("./agent-creative-reel").ReelScript,
-    mediaManifest: new Map(), // not needed for code refinement
-    hasLogo: compositionCode.includes("logo"),
-    hasMusic: compositionCode.includes("music") || compositionCode.includes("track.mp3"),
-  });
+  const round = variation.chat_rounds_used + 1;
+  const reelScript = brief as unknown as import("./agent-creative-reel").ReelScript;
 
-  console.log(`[reel-chat] Got refined composition: ${refined.reelTsx.length} chars`);
-
-  // Step 3: Re-download media files for re-render
-  // Get all media paths from the original variation's scenes
-  const scenes = (brief.scenes as Array<{ mediaPath: string }>) ?? [];
+  // Step 2: Reload the exact asset set used at generation (media + brand + music).
   const { data: reqData } = await admin
     .from("requests")
     .select("school_id")
@@ -256,55 +243,164 @@ async function runReelChatEdit(
     .single();
   const schoolId = reqData?.school_id ?? "unknown";
 
+  // Download a storage object with retries. Storage downloads use fetch/undici,
+  // which throws `terminated` if a (large video) stream is interrupted mid-transfer
+  // — that single blip was crashing the whole chat-edit. Retry transient failures;
+  // return null on permanent failure so one bad asset doesn't kill the edit.
+  const downloadWithRetry = async (bucket: string, storagePath: string, attempts = 3): Promise<Buffer | null> => {
+    for (let i = 1; i <= attempts; i++) {
+      try {
+        const { data, error } = await admin.storage.from(bucket).download(storagePath);
+        if (error) throw error;
+        if (data) return Buffer.from(await data.arrayBuffer());
+        return null; // not found — no point retrying
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`[reel-chat] download ${bucket}/${storagePath} attempt ${i}/${attempts} failed: ${msg}`);
+        if (i === attempts) return null;
+        await new Promise((r) => setTimeout(r, 500 * i));
+      }
+    }
+    return null;
+  };
+
+  // Media — from the variation's scenes (originals still live in request-uploads).
+  // Dedup by path: the per-scene model reuses one long video across several scenes,
+  // so downloading per-scene re-fetched the same large file many times (slow, and
+  // more chances for a `terminated` stream error). Fetch each unique file ONCE.
+  const scenes = (brief.scenes as Array<{ mediaPath: string; mediaType?: "image" | "video" }>) ?? [];
   const mediaFiles = new Map<string, Buffer>();
+  const mediaManifest = new Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>();
+  const seenPaths = new Set<string>();
   for (const scene of scenes) {
-    if (!scene.mediaPath) continue;
+    if (!scene.mediaPath || seenPaths.has(scene.mediaPath)) continue;
+    seenPaths.add(scene.mediaPath);
     const filename = scene.mediaPath.split("/").pop() ?? "media.bin";
-    // Download from Supabase
-    const { data: fileData } = await admin.storage.from("request-uploads").download(scene.mediaPath);
-    if (fileData) {
-      mediaFiles.set(filename, Buffer.from(await fileData.arrayBuffer()));
+    const buf = await downloadWithRetry("request-uploads", scene.mediaPath);
+    if (buf) {
+      mediaFiles.set(filename, buf);
+      mediaManifest.set(filename, {
+        type: scene.mediaType === "video" ? "video" : "image",
+        description: "uploaded media",
+      });
+    } else {
+      console.warn(`[reel-chat] media ${filename} could not be downloaded — proceeding without it`);
     }
   }
 
-  // Re-download logo if present
+  // Brand assets — logo AND footer (the old code dropped footer → render 404s).
   const { data: brandAssets } = await admin
     .from("school_brand_assets")
     .select("asset_type, storage_path")
     .eq("school_id", schoolId)
-    .eq("asset_type", "logo")
-    .limit(1);
-  if (brandAssets?.[0]) {
-    const { data: logoData } = await admin.storage.from("school-assets").download(brandAssets[0].storage_path);
-    if (logoData) {
-      mediaFiles.set("logo.png", Buffer.from(await logoData.arrayBuffer()));
+    .in("asset_type", ["logo", "footer"]);
+  let hasLogo = false;
+  let hasFooter = false;
+  let logoProfile: import("./logo-analysis").LogoProfile | undefined;
+  for (const a of brandAssets ?? []) {
+    const buf = await downloadWithRetry("school-assets", a.storage_path);
+    if (!buf) continue;
+    if (a.asset_type === "logo") {
+      mediaFiles.set("logo.png", buf);
+      hasLogo = true;
+      const { analyzeLogo } = await import("./logo-analysis");
+      logoProfile = (await analyzeLogo(buf)) ?? undefined;
+    } else if (a.asset_type === "footer") { mediaFiles.set("footer.png", buf); hasFooter = true; }
+  }
+
+  // Music — reuse the persisted track so the soundtrack stays identical across
+  // edits. Only re-discover when the user explicitly asks to change it.
+  let musicPath = brief._musicPath as string | undefined;
+  let musicFile: { name: string; buffer: Buffer } | undefined;
+  let musicSource = brief._musicSource as string | undefined;
+  const musicRe = /\b(music|song|track|audio|sound|tune|soundtrack|bgm|background\s*music)\b/i;
+  const mentionsMusic = musicRe.test(message);
+  // Scope intent to the CLAUSE that mentions music, so "remove the slide numbering"
+  // (a different clause) can't be read as "remove music", and "reduce BGM" reads as
+  // ducking (keep) rather than removal. Split on list markers / punctuation.
+  const clauses = message.split(/[\n.,;]|\d+\s*[.)]/).map((c) => c.trim()).filter(Boolean);
+  const musicClauses = clauses.filter((c) => musicRe.test(c));
+  const inMusicClause = (re: RegExp) => musicClauses.some((c) => re.test(c));
+  const wantsMusicDuck = inMusicClause(/\b(reduce|lower|quiet|softer|soften|duck|less|turn\s*down|tone\s*down)\b/i);
+  const wantsMusicOff = mentionsMusic && !wantsMusicDuck &&
+    inMusicClause(/\b(remove|mute|silent|without|no\s+music|turn\s*off|delete|get\s*rid|drop)\b/i);
+  const wantsMusicChange = mentionsMusic && !wantsMusicOff && !wantsMusicDuck &&
+    inMusicClause(/\b(change|different|new|replace|swap|another|other)\b/i);
+
+  // Tracks whether we ended up with REAL (audible) music, vs none/silence.
+  let hasRealMusic = false;
+  if (wantsMusicOff) {
+    console.log(`[reel-chat] Edit requests music removed`);
+    musicPath = undefined;
+    musicSource = "none";
+  } else if (wantsMusicChange) {
+    console.log(`[reel-chat] Edit requests a music change — re-discovering`);
+    const { findAndTrimMusic } = await import("./agent-music");
+    const music = await findAndTrimMusic({
+      musicMood: reelScript.musicMood ?? [],
+      musicTempo: reelScript.musicTempo ?? "moderate",
+      durationSec: reelScript.durationSec ?? 30,
+    });
+    if (music.buffer.length > 0 && music.source !== "fallback-silent") {
+      musicFile = { name: "track.mp3", buffer: music.buffer };
+      musicSource = music.source;
+      hasRealMusic = true;
+      musicPath = `${schoolId}/${requestId}/ai/${variation.variation_index}/music-r${round}.mp3`;
+      await admin.storage.from("designs").upload(musicPath, music.buffer, { contentType: "audio/mpeg", upsert: true });
+    }
+  } else if (musicPath) {
+    const buf = await downloadWithRetry("designs", musicPath);
+    if (buf) {
+      musicFile = { name: "track.mp3", buffer: buf };
+      hasRealMusic = true;
+    } else {
+      console.warn(`[reel-chat] Persisted track ${musicPath} is no longer available — falling back to silence`);
     }
   }
 
-  // Re-download music if the original had it
-  const musicSource = brief._musicSource as string | undefined;
-  let musicBuffer: Buffer | undefined;
-  // Music was embedded in the original render — we need to find it
-  // For now, we'll generate a silent track if we can't recover the original
-  // The music agent's output isn't persisted separately, so chat edits
-  // that don't change the music will get a silent fallback
-  // TODO: persist trimmed music in storage for chat edit re-use
+  // UNIVERSAL 404 SAFETY NET: the composition may still reference
+  // staticFile("music/track.mp3") whatever happened above — music turned off,
+  // re-discovery failed, OR a persisted track that has since gone missing. Always
+  // supply SOMETHING so the render can never 404 on the music file.
+  if (!musicFile) {
+    const { generateSilentTrack } = await import("./agent-music");
+    musicFile = { name: "track.mp3", buffer: await generateSilentTrack(reelScript.durationSec ?? 30) };
+    console.log(`[reel-chat] No track available — using silent track (render-safe)`);
+  }
+  // Tell the editor music exists only when it's REAL — so when we're only supplying
+  // a silent safety-net track it removes the Audio element rather than playing silence.
+  const hasMusic = hasRealMusic;
 
-  console.log(`[reel-chat] Re-rendering with ${mediaFiles.size} media files`);
-
-  // Step 4: Re-render
-  const { renderReel } = await import("@/lib/remotion/render");
-  const renderResult = await renderReel({
-    reelTsx: refined.reelTsx,
-    dataTsx: refined.dataTsx,
-    mediaFiles,
-    musicFile: musicBuffer ? { name: "track.mp3", buffer: musicBuffer } : undefined,
+  // Step 3: Apply the user's edit to the composition code.
+  const { editComposition, renderWithRepair } = await import("./agent-composition");
+  const edited = await editComposition({
+    originalCode: compositionCode,
+    instruction: message,
+    script: reelScript,
+    mediaManifest,
+    hasLogo,
+    logoProfile,
+    hasFooter,
+    hasMusic,
   });
+  console.log(`[reel-chat] Got edited composition: ${edited.reelTsx.length} chars`);
 
-  console.log(`[reel-chat] Rendered in ${renderResult.renderTimeSec.toFixed(1)}s`);
+  // Step 4: Re-render with the same self-correcting repair loop as generation.
+  // Carry the persisted data.ts through if the edit didn't emit its own (most
+  // compositions are single-file, so this is the common case).
+  console.log(`[reel-chat] Re-rendering with ${mediaFiles.size} media files, music=${hasMusic}`);
+  const { renderResult, composition: working, usedFallback } = await renderWithRepair({
+    composition: {
+      reelTsx: edited.reelTsx,
+      dataTsx: edited.dataTsx ?? (brief._compositionDataCode as string | undefined),
+    },
+    script: reelScript,
+    assets: { mediaFiles, mediaManifest, musicFile, hasLogo, hasFooter, hasMusic },
+    label: `edit r${round}`,
+  });
+  console.log(`[reel-chat] Rendered in ${renderResult.renderTimeSec.toFixed(1)}s${usedFallback ? " (fallback slideshow)" : ""}`);
 
-  // Step 5: Upload the new reel
-  const round = variation.chat_rounds_used + 1;
+  // Step 5: Upload the new reel and update the variation.
   const timestamp = Date.now();
   const storagePath = `${schoolId}/${requestId}/ai/${variation.variation_index}/edits/${round}-reel-${timestamp}.mp4`;
   const fsPromises = await import("node:fs").then((m) => m.promises);
@@ -315,16 +411,14 @@ async function runReelChatEdit(
     upsert: false,
   });
 
-  // Store assistant message
   await admin.from("ai_chat_messages").insert({
     variation_id: variation.id,
     role: "assistant",
     content: assistantText,
     image_paths: [storagePath],
-    metadata: { model: "codex-composition", round },
+    metadata: { model: "codex-composition", round, usedFallback },
   });
 
-  // Update variation — replace the reel path
   await admin
     .from("ai_variations")
     .update({
@@ -332,7 +426,10 @@ async function runReelChatEdit(
       storage_paths: [storagePath],
       creative_brief: {
         ...brief,
-        _compositionCode: refined.reelTsx,
+        _compositionCode: working.reelTsx,
+        _compositionDataCode: working.dataTsx,
+        _musicPath: musicPath,
+        _musicSource: musicSource,
       } as unknown as Record<string, unknown>,
     })
     .eq("id", variation.id);
