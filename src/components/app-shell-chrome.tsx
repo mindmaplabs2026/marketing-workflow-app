@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { AppSidebar } from "./app-sidebar";
 import { MobileBottomNav } from "./mobile-bottom-nav";
+import { NavigationFeedback } from "./navigation-feedback";
 import { UserMenu } from "./user-menu";
 import type { UserRole } from "@/lib/supabase/types";
 
@@ -23,6 +24,7 @@ export function AppShellChrome({
 }) {
   return (
     <div className="flex min-h-full flex-col bg-zinc-50 dark:bg-zinc-950">
+      <NavigationFeedback />
       <header
         className="sticky top-0 z-50 flex h-14 items-center justify-between gap-3 border-b border-zinc-200 bg-white/80 px-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/80 sm:px-4"
         style={{ paddingTop: "env(safe-area-inset-top)", height: "calc(3.5rem + env(safe-area-inset-top))" }}
