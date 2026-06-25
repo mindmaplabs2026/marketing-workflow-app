@@ -567,6 +567,12 @@ export async function requestDesignChanges(formData: FormData) {
   }
 
   const supabase = await createClient();
+
+  await supabase
+    .from("ai_variations")
+    .update({ is_accepted: false })
+    .eq("request_id", id);
+
   const { error } = await supabase
     .from("requests")
     .update({
