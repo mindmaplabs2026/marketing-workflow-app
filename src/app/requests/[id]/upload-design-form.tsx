@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { attachDesign } from "../actions";
 import { toast } from "sonner";
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 150 * 1024 * 1024;
 
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
@@ -38,7 +38,7 @@ export function UploadDesignForm({
   const stageFiles = useCallback((files: File[]) => {
     const tooBig = files.find((f) => f.size > MAX_FILE_BYTES);
     if (tooBig) {
-      setError(`${tooBig.name} is over 50 MB — pick something smaller.`);
+      setError(`${tooBig.name} is over 150 MB — pick something smaller.`);
       return;
     }
     setError(null);
@@ -139,7 +139,7 @@ export function UploadDesignForm({
             {dragging ? "Drop files here" : "Drag & drop your design here"}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            or click to browse · Images, videos, PDFs up to 50 MB
+            or click to browse · Images, videos, PDFs up to 150 MB
           </p>
         </div>
       ) : (
