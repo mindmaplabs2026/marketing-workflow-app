@@ -168,7 +168,7 @@ export function LoginForm({
   return (
     <main className="min-h-dvh overflow-y-auto bg-[radial-gradient(circle_at_10%_10%,rgba(124,58,237,0.08),transparent_28%),linear-gradient(135deg,#ffffff_0%,#fbf8ff_44%,#eef6ff_100%)] text-zinc-950 lg:h-dvh lg:overflow-hidden">
       <div className="mx-auto grid min-h-dvh w-full max-w-[1440px] grid-cols-1 lg:h-dvh lg:grid-cols-[minmax(430px,0.88fr)_minmax(0,1.12fr)]">
-        <section className="relative min-h-dvh overflow-hidden px-4 pb-4 pt-4 lg:hidden">
+        <section className="relative min-h-dvh overflow-hidden px-4 pb-3 pt-8 lg:hidden">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_82%_8%,rgba(124,58,237,0.18),transparent_28%),radial-gradient(circle_at_58%_42%,rgba(59,130,246,0.13),transparent_34%),linear-gradient(160deg,#ffffff_0%,#f7f2ff_45%,#eef7ff_100%)]" />
           <div className="absolute -right-28 top-48 h-72 w-[28rem] rotate-[-16deg] rounded-full border border-white/70" />
           <div className="absolute -left-28 top-72 h-64 w-[34rem] rotate-[-10deg] rounded-full border border-white/60" />
@@ -207,10 +207,10 @@ export function LoginForm({
               </span>
             </div>
 
-            <div className="relative h-[220px]">
+            <div className="relative h-[196px]">
               <svg
                 aria-hidden="true"
-                className="absolute inset-x-0 top-0 h-[180px] w-full overflow-visible"
+                className="absolute inset-x-0 top-0 z-0 h-[180px] w-full overflow-visible"
                 viewBox="0 0 430 180"
                 fill="none"
               >
@@ -249,6 +249,20 @@ export function LoginForm({
                   opacity="1"
                 />
               </svg>
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-0 z-30 h-[180px] w-full overflow-visible"
+                viewBox="0 0 430 180"
+                fill="none"
+              >
+                <circle cx="22" cy="121" r="7" fill="#8b5cf6" stroke="white" strokeWidth="3" />
+                <circle cx="90" cy="121" r="7" fill="#8b5cf6" stroke="white" strokeWidth="3" />
+                <circle cx="125" cy="61" r="7" fill="#60a5fa" stroke="white" strokeWidth="3" />
+                <circle cx="193" cy="61" r="7" fill="#60a5fa" stroke="white" strokeWidth="3" />
+                <circle cx="228" cy="97" r="7" fill="#f59e0b" stroke="white" strokeWidth="3" />
+                <circle cx="296" cy="97" r="7" fill="#f59e0b" stroke="white" strokeWidth="3" />
+                <circle cx="323" cy="143" r="7" fill="#10b981" stroke="white" strokeWidth="3" />
+              </svg>
 
               {workflowVisuals.map((visual, index) => {
                 const step = workflowSteps[index] ?? fallbackWorkflowSteps[index];
@@ -263,7 +277,7 @@ export function LoginForm({
                 return (
                   <div
                     key={step.title}
-                    className={`absolute flex h-[82px] w-[68px] flex-col items-center justify-center rounded-2xl border border-white/80 bg-white/82 shadow-[0_14px_30px_rgba(91,33,182,0.13),inset_0_1px_0_rgba(255,255,255,0.92)] backdrop-blur-xl ${positions[index]}`}
+                    className={`absolute z-10 flex h-[82px] w-[68px] flex-col items-center justify-center rounded-2xl border border-white/80 bg-white/82 shadow-[0_14px_30px_rgba(91,33,182,0.13),inset_0_1px_0_rgba(255,255,255,0.92)] backdrop-blur-xl ${positions[index]}`}
                   >
                     <span
                       className={`mb-1.5 flex h-8 w-8 items-center justify-center rounded-full ${tone.icon}`}
@@ -278,35 +292,27 @@ export function LoginForm({
                   </div>
                 );
               })}
-
-              <span className="absolute left-[5%] top-[121px] z-30 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white bg-violet-500" />
-              <span className="absolute left-[calc(5%_+_68px)] top-[121px] z-30 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white bg-violet-500" />
-              <span className="absolute left-[29%] top-[61px] z-30 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white bg-blue-400" />
-              <span className="absolute left-[calc(29%_+_68px)] top-[61px] z-30 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white bg-blue-400" />
-              <span className="absolute left-[53%] top-[97px] z-30 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white bg-amber-500" />
-              <span className="absolute left-[calc(53%_+_68px)] top-[97px] z-30 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white bg-amber-500" />
-              <span className="absolute left-[75%] top-[143px] z-30 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white bg-emerald-500" />
             </div>
 
-            <div className="relative mt-9 rounded-[24px] border border-white/80 bg-white/92 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.14),inset_0_1px_0_rgba(255,255,255,0.94)] backdrop-blur-xl">
-              <h1 className="text-[32px] font-semibold leading-tight text-zinc-950">
+            <div className="relative mt-5 rounded-[22px] border border-white/80 bg-white/92 p-4 shadow-[0_22px_62px_rgba(15,23,42,0.13),inset_0_1px_0_rgba(255,255,255,0.94)] backdrop-blur-xl">
+              <h1 className="text-[28px] font-semibold leading-tight text-zinc-950">
                 Welcome back
               </h1>
-              <p className="mt-3 text-sm leading-6 text-zinc-600">
+              <p className="mt-2 text-[13px] leading-5 text-zinc-600">
                 Manage school marketing requests, approvals, and published
                 posts in one place.
               </p>
 
-              <form action={formAction} className="mt-5 space-y-3">
+              <form action={formAction} className="mt-4 space-y-2.5">
                 <div>
                   <label
                     htmlFor="email-mobile"
-                    className="block text-sm font-semibold text-zinc-900"
+                    className="block text-[13px] font-semibold text-zinc-900"
                   >
                     Email address
                   </label>
-                  <div className="mt-2 flex items-center rounded-xl border border-zinc-300/90 bg-white px-3 shadow-[0_8px_22px_rgba(15,23,42,0.05)] transition focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/15">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+                  <div className="mt-1.5 flex items-center rounded-xl border border-zinc-300/90 bg-white px-3 shadow-[0_8px_22px_rgba(15,23,42,0.05)] transition focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/15">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                       <Mail className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <input
@@ -315,7 +321,7 @@ export function LoginForm({
                       type="email"
                       autoComplete="email"
                       required
-                      className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400"
+                      className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm text-zinc-950 outline-none placeholder:text-zinc-400"
                       placeholder="you@example.com"
                       defaultValue={
                         typeof window === "undefined"
@@ -329,12 +335,12 @@ export function LoginForm({
                 <div>
                   <label
                     htmlFor="password-mobile"
-                    className="block text-sm font-semibold text-zinc-900"
+                    className="block text-[13px] font-semibold text-zinc-900"
                   >
                     Password
                   </label>
-                  <div className="mt-2 flex items-center rounded-xl border border-zinc-300/90 bg-white px-3 shadow-[0_8px_22px_rgba(15,23,42,0.05)] transition focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/15">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+                  <div className="mt-1.5 flex items-center rounded-xl border border-zinc-300/90 bg-white px-3 shadow-[0_8px_22px_rgba(15,23,42,0.05)] transition focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/15">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                       <Lock className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <input
@@ -343,7 +349,7 @@ export function LoginForm({
                       type={showPassword ? "text" : "password"}
                       autoComplete="current-password"
                       required
-                      className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-zinc-950 outline-none placeholder:text-zinc-400"
+                      className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm text-zinc-950 outline-none placeholder:text-zinc-400"
                       placeholder="Enter your password"
                     />
                     <button
@@ -362,7 +368,7 @@ export function LoginForm({
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-zinc-600">
+                  <label className="flex cursor-pointer items-center gap-2 text-[13px] font-medium text-zinc-600">
                     <input
                       name="remember"
                       type="checkbox"
@@ -373,7 +379,7 @@ export function LoginForm({
                   </label>
                   <a
                     href="mailto:support@mindmaplabs.com?subject=Mindmap%20Workflow%20password%20help"
-                    className="text-sm font-semibold text-violet-600 transition hover:text-violet-700"
+                    className="text-[13px] font-semibold text-violet-600 transition hover:text-violet-700"
                   >
                     Forgot password?
                   </a>
@@ -388,25 +394,25 @@ export function LoginForm({
                 <button
                   type="submit"
                   disabled={pending}
-                  className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-violet-700 to-blue-600 px-5 py-3 text-base font-semibold text-white shadow-[0_18px_36px_rgba(79,70,229,0.28)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_44px_rgba(79,70,229,0.32)] disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-65 motion-reduce:transform-none"
+                  className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-violet-700 to-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_16px_32px_rgba(79,70,229,0.26)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_40px_rgba(79,70,229,0.30)] disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-65 motion-reduce:transform-none"
                 >
                   <span>{pending ? "Signing in..." : "Sign in"}</span>
-                  <ArrowRight className="h-5 w-5 transition group-hover:translate-x-0.5" />
+                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
                   {pending && (
                     <span className="absolute inset-y-0 left-0 w-1/2 animate-[navigation-progress_950ms_ease-in-out_infinite] rounded-r-full bg-white/20" />
                   )}
                 </button>
               </form>
 
-              <div className="mt-4 flex items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/75 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-violet-700 shadow-sm">
-                  <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+              <div className="mt-3 flex items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/75 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-violet-700 shadow-sm">
+                  <ShieldCheck className="h-4 w-4" aria-hidden="true" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-violet-700">
+                  <p className="text-[13px] font-semibold text-violet-700">
                     Need help?
                   </p>
-                  <p className="mt-0.5 text-xs leading-4 text-zinc-600">
+                  <p className="mt-0.5 text-[11px] leading-4 text-zinc-600">
                     Contact your administrator if you are having trouble signing in.
                   </p>
                 </div>
