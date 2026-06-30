@@ -209,12 +209,12 @@ export function FloatingBottomNavigation({ role }: { role: UserRole }) {
                     setActiveTab(item.id);
                     router.push(routeById[item.id]);
                   }}
-                  className="group relative flex h-full w-full items-center justify-center rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                  className="group relative flex h-full w-full items-center justify-center rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                 >
                   {active ? (
                     <motion.div
                       layoutId="floating-nav-active-circle"
-                      className="absolute -top-[29px] z-10 flex h-[58px] w-[58px] items-center justify-center rounded-full bg-[#2563EB] text-white"
+                      className="absolute -top-[29px] z-10 flex h-[58px] w-[58px] items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-blue-600 text-white shadow-[0_16px_30px_rgba(124,58,237,0.26)]"
                       transition={springTransition}
                     >
                       <motion.div
