@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { triggerAiGeneration, triggerLocalAiGeneration, triggerLocalReelGeneration } from "../actions";
+import {
+  triggerAiGeneration,
+  triggerLocalAiGeneration,
+  triggerLocalAiGenerationV2,
+  triggerLocalReelGeneration,
+} from "../actions";
 
 const REEL_LENGTH_OPTIONS = [
   { value: 60, label: "Short (up to 1 min)" },
@@ -12,18 +17,20 @@ const REEL_LENGTH_OPTIONS = [
 ];
 
 export function AiGenerateButton({ requestId }: { requestId: string }) {
-  const [busy, setBusy] = useState<null | "cloud" | "local" | "reel">(null);
+  const [busy, setBusy] = useState<null | "cloud" | "local" | "local-v2" | "reel">(null);
   const [error, setError] = useState<string | null>(null);
   const [outputType, setOutputType] = useState<"single" | "carousel" | "reel">("single");
   const [reelMaxDuration, setReelMaxDuration] = useState(120);
 
-  async function run(engine: "cloud" | "local" | "reel") {
+  async function run(engine: "cloud" | "local" | "local-v2" | "reel") {
     setBusy(engine);
     setError(null);
 
     let result: { error?: string };
     if (engine === "reel") {
       result = await triggerLocalReelGeneration(requestId, reelMaxDuration);
+    } else if (engine === "local-v2") {
+      result = await triggerLocalAiGenerationV2(requestId, outputType as "single" | "carousel");
     } else if (engine === "local") {
       result = await triggerLocalAiGeneration(requestId, outputType as "single" | "carousel");
     } else {
@@ -117,6 +124,15 @@ export function AiGenerateButton({ requestId }: { requestId: string }) {
               className="rounded-md border border-violet-600 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
             >
               {busy === "local" ? "Starting..." : "Generate with Local AI"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => run("local-v2")}
+              disabled={busy !== null}
+              className="rounded-md border border-emerald-600 bg-white px-4 py-2 text-sm font-medium text-emerald-700 shadow-sm hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-500 dark:bg-zinc-900 dark:text-emerald-300 dark:hover:bg-emerald-950"
+            >
+              {busy === "local-v2" ? "Starting..." : "Generate with Local AI v2"}
             </button>
           </>
         )}

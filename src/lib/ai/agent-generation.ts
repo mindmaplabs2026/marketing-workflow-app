@@ -2,6 +2,11 @@ import "server-only";
 import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
 import { getModelEngineKind } from "../config/engine";
+import {
+  compositeOriginalPhotos,
+  defaultPhotoFrames,
+  type NormalizedPhotoFrame,
+} from "./poster-compositor";
 import type { CostTracker } from "./cost-tracker";
 import type { VariationBrief } from "./agent-creative";
 import type { UnderstandingOutput } from "./agent-understanding";
@@ -580,6 +585,227 @@ Rules:
     prompts,
     referenceImageCount: referenceImages.length,
     refinementRounds,
+  };
+}
+
+/**
+ * V2 local poster generation: generate a designed background/slot layer, then
+ * composite original uploaded photos afterward. This keeps people/faces out of
+ * the generative edit pass, so the model cannot redraw them.
+ */
+export async function runGenerationAgentV2(
+  input: Agent3Input,
+  costTracker?: CostTracker,
+): Promise<GenerationResult> {
+  const openai = await getModelClient();
+  const { brief } = input;
+  const pages =
+    brief.layout.type === "carousel" ? brief.layout.pages : [brief.layout.pages[0]];
+
+  const imageUrls: string[] = [];
+  const prompts: string[] = [];
+  const imageSize = "1024x1536" as const;
+  const referenceImages: { buffer: Buffer; name: string; role: string }[] = [];
+  let imageIndex = 1;
+
+  const selectedAssets = (brief as Record<string, unknown>).selectedAssets as {
+    logo?: string | null;
+    header?: string | null;
+    footer?: string | null;
+    uniform?: string | null;
+    infrastructure?: string | null;
+    samples?: string[];
+  } | undefined;
+
+  async function addAsset(storagePath: string | null | undefined, role: string, assetType: string): Promise<void> {
+    if (!storagePath) return;
+    const asset = input.brandAssets.find((a) =>
+      a.storagePath === storagePath ||
+      a.storagePath.endsWith(storagePath) ||
+      storagePath.endsWith(a.storagePath.split("/").pop() ?? ""),
+    );
+    if (!asset?.signedUrl) return;
+    const buf = await downloadImage(asset.signedUrl);
+    if (!buf) return;
+    const label = asset.label ?? asset.storagePath.split("/").pop() ?? assetType;
+    referenceImages.push({
+      buffer: buf,
+      name: `image${imageIndex}_${assetType}.png`,
+      role: `IMAGE ${imageIndex}: ${role} — "${label}"`,
+    });
+    imageIndex++;
+  }
+
+  let hasLogo = false;
+  let hasHeader = false;
+  let hasFooter = false;
+
+  if (selectedAssets) {
+    if (selectedAssets.logo) {
+      await addAsset(selectedAssets.logo, "SCHOOL LOGO — Reproduce this logo accurately", "logo");
+      hasLogo = referenceImages.some((r) => r.role.includes("LOGO"));
+    }
+    if (selectedAssets.header) {
+      await addAsset(selectedAssets.header, "SCHOOL BRANDING SOURCE — Extract school name and affiliations", "header");
+      hasHeader = referenceImages.some((r) => r.role.includes("BRANDING SOURCE"));
+    }
+    if (selectedAssets.footer) {
+      await addAsset(selectedAssets.footer, "SCHOOL CONTACT SOURCE — Extract contact details", "footer");
+      hasFooter = referenceImages.some((r) => r.role.includes("CONTACT SOURCE"));
+    }
+    await addAsset(selectedAssets.uniform, "UNIFORM REFERENCE — Use only if no uploaded photos are provided", "uniform");
+    await addAsset(selectedAssets.infrastructure, "INFRASTRUCTURE REFERENCE — Use as setting/background guide", "infrastructure");
+    for (const samplePath of selectedAssets.samples ?? []) {
+      await addAsset(samplePath, "STYLE REFERENCE POSTER — Match design quality and layout", "sample");
+    }
+  } else {
+    for (const assetType of ["logo", "header", "footer"] as const) {
+      const asset = input.brandAssets.find((a) => a.assetType === assetType);
+      if (asset) {
+        await addAsset(asset.storagePath, `SCHOOL ${assetType.toUpperCase()}`, assetType);
+        if (assetType === "logo") hasLogo = true;
+        if (assetType === "header") hasHeader = true;
+        if (assetType === "footer") hasFooter = true;
+      }
+    }
+  }
+
+  const photoBuffers = new Map<string, Buffer>();
+  for (const img of input.curatedImages) {
+    const buf = await downloadImage(img.signedUrl);
+    if (buf) photoBuffers.set(img.path, buf);
+  }
+
+  function pathsForPage(page: typeof pages[number] | undefined): string[] {
+    const raw = brief.layout.type === "carousel" && page?.selectedImages?.length
+      ? page.selectedImages.map((img) => img.path).filter(Boolean)
+      : (brief.selectedImages ?? []).map((img) => img.path).filter(Boolean);
+    const wanted = raw.length > 0 ? raw : input.curatedImages.map((img) => img.path);
+    const matched: string[] = [];
+    for (const candidate of wanted) {
+      const filename = candidate.split("/").pop() ?? "";
+      const match = input.curatedImages.find((img) =>
+        img.path === candidate ||
+        img.path.endsWith(candidate) ||
+        candidate.endsWith(img.path.split("/").pop() ?? "") ||
+        img.path.split("/").pop() === filename,
+      );
+      if (match && photoBuffers.has(match.path)) matched.push(match.path);
+    }
+    return [...new Set(matched)];
+  }
+
+  function framePrompt(frames: NormalizedPhotoFrame[]): string {
+    if (frames.length === 0) {
+      return "No uploaded photo frames are needed. Do not generate random people unless the poster concept requires it.";
+    }
+    return `PHOTO FRAME PLAN — create designed EMPTY photo slots at these normalized positions. Do NOT put people, faces, students, or generated photos inside these slots; leave them as clean blank placeholders because the worker will paste the real uploaded photos afterward:
+${frames.map((f, i) => `- Slot ${i + 1} for "${f.path.split("/").pop()}": x=${f.x.toFixed(2)}, y=${f.y.toFixed(2)}, w=${f.width.toFixed(2)}, h=${f.height.toFixed(2)}, rounded corners`).join("\n")}`;
+  }
+
+  async function generateBackground(pageIndex: number): Promise<{ background: Buffer; prompt: string; frames: NormalizedPhotoFrame[]; pagePaths: string[] }> {
+    const page = pages[pageIndex];
+    const pagePaths = pathsForPage(page);
+    const frames = defaultPhotoFrames(pagePaths, pageIndex, pages.length);
+    const basePrompt = buildImagePrompt(input, page, pageIndex, pages.length, (brief as Record<string, unknown>).creativeVision as string ?? "", {
+      hasLogo,
+      hasHeader,
+      hasFooter,
+    });
+
+    const v2Prompt = `${basePrompt}
+
+V2 BACKGROUND-ONLY GENERATION RULES:
+- Generate the poster design, branding, typography, decorations, and empty photo frames only.
+- Do NOT render, redraw, enhance, stylize, or reinterpret uploaded photos.
+- Do NOT generate faces or people inside uploaded-photo slots.
+- The original uploaded photos will be composited after this generation step by code.
+- Make the empty frames visually intentional: white/light placeholders, subtle shadows, clean borders, and enough contrast for real photos pasted later.
+
+${framePrompt(frames)}`;
+
+    const enhanced = await withRateLimitRetry(() =>
+      openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert image prompt engineer. Expand the brief for a BACKGROUND-ONLY poster generation pass. Preserve the empty photo-frame plan exactly. Output ONLY the enhanced prompt.",
+          },
+          { role: "user", content: v2Prompt },
+        ],
+        max_tokens: 1500,
+      }),
+    );
+    costTracker?.addLLMCall(`agent3_v2_background_enhancer_p${pageIndex + 1}`, "gpt-4o-mini", enhanced.usage);
+
+    const prompt = enhanced.choices[0]?.message?.content ?? v2Prompt;
+    let base64Result = "";
+
+    if (referenceImages.length > 0) {
+      const files = await Promise.all(
+        referenceImages.map((img) => toFile(img.buffer, img.name, { type: "image/png" })),
+      );
+      const response = await openai.images.edit({
+        model: "gpt-image-2",
+        image: files,
+        prompt,
+        n: 1,
+        size: imageSize,
+        quality: "high",
+      });
+      const item = response.data?.[0];
+      base64Result = item?.b64_json ?? "";
+      if (!base64Result && item?.url) {
+        base64Result = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
+      }
+    } else {
+      const response = await openai.images.generate({
+        model: "gpt-image-2",
+        prompt,
+        n: 1,
+        size: imageSize,
+        quality: "high",
+      });
+      const item = response.data?.[0];
+      base64Result = item?.b64_json ?? "";
+      if (!base64Result && item?.url) {
+        base64Result = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
+      }
+    }
+
+    if (!base64Result) throw new Error(`Agent 3 v2: no background returned for page ${pageIndex + 1}`);
+    costTracker?.addImageCall(`agent3_v2_background_p${pageIndex + 1}`, 1, imageSize);
+    return { background: Buffer.from(base64Result, "base64"), prompt, frames, pagePaths };
+  }
+
+  for (let i = 0; i < pages.length; i++) {
+    console.log(`[Agent3:v2] Page ${i + 1}/${pages.length}: generating background, then compositing original photos`);
+    const result = await generateBackground(i);
+    const photos = result.pagePaths
+      .map((path) => {
+        const buffer = photoBuffers.get(path);
+        return buffer ? { path, buffer } : null;
+      })
+      .filter((p): p is { path: string; buffer: Buffer } => !!p);
+
+    const finalBuffer = await compositeOriginalPhotos({
+      background: result.background,
+      photos,
+      frames: result.frames,
+    });
+
+    imageUrls.push(`data:image/png;base64,${finalBuffer.toString("base64")}`);
+    prompts.push(result.prompt);
+    console.log(`[Agent3:v2] Page ${i + 1}/${pages.length}: composited ${photos.length} original photo(s)`);
+  }
+
+  return {
+    imageUrls,
+    model: "gpt-image-2-v2-background-plus-sharp-composite",
+    prompts,
+    referenceImageCount: referenceImages.length + photoBuffers.size,
+    refinementRounds: 0,
   };
 }
 

@@ -2,7 +2,7 @@ import { inngest } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runUnderstandingAgent } from "@/lib/ai/agent-understanding";
 import { runCreativeAgent } from "@/lib/ai/agent-creative";
-import { runGenerationAgent, evaluatePoster, refineAndRegenerate, QUALITY_THRESHOLD } from "@/lib/ai/agent-generation";
+import { runGenerationAgent, runGenerationAgentV2, evaluatePoster, refineAndRegenerate, QUALITY_THRESHOLD } from "@/lib/ai/agent-generation";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import { CostTracker } from "@/lib/ai/cost-tracker";
 import type { CostTracking } from "@/lib/ai/cost-tracker";
@@ -142,7 +142,14 @@ export async function markFailed(jobId: string, message: string) {
   try { await dispatchPendingPushes(); } catch { /* best effort */ }
 }
 
-export async function generateOneVariation(jobId: string, requestId: string, posterType: "single" | "carousel", variationIndex: number, costTracker?: CostTracker) {
+export async function generateOneVariation(
+  jobId: string,
+  requestId: string,
+  posterType: "single" | "carousel",
+  variationIndex: number,
+  costTracker?: CostTracker,
+  opts?: { preserveUploadedPhotos?: boolean },
+) {
   const admin = createAdminClient();
 
   const { data: job } = await admin
@@ -316,7 +323,7 @@ export async function generateOneVariation(jobId: string, requestId: string, pos
     console.log(`[Pipeline] Job ${jobId} | Photos: ${curatedImages.length} assigned, ${unassignedPool.length} unused from ${allCuratedPaths.length} curated`);
   }
 
-  const result = await runGenerationAgent({
+  const generationInput = {
     brief,
     understanding,
     brandAssets: ctx.brandAssets.map((a) => ({
@@ -327,7 +334,11 @@ export async function generateOneVariation(jobId: string, requestId: string, pos
     })),
     curatedImages,
     schoolName: ctx.schoolName,
-  }, costTracker);
+  };
+
+  const result = opts?.preserveUploadedPhotos
+    ? await runGenerationAgentV2(generationInput, costTracker)
+    : await runGenerationAgent(generationInput, costTracker);
 
   const storagePaths: string[] = [];
   for (let i = 0; i < result.imageUrls.length; i++) {
