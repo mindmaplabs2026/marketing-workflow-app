@@ -100,8 +100,8 @@ export function defaultPhotoFrames(
 
   const isCover = totalPages > 1 && pageIndex === 0;
   const isClosing = totalPages > 1 && pageIndex === totalPages - 1;
-  const top = isCover ? 0.38 : isClosing ? 0.18 : 0.24;
-  const height = isCover ? 0.38 : isClosing ? 0.34 : 0.52;
+  const top = isCover ? 0.48 : isClosing ? 0.18 : 0.24;
+  const height = isCover ? 0.3 : isClosing ? 0.32 : 0.52;
 
   const specs =
     count === 1

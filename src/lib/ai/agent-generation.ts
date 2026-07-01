@@ -699,30 +699,39 @@ export async function runGenerationAgentV2(
     if (frames.length === 0) {
       return "No uploaded photo frames are needed. Do not generate random people unless the poster concept requires it.";
     }
-    return `PHOTO FRAME PLAN — create designed EMPTY photo slots at these normalized positions. Do NOT put people, faces, students, or generated photos inside these slots; leave them as clean blank placeholders because the worker will paste the real uploaded photos afterward:
-${frames.map((f, i) => `- Slot ${i + 1} for "${f.path.split("/").pop()}": x=${f.x.toFixed(2)}, y=${f.y.toFixed(2)}, w=${f.width.toFixed(2)}, h=${f.height.toFixed(2)}, rounded corners`).join("\n")}`;
+    return `PHOTO FRAME PLAN — these rectangles are RESERVED. The worker will paste the real photos here after generation. Do not put text, logos, decorations, faces, people, or generated photos inside these rectangles:
+${frames.map((f, i) => {
+  const x = Math.round(f.x * 1024);
+  const y = Math.round(f.y * 1536);
+  const w = Math.round(f.width * 1024);
+  const h = Math.round(f.height * 1536);
+  return `- Reserved slot ${i + 1} for "${f.path.split("/").pop()}": normalized x=${f.x.toFixed(2)}, y=${f.y.toFixed(2)}, w=${f.width.toFixed(2)}, h=${f.height.toFixed(2)}; pixels x=${x}, y=${y}, w=${w}, h=${h}. Leave this area blank/quiet with only a simple light placeholder frame.`;
+}).join("\n")}`;
   }
 
   async function generateBackground(pageIndex: number): Promise<{ background: Buffer; prompt: string; frames: NormalizedPhotoFrame[]; pagePaths: string[] }> {
     const page = pages[pageIndex];
     const pagePaths = pathsForPage(page);
     const frames = defaultPhotoFrames(pagePaths, pageIndex, pages.length);
+    const slots = framePrompt(frames);
     const basePrompt = buildImagePrompt(input, page, pageIndex, pages.length, (brief as Record<string, unknown>).creativeVision as string ?? "", {
       hasLogo,
       hasHeader,
       hasFooter,
-    });
+    }, { photoSlotInstructions: slots });
 
     const v2Prompt = `${basePrompt}
 
 V2 BACKGROUND-ONLY GENERATION RULES:
-- Generate the poster design, branding, typography, decorations, and empty photo frames only.
+- Generate the poster design, branding, typography, decorations, and empty reserved photo-frame areas only.
 - Do NOT render, redraw, enhance, stylize, or reinterpret uploaded photos.
 - Do NOT generate faces or people inside uploaded-photo slots.
+- Do NOT place text under, across, or behind uploaded-photo slots.
+- Keep all headline/subheadline/body text fully outside the reserved rectangles.
 - The original uploaded photos will be composited after this generation step by code.
 - Make the empty frames visually intentional: white/light placeholders, subtle shadows, clean borders, and enough contrast for real photos pasted later.
 
-${framePrompt(frames)}`;
+${slots}`;
 
     const enhanced = await withRateLimitRetry(() =>
       openai.chat.completions.create({
@@ -816,6 +825,7 @@ function buildImagePrompt(
   totalPages: number,
   topLevelCreativeVision: string,
   assets: { hasLogo: boolean; hasHeader: boolean; hasFooter: boolean } = { hasLogo: true, hasHeader: true, hasFooter: true },
+  opts?: { photoSlotInstructions?: string },
 ): string {
   const { hasLogo, hasHeader, hasFooter } = assets;
   const { brief, understanding, schoolName, curatedImages } = input;
@@ -854,7 +864,13 @@ ${page?.textOverlays?.length ? `Text on this page:\n${page.textOverlays.map((t) 
 
   // Build uploaded photo details with descriptions from Agent 1
   let photoSection = "";
-  if (hasUploadedPhotos) {
+  if (opts?.photoSlotInstructions) {
+    photoSection = `## Uploaded Photo Slots
+Uploaded photos are NOT provided to the image model and must NOT be generated.
+The worker will paste the real original photos after this background is generated.
+Design around these exact reserved slots and keep all text/branding outside them.
+${opts.photoSlotInstructions}`;
+  } else if (hasUploadedPhotos) {
     const photoDetails = pageSelectedImages
       .map((img) => {
         const curated = understanding.curatedImages.find((c) => c.path === img.path);
