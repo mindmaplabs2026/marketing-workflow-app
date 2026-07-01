@@ -545,6 +545,7 @@ export type Database = {
           status: AiJobStatus;
           poster_type: "single" | "carousel" | "reel";
           engine: "cloud" | "local";
+          pipeline_version: "v1" | "v2";
           inngest_run_id: string | null;
           agent1_output: Record<string, unknown> | null;
           agent2_output: Record<string, unknown> | null;
@@ -563,6 +564,7 @@ export type Database = {
           status?: AiJobStatus;
           poster_type?: "single" | "carousel" | "reel";
           engine?: "cloud" | "local";
+          pipeline_version?: "v1" | "v2";
           inngest_run_id?: string | null;
           agent1_output?: Record<string, unknown> | null;
           agent2_output?: Record<string, unknown> | null;
@@ -581,6 +583,7 @@ export type Database = {
           status?: AiJobStatus;
           poster_type?: "single" | "carousel" | "reel";
           engine?: "cloud" | "local";
+          pipeline_version?: "v1" | "v2";
           inngest_run_id?: string | null;
           agent1_output?: Record<string, unknown> | null;
           agent2_output?: Record<string, unknown> | null;

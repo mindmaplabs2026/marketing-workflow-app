@@ -15,7 +15,7 @@
  *   --import tsx            runs the TypeScript directly
  */
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runPosterPipeline, runReelPipeline } from "@/lib/ai/pipeline-core";
+import { runPosterPipeline, runPosterPipelineV2, runReelPipeline } from "@/lib/ai/pipeline-core";
 import { runChatEdit } from "@/lib/ai/chat-core";
 import { getModelEngineKind } from "@/lib/config/engine";
 import { checkFfmpegAvailable } from "@/lib/ai/agent-music";
@@ -86,7 +86,7 @@ let busy = false;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type ClaimedJob = { id: string; request_id: string; poster_type?: string | null };
+type ClaimedJob = { id: string; request_id: string; poster_type?: string | null; pipeline_version?: string | null };
 
 /**
  * Atomically claim the oldest queued job by flipping queued → understanding.
@@ -125,6 +125,7 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
     request_id: row.request_id as string,
     // poster_type column is added in Phase 3; until then default to "single".
     poster_type: (row.poster_type as string | undefined) ?? "single",
+    pipeline_version: (row.pipeline_version as string | undefined) ?? "v1",
   };
 }
 
@@ -209,6 +210,9 @@ async function loop() {
       busy = true;
       if (job.poster_type === "reel") {
         await runReelPipeline(job.id, job.request_id);
+      } else if (job.pipeline_version === "v2") {
+        const posterType = job.poster_type === "carousel" ? "carousel" : "single";
+        await runPosterPipelineV2(job.id, job.request_id, posterType);
       } else {
         const posterType = job.poster_type === "carousel" ? "carousel" : "single";
         await runPosterPipeline(job.id, job.request_id, posterType);

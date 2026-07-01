@@ -13,6 +13,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getModelClient } from "./model-client";
 import { getModelEngineKind } from "../config/engine";
 import { toFile } from "openai";
+import { compositeOriginalPhotos, defaultPhotoFrames } from "./poster-compositor";
 
 export type ChatEditInput = {
   variationId: string;
@@ -29,7 +30,7 @@ export async function runChatEdit({ variationId, message, pageIndex }: ChatEditI
 
   const { data: variation } = await admin
     .from("ai_variations")
-    .select("id, request_id, variation_index, storage_paths, poster_type, chat_rounds_used, creative_brief")
+    .select("id, job_id, request_id, variation_index, storage_paths, poster_type, chat_rounds_used, creative_brief")
     .eq("id", variationId)
     .single();
 
@@ -96,6 +97,13 @@ export async function runChatEdit({ variationId, message, pageIndex }: ChatEditI
   console.log(`[chat-edit] Step 2 done: Downloaded ${(currentImageBuffer.length / 1024).toFixed(0)} KB`);
   const file = await toFile(currentImageBuffer, "current-poster.png", { type: "image/png" });
 
+  const { data: jobRow } = await admin
+    .from("ai_generation_jobs")
+    .select("pipeline_version")
+    .eq("id", variation.job_id)
+    .single();
+  const preserveUploadedPhotos = jobRow?.pipeline_version === "v2";
+
   // Step 3: targeted image edit
   // Codex: use dedicated chat-edit agent (vision + image gen in one session).
   // OpenAI: use images.edit API (true inpainting).
@@ -141,10 +149,61 @@ Keep EVERYTHING else exactly the same — same layout, same images, same colors,
     .single();
   const schoolId = fullReq?.school_id ?? "unknown";
 
+  let imageBuffer: Buffer<ArrayBufferLike> = Buffer.from(base64Result, "base64");
+  if (preserveUploadedPhotos) {
+    const creativeBrief = variation.creative_brief as {
+      selectedImages?: { path?: string }[];
+      layout?: { pages?: { selectedImages?: { path?: string }[] }[] };
+    };
+    const selected = variation.poster_type === "carousel"
+      ? (creativeBrief.layout?.pages?.[editIndex]?.selectedImages ?? [])
+      : (creativeBrief.selectedImages ?? []);
+    const wanted = selected.map((img) => img.path).filter((p): p is string => !!p);
+
+    const { data: uploads } = await admin
+      .from("request_uploads")
+      .select("storage_path, mime_type")
+      .eq("request_id", requestId);
+
+    const matchedUploads = (uploads ?? []).filter((u) => {
+      if (u.mime_type && !u.mime_type.startsWith("image/")) return false;
+      if (wanted.length === 0) return true;
+      const fn = u.storage_path.split("/").pop() ?? "";
+      return wanted.some((p) =>
+        p === u.storage_path ||
+        u.storage_path.endsWith(p) ||
+        p.endsWith(fn) ||
+        p.split("/").pop() === fn,
+      );
+    });
+
+    const photos = [];
+    for (const u of matchedUploads) {
+      const { data: signed } = await admin.storage
+        .from("request-uploads")
+        .createSignedUrl(u.storage_path, 3600);
+      if (!signed?.signedUrl) continue;
+      const res = await fetch(signed.signedUrl);
+      if (!res.ok) continue;
+      photos.push({ path: u.storage_path, buffer: Buffer.from(await res.arrayBuffer()) });
+    }
+
+    const frames = defaultPhotoFrames(
+      photos.map((p) => p.path),
+      editIndex,
+      variation.storage_paths.length,
+    );
+    imageBuffer = await compositeOriginalPhotos({
+      background: imageBuffer,
+      photos,
+      frames,
+    });
+    console.log(`[chat-edit] V2 photo-preserve: re-composited ${photos.length} original photo(s) after edit`);
+  }
+
   const round = variation.chat_rounds_used + 1;
   const timestamp = Date.now();
   const storagePath = `${schoolId}/${requestId}/ai/${variation.variation_index}/edits/${round}-${timestamp}.png`;
-  const imageBuffer = Buffer.from(base64Result, "base64");
   console.log(`[chat-edit] Step 4: Uploading edited image → ${storagePath}`);
   await admin.storage.from("designs").upload(storagePath, imageBuffer, {
     contentType: "image/png",

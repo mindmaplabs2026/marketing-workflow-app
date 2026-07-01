@@ -263,9 +263,10 @@ export async function runPosterPipeline(
   jobId: string,
   requestId: string,
   posterType: PosterType,
+  opts?: { preserveUploadedPhotos?: boolean },
 ): Promise<void> {
   const admin = createAdminClient();
-  console.log(`[Worker] Job ${jobId} | START (request ${requestId}, ${posterType})`);
+  console.log(`[Worker] Job ${jobId} | START (request ${requestId}, ${posterType}${opts?.preserveUploadedPhotos ? ", v2 photo-preserve" : ""})`);
 
   try {
     // --- Agent 1: Understanding ---
@@ -346,7 +347,9 @@ export async function runPosterPipeline(
     // --- Agent 3: Generation (variation 0, same as the live pipeline) ---
     console.log(`[Worker] Job ${jobId} | ── Agent 3: Image Generation ──`);
     const a3Costs = new CostTracker();
-    await generateOneVariation(jobId, requestId, posterType, 0, a3Costs);
+    await generateOneVariation(jobId, requestId, posterType, 0, a3Costs, {
+      preserveUploadedPhotos: opts?.preserveUploadedPhotos,
+    });
     await appendCosts(jobId, a3Costs.toJSON());
 
     console.log(`[Worker] Job ${jobId} | ── Agent 4: Evaluation ──`);
@@ -365,6 +368,10 @@ export async function runPosterPipeline(
       }
       if (decision.finalize) {
         console.log(`[Worker] Job ${jobId} | Evaluation passed — finalizing`);
+        break;
+      }
+      if (opts?.preserveUploadedPhotos) {
+        console.log(`[Worker] Job ${jobId} | V2 photo-preserve: skipping generative refinement to keep original photos intact`);
         break;
       }
       console.log(`[Worker] Job ${jobId} | ── Agent 5: Refinement (round ${round + 1}) ──`);
@@ -391,6 +398,16 @@ export async function runPosterPipeline(
     console.error(`[Worker] Job ${jobId} | FAILED: ${message}`);
     await markFailed(jobId, message);
   }
+}
+
+export async function runPosterPipelineV2(
+  jobId: string,
+  requestId: string,
+  posterType: PosterType,
+): Promise<void> {
+  return runPosterPipeline(jobId, requestId, posterType, {
+    preserveUploadedPhotos: true,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────
