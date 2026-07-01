@@ -8,7 +8,7 @@ import { toast } from "sonner";
 
 type School = { id: string; name: string };
 
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_FILE_BYTES = 150 * 1024 * 1024;
 
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
@@ -27,7 +27,7 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
     const list = Array.from(e.target.files ?? []);
     const tooBig = list.find((f) => f.size > MAX_FILE_BYTES);
     if (tooBig) {
-      setError(`${tooBig.name} is over 25 MB — pick something smaller.`);
+      setError(`${tooBig.name} is over 150 MB — pick something smaller.`);
       return;
     }
     setError(null);

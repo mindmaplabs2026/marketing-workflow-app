@@ -7,7 +7,7 @@ import { attachBrandAsset } from "../actions";
 import { toast } from "sonner";
 import type { BrandAssetType } from "@/lib/supabase/types";
 
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_FILE_BYTES = 150 * 1024 * 1024;
 
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
@@ -31,7 +31,7 @@ export function BrandAssetUpload({
 
     const tooBig = files.find((f) => f.size > MAX_FILE_BYTES);
     if (tooBig) {
-      setError(`${tooBig.name} is over 25 MB.`);
+      setError(`${tooBig.name} is over 150 MB.`);
       e.target.value = "";
       return;
     }
