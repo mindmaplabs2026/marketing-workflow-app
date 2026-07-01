@@ -3,9 +3,8 @@ import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
 import { getModelEngineKind } from "../config/engine";
 import {
-  compositeOriginalPhotos,
   defaultPhotoFrames,
-  type NormalizedPhotoFrame,
+  renderDeterministicPosterPage,
 } from "./poster-compositor";
 import type { CostTracker } from "./cost-tracker";
 import type { VariationBrief } from "./agent-creative";
@@ -597,15 +596,13 @@ export async function runGenerationAgentV2(
   input: Agent3Input,
   costTracker?: CostTracker,
 ): Promise<GenerationResult> {
-  const openai = await getModelClient();
   const { brief } = input;
   const pages =
     brief.layout.type === "carousel" ? brief.layout.pages : [brief.layout.pages[0]];
 
   const imageUrls: string[] = [];
   const prompts: string[] = [];
-  const imageSize = "1024x1536" as const;
-  const referenceImages: { buffer: Buffer; name: string; role: string }[] = [];
+  const brandImages: { buffer: Buffer; assetType: string }[] = [];
   let imageIndex = 1;
 
   const selectedAssets = (brief as Record<string, unknown>).selectedAssets as {
@@ -628,30 +625,23 @@ export async function runGenerationAgentV2(
     const buf = await downloadImage(asset.signedUrl);
     if (!buf) return;
     const label = asset.label ?? asset.storagePath.split("/").pop() ?? assetType;
-    referenceImages.push({
+    brandImages.push({
       buffer: buf,
-      name: `image${imageIndex}_${assetType}.png`,
-      role: `IMAGE ${imageIndex}: ${role} — "${label}"`,
+      assetType,
     });
+    console.log(`[Agent3:v2] Brand asset ${imageIndex}: ${role} — "${label}"`);
     imageIndex++;
   }
-
-  let hasLogo = false;
-  let hasHeader = false;
-  let hasFooter = false;
 
   if (selectedAssets) {
     if (selectedAssets.logo) {
       await addAsset(selectedAssets.logo, "SCHOOL LOGO — Reproduce this logo accurately", "logo");
-      hasLogo = referenceImages.some((r) => r.role.includes("LOGO"));
     }
     if (selectedAssets.header) {
       await addAsset(selectedAssets.header, "SCHOOL BRANDING SOURCE — Extract school name and affiliations", "header");
-      hasHeader = referenceImages.some((r) => r.role.includes("BRANDING SOURCE"));
     }
     if (selectedAssets.footer) {
       await addAsset(selectedAssets.footer, "SCHOOL CONTACT SOURCE — Extract contact details", "footer");
-      hasFooter = referenceImages.some((r) => r.role.includes("CONTACT SOURCE"));
     }
     await addAsset(selectedAssets.uniform, "UNIFORM REFERENCE — Use only if no uploaded photos are provided", "uniform");
     await addAsset(selectedAssets.infrastructure, "INFRASTRUCTURE REFERENCE — Use as setting/background guide", "infrastructure");
@@ -663,9 +653,6 @@ export async function runGenerationAgentV2(
       const asset = input.brandAssets.find((a) => a.assetType === assetType);
       if (asset) {
         await addAsset(asset.storagePath, `SCHOOL ${assetType.toUpperCase()}`, assetType);
-        if (assetType === "logo") hasLogo = true;
-        if (assetType === "header") hasHeader = true;
-        if (assetType === "footer") hasFooter = true;
       }
     }
   }
@@ -695,125 +682,50 @@ export async function runGenerationAgentV2(
     return [...new Set(matched)];
   }
 
-  function framePrompt(frames: NormalizedPhotoFrame[]): string {
-    if (frames.length === 0) {
-      return "No uploaded photo frames are needed. Do not generate random people unless the poster concept requires it.";
-    }
-    return `PHOTO FRAME PLAN — these rectangles are RESERVED. The worker will paste the real photos here after generation. Do not put text, logos, decorations, faces, people, or generated photos inside these rectangles:
-${frames.map((f, i) => {
-  const x = Math.round(f.x * 1024);
-  const y = Math.round(f.y * 1536);
-  const w = Math.round(f.width * 1024);
-  const h = Math.round(f.height * 1536);
-  return `- Reserved slot ${i + 1} for "${f.path.split("/").pop()}": normalized x=${f.x.toFixed(2)}, y=${f.y.toFixed(2)}, w=${f.width.toFixed(2)}, h=${f.height.toFixed(2)}; pixels x=${x}, y=${y}, w=${w}, h=${h}. Leave this area blank/quiet with only a simple light placeholder frame.`;
-}).join("\n")}`;
-  }
-
-  async function generateBackground(pageIndex: number): Promise<{ background: Buffer; prompt: string; frames: NormalizedPhotoFrame[]; pagePaths: string[] }> {
-    const page = pages[pageIndex];
-    const pagePaths = pathsForPage(page);
-    const frames = defaultPhotoFrames(pagePaths, pageIndex, pages.length);
-    const slots = framePrompt(frames);
-    const basePrompt = buildImagePrompt(input, page, pageIndex, pages.length, (brief as Record<string, unknown>).creativeVision as string ?? "", {
-      hasLogo,
-      hasHeader,
-      hasFooter,
-    }, { photoSlotInstructions: slots });
-
-    const v2Prompt = `${basePrompt}
-
-V2 BACKGROUND-ONLY GENERATION RULES:
-- Generate the poster design, branding, typography, decorations, and empty reserved photo-frame areas only.
-- Do NOT render, redraw, enhance, stylize, or reinterpret uploaded photos.
-- Do NOT generate faces or people inside uploaded-photo slots.
-- Do NOT place text under, across, or behind uploaded-photo slots.
-- Keep all headline/subheadline/body text fully outside the reserved rectangles.
-- The original uploaded photos will be composited after this generation step by code.
-- Make the empty frames visually intentional: white/light placeholders, subtle shadows, clean borders, and enough contrast for real photos pasted later.
-
-${slots}`;
-
-    const enhanced = await withRateLimitRetry(() =>
-      openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: "You are an expert image prompt engineer. Expand the brief for a BACKGROUND-ONLY poster generation pass. Preserve the empty photo-frame plan exactly. Output ONLY the enhanced prompt.",
-          },
-          { role: "user", content: v2Prompt },
-        ],
-        max_tokens: 1500,
-      }),
-    );
-    costTracker?.addLLMCall(`agent3_v2_background_enhancer_p${pageIndex + 1}`, "gpt-4o-mini", enhanced.usage);
-
-    const prompt = enhanced.choices[0]?.message?.content ?? v2Prompt;
-    let base64Result = "";
-
-    if (referenceImages.length > 0) {
-      const files = await Promise.all(
-        referenceImages.map((img) => toFile(img.buffer, img.name, { type: "image/png" })),
-      );
-      const response = await openai.images.edit({
-        model: "gpt-image-2",
-        image: files,
-        prompt,
-        n: 1,
-        size: imageSize,
-        quality: "high",
-      });
-      const item = response.data?.[0];
-      base64Result = item?.b64_json ?? "";
-      if (!base64Result && item?.url) {
-        base64Result = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
-      }
-    } else {
-      const response = await openai.images.generate({
-        model: "gpt-image-2",
-        prompt,
-        n: 1,
-        size: imageSize,
-        quality: "high",
-      });
-      const item = response.data?.[0];
-      base64Result = item?.b64_json ?? "";
-      if (!base64Result && item?.url) {
-        base64Result = Buffer.from(await (await fetch(item.url)).arrayBuffer()).toString("base64");
-      }
-    }
-
-    if (!base64Result) throw new Error(`Agent 3 v2: no background returned for page ${pageIndex + 1}`);
-    costTracker?.addImageCall(`agent3_v2_background_p${pageIndex + 1}`, 1, imageSize);
-    return { background: Buffer.from(base64Result, "base64"), prompt, frames, pagePaths };
-  }
-
   for (let i = 0; i < pages.length; i++) {
-    console.log(`[Agent3:v2] Page ${i + 1}/${pages.length}: generating background, then compositing original photos`);
-    const result = await generateBackground(i);
-    const photos = result.pagePaths
+    const page = pages[i];
+    const pagePaths = pathsForPage(page);
+    const frames = defaultPhotoFrames(pagePaths, i, pages.length);
+    console.log(`[Agent3:v2] Page ${i + 1}/${pages.length}: deterministic render with ${frames.length} photo frame(s)`);
+    const photos = pagePaths
       .map((path) => {
         const buffer = photoBuffers.get(path);
         return buffer ? { path, buffer } : null;
       })
       .filter((p): p is { path: string; buffer: Buffer } => !!p);
 
-    const finalBuffer = await compositeOriginalPhotos({
-      background: result.background,
+    const finalBuffer = await renderDeterministicPosterPage({
+      schoolName: input.schoolName,
+      headline: i === 0 || pages.length === 1
+        ? brief.textContent.headline
+        : (page?.textOverlays?.[0]?.text || page?.description || brief.textContent.headline),
+      subheadline: i === pages.length - 1 ? (brief.textContent.subheadline || brief.textContent.callToAction) : brief.textContent.subheadline,
+      theme: brief.theme,
+      palette: brief.colorPalette,
+      pageIndex: i,
+      totalPages: pages.length,
       photos,
-      frames: result.frames,
+      frames,
+      brandImages,
     });
 
     imageUrls.push(`data:image/png;base64,${finalBuffer.toString("base64")}`);
-    prompts.push(result.prompt);
-    console.log(`[Agent3:v2] Page ${i + 1}/${pages.length}: composited ${photos.length} original photo(s)`);
+    prompts.push(JSON.stringify({
+      renderer: "deterministic-sharp-v2",
+      page: i + 1,
+      photoFrames: frames,
+      photoCount: photos.length,
+      headline: brief.textContent.headline,
+      theme: brief.theme,
+    }));
+    console.log(`[Agent3:v2] Page ${i + 1}/${pages.length}: rendered ${photos.length} original photo(s)`);
   }
 
   return {
     imageUrls,
-    model: "gpt-image-2-v2-background-plus-sharp-composite",
+    model: "deterministic-sharp-v2",
     prompts,
-    referenceImageCount: referenceImages.length + photoBuffers.size,
+    referenceImageCount: brandImages.length + photoBuffers.size,
     refinementRounds: 0,
   };
 }
