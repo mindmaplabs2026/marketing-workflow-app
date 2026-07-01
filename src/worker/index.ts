@@ -15,7 +15,7 @@
  *   --import tsx            runs the TypeScript directly
  */
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runPosterPipeline, runPosterPipelineV2, runReelPipeline } from "@/lib/ai/pipeline-core";
+import { runPosterPipeline, runPosterPipelineV2, runPosterPipelineV3, runReelPipeline } from "@/lib/ai/pipeline-core";
 import { runChatEdit } from "@/lib/ai/chat-core";
 import { getModelEngineKind } from "@/lib/config/engine";
 import { checkFfmpegAvailable } from "@/lib/ai/agent-music";
@@ -210,6 +210,9 @@ async function loop() {
       busy = true;
       if (job.poster_type === "reel") {
         await runReelPipeline(job.id, job.request_id);
+      } else if (job.pipeline_version === "v3") {
+        const posterType = job.poster_type === "carousel" ? "carousel" : "single";
+        await runPosterPipelineV3(job.id, job.request_id, posterType);
       } else if (job.pipeline_version === "v2") {
         const posterType = job.poster_type === "carousel" ? "carousel" : "single";
         await runPosterPipelineV2(job.id, job.request_id, posterType);

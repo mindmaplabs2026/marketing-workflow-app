@@ -880,6 +880,50 @@ export async function triggerLocalAiGenerationV2(
 }
 
 /**
+ * "Generate with Local AI v3" — local worker path where a composition agent
+ * writes a sandboxed SVG composition artifact, then the worker renders and
+ * stitches original photos deterministically.
+ */
+export async function triggerLocalAiGenerationV3(
+  requestId: string,
+  posterType: "single" | "carousel",
+): Promise<{ error?: string }> {
+  const actor = await loadActor();
+  if ("error" in actor) return { error: actor.error };
+
+  const req = await loadRequestForUpdate(requestId);
+  if ("error" in req) return { error: req.error };
+
+  if (actor.role !== "super_admin" && actor.role !== "designer") {
+    return { error: "Only a designer can trigger AI generation." };
+  }
+  if (actor.role === "designer" && req.status !== "in_design" && req.status !== "changes_requested") {
+    return { error: "Pick up the request first before assigning to AI." };
+  }
+
+  const supabase = await createClient();
+
+  await supabase.from("requests").update({ ai_generated: true }).eq("id", requestId);
+
+  const { data: job, error: jobErr } = await supabase
+    .from("ai_generation_jobs")
+    .insert({
+      request_id: requestId,
+      poster_type: posterType,
+      engine: "local",
+      pipeline_version: "v3",
+    })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (jobErr || !job) {
+    return { error: jobErr?.message ?? "Could not create AI v3 job." };
+  }
+
+  return {};
+}
+
+/**
  * Trigger local AI reel generation — creates a job with poster_type='reel'.
  * The always-on worker picks this up and runs the reel pipeline (Remotion render).
  */
@@ -933,7 +977,7 @@ export async function regenerateAi(
   description?: string | null,
   engine: "cloud" | "local" = "cloud",
   reelDurationSec?: number,
-  pipelineVersion: "v1" | "v2" = "v1",
+  pipelineVersion: "v1" | "v2" | "v3" = "v1",
 ): Promise<{ error?: string }> {
   const actor = await loadActor();
   if ("error" in actor) return { error: actor.error };

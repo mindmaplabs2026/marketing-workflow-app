@@ -263,10 +263,10 @@ export async function runPosterPipeline(
   jobId: string,
   requestId: string,
   posterType: PosterType,
-  opts?: { preserveUploadedPhotos?: boolean },
+  opts?: { preserveUploadedPhotos?: boolean; compositionAgent?: boolean },
 ): Promise<void> {
   const admin = createAdminClient();
-  console.log(`[Worker] Job ${jobId} | START (request ${requestId}, ${posterType}${opts?.preserveUploadedPhotos ? ", v2 photo-preserve" : ""})`);
+  console.log(`[Worker] Job ${jobId} | START (request ${requestId}, ${posterType}${opts?.compositionAgent ? ", v3 composition-agent" : opts?.preserveUploadedPhotos ? ", v2 photo-preserve" : ""})`);
 
   try {
     // --- Agent 1: Understanding ---
@@ -349,6 +349,7 @@ export async function runPosterPipeline(
     const a3Costs = new CostTracker();
     await generateOneVariation(jobId, requestId, posterType, 0, a3Costs, {
       preserveUploadedPhotos: opts?.preserveUploadedPhotos,
+      compositionAgent: opts?.compositionAgent,
     });
     await appendCosts(jobId, a3Costs.toJSON());
 
@@ -370,8 +371,8 @@ export async function runPosterPipeline(
         console.log(`[Worker] Job ${jobId} | Evaluation passed — finalizing`);
         break;
       }
-      if (opts?.preserveUploadedPhotos) {
-        console.log(`[Worker] Job ${jobId} | V2 photo-preserve: skipping generative refinement to keep original photos intact`);
+      if (opts?.preserveUploadedPhotos || opts?.compositionAgent) {
+        console.log(`[Worker] Job ${jobId} | ${opts.compositionAgent ? "V3 composition-agent" : "V2 photo-preserve"}: skipping generative refinement to keep original photos intact`);
         break;
       }
       console.log(`[Worker] Job ${jobId} | ── Agent 5: Refinement (round ${round + 1}) ──`);
@@ -407,6 +408,17 @@ export async function runPosterPipelineV2(
 ): Promise<void> {
   return runPosterPipeline(jobId, requestId, posterType, {
     preserveUploadedPhotos: true,
+  });
+}
+
+export async function runPosterPipelineV3(
+  jobId: string,
+  requestId: string,
+  posterType: PosterType,
+): Promise<void> {
+  return runPosterPipeline(jobId, requestId, posterType, {
+    preserveUploadedPhotos: true,
+    compositionAgent: true,
   });
 }
 

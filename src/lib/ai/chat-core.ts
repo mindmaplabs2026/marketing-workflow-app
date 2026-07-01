@@ -102,7 +102,7 @@ export async function runChatEdit({ variationId, message, pageIndex }: ChatEditI
     .select("pipeline_version")
     .eq("id", variation.job_id)
     .single();
-  const preserveUploadedPhotos = jobRow?.pipeline_version === "v2";
+  const preserveUploadedPhotos = jobRow?.pipeline_version === "v2" || jobRow?.pipeline_version === "v3";
 
   // Step 3: targeted image edit
   // Codex: use dedicated chat-edit agent (vision + image gen in one session).

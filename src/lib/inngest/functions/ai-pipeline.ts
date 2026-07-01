@@ -2,7 +2,7 @@ import { inngest } from "../client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runUnderstandingAgent } from "@/lib/ai/agent-understanding";
 import { runCreativeAgent } from "@/lib/ai/agent-creative";
-import { runGenerationAgent, runGenerationAgentV2, evaluatePoster, refineAndRegenerate, QUALITY_THRESHOLD } from "@/lib/ai/agent-generation";
+import { runGenerationAgent, runGenerationAgentV2, runGenerationAgentV3, evaluatePoster, refineAndRegenerate, QUALITY_THRESHOLD } from "@/lib/ai/agent-generation";
 import { dispatchPendingPushes } from "@/lib/push/dispatch";
 import { CostTracker } from "@/lib/ai/cost-tracker";
 import type { CostTracking } from "@/lib/ai/cost-tracker";
@@ -148,7 +148,7 @@ export async function generateOneVariation(
   posterType: "single" | "carousel",
   variationIndex: number,
   costTracker?: CostTracker,
-  opts?: { preserveUploadedPhotos?: boolean },
+  opts?: { preserveUploadedPhotos?: boolean; compositionAgent?: boolean },
 ) {
   const admin = createAdminClient();
 
@@ -336,9 +336,11 @@ export async function generateOneVariation(
     schoolName: ctx.schoolName,
   };
 
-  const result = opts?.preserveUploadedPhotos
-    ? await runGenerationAgentV2(generationInput, costTracker)
-    : await runGenerationAgent(generationInput, costTracker);
+  const result = opts?.compositionAgent
+    ? await runGenerationAgentV3(generationInput, costTracker)
+    : opts?.preserveUploadedPhotos
+      ? await runGenerationAgentV2(generationInput, costTracker)
+      : await runGenerationAgent(generationInput, costTracker);
 
   const storagePaths: string[] = [];
   for (let i = 0; i < result.imageUrls.length; i++) {
@@ -365,6 +367,18 @@ export async function generateOneVariation(
     storagePaths.push(storagePath);
   }
 
+  const artifactPaths: string[] = [];
+  for (const artifact of result.artifacts ?? []) {
+    const storagePath = `${ctx.schoolId}/${requestId}/ai/${brief.variationIndex}/${artifact.relativePath}`;
+    await admin.storage
+      .from("designs")
+      .upload(storagePath, artifact.body, {
+        contentType: artifact.contentType,
+        upsert: true,
+      });
+    artifactPaths.push(storagePath);
+  }
+
   await admin.from("ai_variations").insert({
     job_id: jobId,
     request_id: requestId,
@@ -376,6 +390,7 @@ export async function generateOneVariation(
         referenceImageCount: result.referenceImageCount,
         refinementRounds: result.refinementRounds,
         model: result.model,
+        compositionArtifacts: artifactPaths,
         generatedAt: new Date().toISOString(),
       },
     } as unknown as Record<string, unknown>,

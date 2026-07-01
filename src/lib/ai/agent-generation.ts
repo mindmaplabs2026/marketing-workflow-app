@@ -4,7 +4,9 @@ import { getModelClient } from "./model-client";
 import { getModelEngineKind } from "../config/engine";
 import {
   defaultPhotoFrames,
+  compositeOriginalPhotos,
   renderDeterministicPosterPage,
+  type NormalizedPhotoFrame,
 } from "./poster-compositor";
 import type { CostTracker } from "./cost-tracker";
 import type { VariationBrief } from "./agent-creative";
@@ -37,6 +39,11 @@ export type GenerationResult = {
   prompts: string[];
   referenceImageCount: number;
   refinementRounds: number;
+  artifacts?: {
+    relativePath: string;
+    contentType: string;
+    body: string;
+  }[];
 };
 
 export type EvaluationResult = {
@@ -727,6 +734,180 @@ export async function runGenerationAgentV2(
     prompts,
     referenceImageCount: brandImages.length + photoBuffers.size,
     refinementRounds: 0,
+  };
+}
+
+/**
+ * V3 local poster generation: a composition agent writes a self-contained SVG
+ * composition per page. We render that SVG as the design layer, then composite
+ * original uploaded photos into deterministic frames. The SVG/manifest are
+ * returned as artifacts so later chat/edit/repair flows can reload the exact
+ * composition instead of starting from pixels.
+ */
+export async function runGenerationAgentV3(
+  input: Agent3Input,
+  costTracker?: CostTracker,
+): Promise<GenerationResult> {
+  const openai = await getModelClient();
+  const { brief } = input;
+  const pages =
+    brief.layout.type === "carousel" ? brief.layout.pages : [brief.layout.pages[0]];
+
+  const imageUrls: string[] = [];
+  const prompts: string[] = [];
+  const artifacts: NonNullable<GenerationResult["artifacts"]> = [];
+  const photoBuffers = new Map<string, Buffer>();
+  for (const img of input.curatedImages) {
+    const buf = await downloadImage(img.signedUrl);
+    if (buf) photoBuffers.set(img.path, buf);
+  }
+
+  const brandAssetsForPrompt = input.brandAssets
+    .map((a) => `- ${a.assetType}${a.label ? ` (${a.label})` : ""}: ${a.storagePath}`)
+    .join("\n");
+
+  function pathsForPage(page: typeof pages[number] | undefined): string[] {
+    const raw = brief.layout.type === "carousel" && page?.selectedImages?.length
+      ? page.selectedImages.map((img) => img.path).filter(Boolean)
+      : (brief.selectedImages ?? []).map((img) => img.path).filter(Boolean);
+    const wanted = raw.length > 0 ? raw : input.curatedImages.map((img) => img.path);
+    const matched: string[] = [];
+    for (const candidate of wanted) {
+      const filename = candidate.split("/").pop() ?? "";
+      const match = input.curatedImages.find((img) =>
+        img.path === candidate ||
+        img.path.endsWith(candidate) ||
+        candidate.endsWith(img.path.split("/").pop() ?? "") ||
+        img.path.split("/").pop() === filename,
+      );
+      if (match && photoBuffers.has(match.path)) matched.push(match.path);
+    }
+    return [...new Set(matched)];
+  }
+
+  function frameManifest(frames: NormalizedPhotoFrame[]): string {
+    return frames.map((f, i) => {
+      const x = Math.round(f.x * 1024);
+      const y = Math.round(f.y * 1536);
+      const w = Math.round(f.width * 1024);
+      const h = Math.round(f.height * 1536);
+      return `slot_${i + 1}: ${f.path.split("/").pop()} at x=${x}, y=${y}, w=${w}, h=${h}`;
+    }).join("\n");
+  }
+
+  function sanitizeSvg(raw: string): string {
+    const stripped = raw
+      .replace(/```(?:svg|xml)?/gi, "")
+      .replace(/```/g, "")
+      .trim();
+    const start = stripped.indexOf("<svg");
+    const end = stripped.lastIndexOf("</svg>");
+    if (start === -1 || end === -1) {
+      throw new Error("Composition agent did not return an SVG");
+    }
+    let svg = stripped.slice(start, end + "</svg>".length);
+    svg = svg.replace(/<script[\s\S]*?<\/script>/gi, "");
+    svg = svg.replace(/\son[a-z]+=\"[^\"]*\"/gi, "");
+    svg = svg.replace(/\son[a-z]+='[^']*'/gi, "");
+    svg = svg.replace(/https?:\/\/[^"')\s]+/gi, "");
+    return svg;
+  }
+
+  async function composeSvg(pageIndex: number, frames: NormalizedPhotoFrame[], pagePaths: string[]): Promise<{ svg: string; prompt: string }> {
+    const page = pages[pageIndex];
+    const pageLabel = pages.length > 1 ? `page ${pageIndex + 1} of ${pages.length}` : "single poster";
+    const headline = pageIndex === 0 || pages.length === 1
+      ? brief.textContent.headline
+      : (page?.textOverlays?.[0]?.text || page?.description || brief.textContent.headline);
+    const prompt = `You are a senior poster composition engineer.
+
+Create a self-contained SVG composition for an Instagram portrait poster at exactly 1024x1536.
+
+Hard constraints:
+- Output ONLY raw SVG. No markdown, no explanation.
+- The SVG must have width="1024", height="1536", and viewBox="0 0 1024 1536".
+- Do NOT include raster photos, external images, external URLs, scripts, animation, or foreignObject.
+- Do NOT draw people or faces.
+- Reserve the photo slots below as clean empty frames/placeholders. Do not put text, logos, or decorations inside them.
+- The worker will paste the real uploaded photos into those exact slots after SVG render.
+- Keep all text readable and inside bounds.
+- Use SVG shapes, gradients, patterns, borders, ornamental motifs, and typography to create a polished school marketing poster.
+
+School: ${input.schoolName}
+Theme: ${brief.theme}
+Direction: ${brief.direction}
+Palette: ${brief.colorPalette.join(", ")}
+Poster page: ${pageLabel}
+Headline/text for this page: ${headline}
+Subheadline: ${pageIndex === pages.length - 1 ? (brief.textContent.subheadline || brief.textContent.callToAction || "") : brief.textContent.subheadline}
+Creative vision: ${(page?.creativeVision || (brief as Record<string, unknown>).creativeVision || brief.designPrompt || "").toString()}
+Brand assets available:
+${brandAssetsForPrompt || "(none)"}
+
+Reserved photo slots:
+${frameManifest(frames) || "(none)"}
+
+Return only SVG.`;
+
+    const response = await withRateLimitRetry(() =>
+      openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You generate safe, deterministic SVG poster compositions. You never use external URLs, scripts, foreignObject, raster image tags, or markdown fences.",
+          },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 5000,
+      }),
+    );
+    costTracker?.addLLMCall(`agent3_v3_composition_p${pageIndex + 1}`, "gpt-4o-mini", response.usage);
+    return { svg: sanitizeSvg(response.choices[0]?.message?.content ?? ""), prompt };
+  }
+
+  for (let i = 0; i < pages.length; i++) {
+    const pagePaths = pathsForPage(pages[i]);
+    const frames = defaultPhotoFrames(pagePaths, i, pages.length);
+    const photos = pagePaths
+      .map((path) => {
+        const buffer = photoBuffers.get(path);
+        return buffer ? { path, buffer } : null;
+      })
+      .filter((p): p is { path: string; buffer: Buffer } => !!p);
+
+    console.log(`[Agent3:v3] Page ${i + 1}/${pages.length}: generating SVG composition, then stitching ${photos.length} photo(s)`);
+    const composition = await composeSvg(i, frames, pagePaths);
+    const background = await (await import("sharp")).default(Buffer.from(composition.svg)).png().toBuffer();
+    const finalBuffer = await compositeOriginalPhotos({ background, photos, frames });
+
+    imageUrls.push(`data:image/png;base64,${finalBuffer.toString("base64")}`);
+    prompts.push(composition.prompt);
+    artifacts.push({
+      relativePath: `composition/page${i + 1}.svg`,
+      contentType: "image/svg+xml",
+      body: composition.svg,
+    });
+    artifacts.push({
+      relativePath: `composition/page${i + 1}.manifest.json`,
+      contentType: "application/json",
+      body: JSON.stringify({
+        renderer: "svg-composition-v3",
+        page: i + 1,
+        photoFrames: frames,
+        photoPaths: pagePaths,
+        prompt: composition.prompt,
+      }, null, 2),
+    });
+  }
+
+  return {
+    imageUrls,
+    model: "svg-composition-agent-v3",
+    prompts,
+    referenceImageCount: photoBuffers.size,
+    refinementRounds: 0,
+    artifacts,
   };
 }
 

@@ -24,20 +24,22 @@ export function AiRegenerateButton({
   const [error, setError] = useState<string | null>(null);
   const [outputType, setOutputType] = useState<"single" | "carousel" | "reel">("single");
   const [reelMaxDuration, setReelMaxDuration] = useState(120);
-  const [engine, setEngine] = useState<"cloud" | "local" | "local-v2">("cloud");
+  const [engine, setEngine] = useState<"cloud" | "local" | "local-v2" | "local-v3">("cloud");
   const [showOptions, setShowOptions] = useState(false);
   const [title, setTitle] = useState(currentTitle ?? "");
   const [description, setDescription] = useState(currentDescription ?? "");
 
   const engineLabel = outputType === "reel"
     ? "Local AI (Reel)"
+    : engine === "local-v3"
+    ? "Local AI v3"
     : engine === "local-v2"
     ? "Local AI v2"
     : engine === "local"
     ? "Local AI"
     : "AI";
 
-  function open(e: "cloud" | "local" | "local-v2" | "reel") {
+  function open(e: "cloud" | "local" | "local-v2" | "local-v3" | "reel") {
     if (e === "reel") {
       setEngine("local");
       setOutputType("reel");
@@ -61,9 +63,9 @@ export function AiRegenerateButton({
       outputType,
       title.trim(),
       description.trim() || null,
-      outputType === "reel" ? "local" : engine === "local-v2" ? "local" : engine,
+      outputType === "reel" ? "local" : engine === "local-v2" || engine === "local-v3" ? "local" : engine,
       outputType === "reel" ? reelMaxDuration : undefined,
-      engine === "local-v2" ? "v2" : "v1",
+      engine === "local-v3" ? "v3" : engine === "local-v2" ? "v2" : "v1",
     );
     if (result.error) {
       setError(result.error);
@@ -97,6 +99,13 @@ export function AiRegenerateButton({
           className="rounded-md border border-emerald-600 bg-white px-4 py-2 text-sm font-medium text-emerald-700 shadow-sm hover:bg-emerald-50 dark:border-emerald-500 dark:bg-zinc-900 dark:text-emerald-300 dark:hover:bg-emerald-950"
         >
           Regenerate with Local AI v2
+        </button>
+        <button
+          type="button"
+          onClick={() => open("local-v3")}
+          className="rounded-md border border-sky-600 bg-white px-4 py-2 text-sm font-medium text-sky-700 shadow-sm hover:bg-sky-50 dark:border-sky-500 dark:bg-zinc-900 dark:text-sky-300 dark:hover:bg-sky-950"
+        >
+          Regenerate with Local AI v3
         </button>
         <button
           type="button"
