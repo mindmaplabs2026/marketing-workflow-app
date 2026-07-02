@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AppSidebar } from "./app-sidebar";
+import { HeaderSearch } from "./header-search";
 import { MobileBottomNav } from "./mobile-bottom-nav";
 import { NavigationFeedback } from "./navigation-feedback";
 import { UserMenu } from "./user-menu";
@@ -31,7 +32,7 @@ export function AppShellChrome({
       >
         <Link
           href="/"
-          className="flex items-center gap-2 text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+          className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50"
         >
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-violet-600 to-violet-700 text-xs font-bold text-white shadow-sm">
             M
@@ -40,13 +41,19 @@ export function AppShellChrome({
         </Link>
 
         <div className="flex items-center gap-1 sm:gap-2">
+          <HeaderSearch />
           {notificationsBell}
           <UserMenu name={name} email={email} roleLabel={roleLabel} />
         </div>
       </header>
 
       <div className="flex flex-1">
-        <AppSidebar role={role} />
+        <AppSidebar
+          role={role}
+          name={name}
+          email={email}
+          roleLabel={roleLabel}
+        />
         <main className="min-w-0 flex-1 pb-16 md:pb-0">{children}</main>
       </div>
 
