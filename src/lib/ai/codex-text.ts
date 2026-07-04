@@ -129,7 +129,7 @@ export function stripJsonFences(s: string): string {
 /** Run Codex for a text/vision reasoning step and return its final message. */
 export async function codexText(input: CodexTextInput): Promise<string> {
   console.log(`[codex-text] Starting with ${input.images?.length ?? 0} images, prompt ${input.prompt.length} chars`);
-  const timeoutMs = input.timeoutMs ?? Number(process.env.CODEX_TEXT_TIMEOUT_MS ?? 300_000);
+  const timeoutMs = input.timeoutMs ?? Number(process.env.CODEX_TEXT_TIMEOUT_MS ?? 900_000);
   const workDir = path.join(os.tmpdir(), "codex-text", `${process.pid}-${Date.now()}-${Math.round(performance.now())}`);
   await fs.mkdir(workDir, { recursive: true });
   const outFile = path.join(workDir, "out.txt");

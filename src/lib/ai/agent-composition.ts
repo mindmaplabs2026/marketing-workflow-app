@@ -67,7 +67,7 @@ const LOGO_MIN_PX = Number(process.env.REEL_LOGO_MIN_PX ?? 128);
 const LOGO_MAX_PX = Number(process.env.REEL_LOGO_MAX_PX ?? 320);
 
 /** Per-attempt timeout for a Codex composition/edit/refine call (env-tunable). */
-const COMPOSITION_TIMEOUT_MS = Number(process.env.CODEX_COMPOSITION_TIMEOUT_MS ?? 300_000);
+const COMPOSITION_TIMEOUT_MS = Number(process.env.CODEX_COMPOSITION_TIMEOUT_MS ?? 900_000);
 
 /**
  * Safe-area margins (px) on the 1080×1920 canvas for TEXT / LOGO / GRAPHIC
@@ -225,7 +225,7 @@ export async function generateComposition(input: {
   hasMusic: boolean;
   timeoutMs?: number;
 }): Promise<CompositionCode> {
-  const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS; // 5 minutes
+  const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS; // 15 minutes
   const workDir = path.join(os.tmpdir(), "codex-composition", `${process.pid}-${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
 
