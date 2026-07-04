@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getSessionUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { SuccessToast } from "@/components/success-toast";
+import { AnimatedNumber } from "@/components/animated-number";
 import { STATUS_BADGE_CLASS, STATUS_SHORT } from "@/app/requests/status";
 import type { RequestStatus, UserRole } from "@/lib/supabase/types";
 
@@ -697,7 +698,7 @@ function MetricCard({
         </span>
         <div className="min-w-0 flex-1 text-right">
           <p className="text-3xl font-semibold leading-none text-zinc-950 dark:text-zinc-50">
-            {value}
+            <AnimatedNumber value={value} />
           </p>
           <p className="mt-1 whitespace-nowrap text-xs leading-4 text-zinc-500">
             {label}

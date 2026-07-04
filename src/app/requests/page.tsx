@@ -12,6 +12,7 @@ import { Pagination } from "@/components/pagination";
 import { MotionSurface } from "@/components/premium-motion";
 import { RequestRowActions } from "@/components/request-row-actions";
 import { AnimatedNumber } from "@/components/animated-number";
+import { StatusFilterChips } from "@/components/status-filter-chips";
 
 const SECTION_PAGE_SIZE = 3;
 
@@ -179,6 +180,8 @@ function priorityReason(request: RequestListRow, todayUtcMs: number): string {
 }
 
 function rowTimingLabel(request: RequestListRow, todayUtcMs: number): string {
+  if (request.status === "published" || request.status === "archived") return "NA";
+
   const dueInDays = daysUntilDue(request.due_date, todayUtcMs);
   if (dueInDays !== null) {
     if (dueInDays < 0) return `${Math.abs(dueInDays)}d overdue`;
@@ -187,6 +190,13 @@ function rowTimingLabel(request: RequestListRow, todayUtcMs: number): string {
     return `Due ${formatDateOnly(request.due_date!)}`;
   }
   return "NA";
+}
+
+function rowTimingDotClass(request: RequestListRow, todayUtcMs: number): string {
+  if (request.status === "published") return "bg-emerald-500";
+  if (request.status === "archived") return "bg-zinc-400";
+  const dueInDays = daysUntilDue(request.due_date, todayUtcMs);
+  return dueInDays !== null && dueInDays < 0 ? "bg-rose-500" : "bg-orange-500";
 }
 
 function normalizedFilter(value: string | undefined): StatusFilter {
@@ -357,6 +367,7 @@ export default async function RequestsListPage({
   const supabase = await createClient();
 
   const canRaise = role === "teacher" || role === "school_admin";
+  const isTeacher = role === "teacher";
   const isReviewer = role === "school_admin" || role === "super_admin";
   const isDesigner = role === "designer" || role === "super_admin";
   const isManagingAdmin = role === "super_admin" || role === "school_admin";
@@ -432,6 +443,7 @@ export default async function RequestsListPage({
   const inFlight: RequestListRow[] = [];
   const published: RequestListRow[] = [];
   const archived: RequestListRow[] = [];
+  const myRequests = requests.filter((request) => request.created_by === userId);
 
   for (const request of requests) {
     if (request.status === "archived") {
@@ -573,9 +585,12 @@ export default async function RequestsListPage({
   ).length;
 
   const needsYouView = paginate(needsYou, sectionPages.needsYou);
+  const myRequestsView = paginate(myRequests, sectionPages.needsYou);
   const inFlightView = paginate(inFlight, sectionPages.inFlight);
   const publishedView = paginate(published, sectionPages.published);
   const archivedView = paginate(archived, sectionPages.archived);
+  const needsSectionTitle = isTeacher ? "My requests" : "Needs you";
+  const needsSectionCount = isTeacher ? myRequests.length : needsYou.length;
   const latestActivity = [...requests]
     .sort(
       (a, b) =>
@@ -613,6 +628,33 @@ export default async function RequestsListPage({
   }
 
   const showSchoolFilter = isDesigner && schoolsList.length > 1;
+  const filteredEmptyState =
+    statusFilter === "all"
+      ? null
+      : {
+          needs: {
+            count: needsSectionCount,
+            title: isTeacher ? "No requests created by you yet." : "No requests need your action right now.",
+            description: isTeacher
+              ? "Requests you raise will appear here as they move through the workflow."
+              : "When a request needs your review or design action, it will appear here.",
+          },
+          "in-flight": {
+            count: inFlight.length,
+            title: "No in-flight requests right now.",
+            description: "Active requests will appear here once they are moving through the workflow.",
+          },
+          published: {
+            count: published.length,
+            title: "No published requests yet.",
+            description: "Completed requests will appear here after they are published.",
+          },
+          archived: {
+            count: archived.length,
+            title: "No archived requests yet.",
+            description: "Requests moved out of the active workflow will appear here.",
+          },
+        }[statusFilter];
 
   return (
     <div className="min-h-full overflow-x-hidden bg-[radial-gradient(circle_at_78%_4%,rgba(124,58,237,0.13),transparent_29%),radial-gradient(circle_at_18%_18%,rgba(14,165,233,0.08),transparent_25%),linear-gradient(180deg,#ffffff_0%,#fbfbff_48%,#f8fafc_100%)] px-3 pb-5 pt-0 text-slate-950 sm:px-6 lg:px-8">
@@ -739,6 +781,37 @@ export default async function RequestsListPage({
 
         <section className="grid min-w-0 gap-6 xl:-mt-2 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0 space-y-5">
+            <section className="grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
+              <MetricCard
+                label={isTeacher ? "My requests" : "Needs you"}
+                value={isTeacher ? myRequests.length : needsYou.length}
+                note={isTeacher ? "Created by you" : "Action required"}
+                icon="needs"
+                color="orange"
+              />
+              <MetricCard
+                label="In design"
+                value={inDesignCount}
+                note="Across schools"
+                icon="design"
+                color="blue"
+              />
+              <MetricCard
+                label="In review"
+                value={pendingReviewCount}
+                note="Awaiting feedback"
+                icon="review"
+                color="violet"
+              />
+              <MetricCard
+                label="Published"
+                value={publishedLast30}
+                note="Last 30 days"
+                icon="published"
+                color="emerald"
+              />
+            </section>
+
             <Panel
               title="Request overview"
               action={<OverviewRangeFilter />}
@@ -764,7 +837,7 @@ export default async function RequestsListPage({
                   published={overviewPublishedCount}
                 />
                 <div className="min-w-0 flex-1 space-y-2 text-xs">
-                  <Legend color="bg-orange-500" label="Needs you" value={overviewPercent(overviewNeedsCount)} suffix="%" />
+                  <Legend color="bg-orange-500" label={isTeacher ? "My requests" : "Needs you"} value={overviewPercent(overviewNeedsCount)} suffix="%" />
                   <Legend color="bg-blue-500" label="In flight" value={overviewPercent(overviewInFlightCount)} suffix="%" />
                   <Legend color="bg-violet-500" label="In review" value={overviewPercent(overviewReviewCount)} suffix="%" />
                   <Legend color="bg-emerald-500" label="Published" value={overviewPercent(overviewPublishedCount)} suffix="%" />
@@ -772,48 +845,17 @@ export default async function RequestsListPage({
               </div>
             </Panel>
 
-            <section className="grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
-              <MetricCard
-                label="Needs you"
-                value={needsYou.length}
-                note="Action required"
-                icon="needs"
-                color="orange"
-              />
-              <MetricCard
-                label="Design"
-                value={inDesignCount}
-                note="Across schools"
-                icon="design"
-                color="blue"
-              />
-              <MetricCard
-                label="In review"
-                value={pendingReviewCount}
-                note="Awaiting feedback"
-                icon="review"
-                color="violet"
-              />
-              <MetricCard
-                label="Published"
-                value={publishedLast30}
-                note="Last 30 days"
-                icon="published"
-                color="emerald"
-              />
-            </section>
-
             <div className="rounded-2xl border border-white/80 bg-white/86 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.07)] ring-1 ring-slate-200/70 backdrop-blur-xl">
-              <div className="grid gap-3 xl:flex xl:items-end xl:gap-2">
-                <div className="xl:min-w-0 xl:flex-[1_1_260px]">
+              <div className={`grid gap-3 xl:items-end ${showSchoolFilter ? "xl:grid-cols-[minmax(0,1fr)_128px_auto]" : "xl:grid-cols-[minmax(300px,1fr)_auto]"}`}>
+                <div className="min-w-0">
                   <SearchInput
                     initialValue={rawQuery}
-                    placeholder="Search by title, school or owner..."
+                    placeholder={showSchoolFilter ? "Search by title, school or owner..." : "Search by title or owner..."}
                     resetParams={Object.values(SECTION_PAGE_KEYS)}
                   />
                 </div>
                 {showSchoolFilter ? (
-                  <div className="xl:w-32 xl:shrink-0">
+                  <div className="min-w-0">
                     <label htmlFor="school-filter" className="mb-1.5 block text-xs font-semibold text-slate-500">
                       School
                     </label>
@@ -828,43 +870,19 @@ export default async function RequestsListPage({
                       resetParams={Object.values(SECTION_PAGE_KEYS)}
                     />
                   </div>
-                ) : (
-                  <div className="hidden xl:block xl:w-32 xl:shrink-0" />
-                )}
+                ) : null}
                 <div className="xl:shrink-0">
                   <p className="mb-1.5 text-xs font-semibold text-slate-500">Status</p>
-                  <div className="flex flex-wrap items-center gap-1 xl:flex-nowrap">
-                    {STATUS_FILTERS.map((item) => {
-                      const active = statusFilter === item.value;
-                      return (
-                        <Link
-                          key={item.value}
-                          href={withParams({
-                            status: item.value === "all" ? "" : item.value,
-                            ...Object.fromEntries(
-                              Object.values(SECTION_PAGE_KEYS).map((key) => [key, ""]),
-                            ),
-                          })}
-                          className={`whitespace-nowrap rounded-full px-2 py-1.5 text-[11px] font-semibold shadow-sm ring-1 transition duration-200 hover:-translate-y-0.5 motion-reduce:transform-none ${
-                            active
-                              ? "bg-gradient-to-b from-violet-500 to-violet-700 text-white ring-violet-400/40 shadow-violet-200"
-                              : item.value === "needs"
-                                ? "bg-orange-50 text-orange-600 ring-orange-100 hover:bg-orange-100"
-                                : item.value === "in-flight"
-                                  ? "bg-blue-50 text-blue-600 ring-blue-100 hover:bg-blue-100"
-                                  : item.value === "published"
-                                    ? "bg-emerald-50 text-emerald-700 ring-emerald-100 hover:bg-emerald-100"
-                                    : "bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100"
-                          }`}
-                        >
-                          {item.label}
-                        </Link>
-                      );
-                    })}
-                  </div>
+                  <StatusFilterChips
+                    filters={STATUS_FILTERS}
+                    active={statusFilter}
+                    resetParams={Object.values(SECTION_PAGE_KEYS)}
+                    labelOverride={isTeacher ? { needs: "My requests" } : undefined}
+                  />
                   {(rawQuery || schoolFilter || statusFilter !== "all") && (
                     <Link
                       href="/requests"
+                      scroll={false}
                       className="mt-2 inline-flex w-full justify-end rounded-full px-2 text-xs font-semibold text-violet-600 transition hover:text-violet-700"
                     >
                       Clear all
@@ -876,11 +894,11 @@ export default async function RequestsListPage({
 
             {visibleSection("needs") && (
               <RequestSection
-                title="Needs you"
-                count={needsYou.length}
-                items={needsYouView.slice}
+                title={needsSectionTitle}
+                count={needsSectionCount}
+                items={isTeacher ? myRequestsView.slice : needsYouView.slice}
                 tone="orange"
-                pagination={sectionPagination("needsYou", needsYou.length)}
+                pagination={sectionPagination("needsYou", needsSectionCount)}
               />
             )}
             {visibleSection("in-flight") && (
@@ -911,6 +929,23 @@ export default async function RequestsListPage({
               />
             )}
 
+            {filteredEmptyState && filteredEmptyState.count === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/80 p-8 text-center shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur sm:p-10">
+                <p className="text-sm font-semibold text-slate-950">
+                  {filteredEmptyState.title}
+                </p>
+                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-slate-500">
+                  {filteredEmptyState.description}
+                </p>
+                <Link
+                  href="/requests"
+                  className="mt-4 inline-flex h-9 items-center justify-center rounded-xl bg-violet-50 px-4 text-sm font-semibold text-violet-600 transition hover:bg-violet-100"
+                >
+                  View all requests
+                </Link>
+              </div>
+            )}
+
             {requests.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/80 p-10 text-center shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur">
                 <p className="text-sm font-semibold text-slate-950">
@@ -923,6 +958,7 @@ export default async function RequestsListPage({
                 </p>
               </div>
             )}
+
           </div>
 
           <aside className="min-w-0 space-y-4 xl:-mt-8">
@@ -1061,7 +1097,7 @@ export default async function RequestsListPage({
         <h2 className={`flex items-center gap-1.5 text-sm font-semibold ${titleClass}`}>
           {title} ({count}) <span className="text-xs opacity-70">⌄</span>
         </h2>
-        <div className="overflow-hidden rounded-2xl border border-white/70 bg-white/82 shadow-[0_18px_60px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/70 backdrop-blur-xl">
+        <div className="overflow-visible rounded-2xl border border-white/70 bg-white/82 shadow-[0_18px_60px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/70 backdrop-blur-xl">
           {items.map((request) => {
             const schoolName = schoolsById.get(request.school_id) ?? "School";
             const showEdit = canEditRequest(request);
@@ -1073,7 +1109,7 @@ export default async function RequestsListPage({
                 key={request.id}
                 className="group relative flex items-center gap-2 border-b border-slate-100/90 px-4 py-3.5 last:border-b-0 transition duration-200 hover:bg-white hover:shadow-[inset_3px_0_0_rgba(124,58,237,0.22)]"
               >
-                <Link href={`/requests/${request.id}`} className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 lg:grid-cols-[auto_minmax(0,1fr)_92px_54px]">
+                <Link href={`/requests/${request.id}`} className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 lg:grid-cols-[auto_minmax(0,1fr)_124px_54px]">
                   <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-lg transition duration-200 group-hover:scale-105 motion-reduce:transform-none ${rowIconClass(request.status)}`}>
                     <RequestIcon type={activityIconType(request.status)} className="h-5 w-5" />
                   </span>
@@ -1085,11 +1121,11 @@ export default async function RequestsListPage({
                       {schoolName}
                     </span>
                   </span>
-                  <span className={`hidden justify-self-start rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm ring-1 ring-white/70 sm:inline-flex lg:justify-self-end ${STATUS_BADGE_CLASS[request.status]}`}>
+                  <span className={`hidden min-w-[92px] justify-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm ring-1 ring-white/70 sm:inline-flex lg:justify-self-end ${STATUS_BADGE_CLASS[request.status]}`}>
                     {STATUS_SHORT[request.status]}
                   </span>
-                  <span className="hidden items-center gap-2 text-xs font-medium text-slate-500 md:flex lg:justify-self-end">
-                    <span className={`h-1.5 w-1.5 rounded-full ${daysUntilDue(request.due_date, todayUtcMs) !== null && daysUntilDue(request.due_date, todayUtcMs)! < 0 ? "bg-rose-500" : request.status === "published" ? "bg-emerald-500" : request.status === "archived" ? "bg-zinc-400" : "bg-orange-500"}`} />
+                  <span className="hidden items-center gap-2 whitespace-nowrap text-xs font-medium text-slate-500 md:flex lg:justify-self-end">
+                    <span className={`h-1.5 w-1.5 rounded-full ${rowTimingDotClass(request, todayUtcMs)}`} />
                     {rowTimingLabel(request, todayUtcMs)}
                   </span>
                 </Link>
