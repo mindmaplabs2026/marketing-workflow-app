@@ -6,18 +6,15 @@
  * marketing-workflow-app). It has its own node_modules with all Remotion
  * packages — nothing Remotion-related is in the Next.js app.
  *
- * Flow:
- *   1. Caller provides AI-generated Reel.tsx + data.ts code strings
- *   2. This module creates a temp work directory with all required files
- *   3. Downloads media from Supabase Storage to work dir
- *   4. Spawns `node --import tsx render.ts <workDir>` in the renderer project
- *   5. Returns the path to the rendered MP4
- *   6. Caller uploads MP4 to Supabase, then calls cleanup()
+ * Two render paths, sharing finalizeRender() (media placement + spawn + faststart):
+ *   • renderReel     — free-form AI Reel.tsx (legacy / advanced path)
+ *   • renderReelDoc  — structured ReelDoc rendered by the fixed SchemaReel (Tier 2)
  */
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ReelDoc } from "@/lib/ai/reel-doc";
 
 const REMOTION_RENDERER_DIR =
   process.env.REMOTION_RENDERER_DIR ??
@@ -36,6 +33,14 @@ export type RenderInput = {
   timeoutMs?: number;
 };
 
+export type RenderDocInput = {
+  /** Validated structured scene graph. */
+  doc: ReelDoc;
+  mediaFiles: Map<string, Buffer>;
+  musicFile?: { name: string; buffer: Buffer };
+  timeoutMs?: number;
+};
+
 export type RenderResult = {
   /** Absolute path to the rendered MP4. */
   outputPath: string;
@@ -47,160 +52,190 @@ export type RenderResult = {
   cleanup: () => Promise<void>;
 };
 
+function newWorkDir(): string {
+  return path.join(os.tmpdir(), "remotion-render", `${process.pid}-${Date.now()}`);
+}
+
+/** Remove the workdir + the media/music we staged in the renderer's public/ dir. */
+async function cleanupStaged(workDir: string): Promise<void> {
+  await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  await fs.rm(path.join(REMOTION_RENDERER_DIR, "public", "media"), { recursive: true, force: true }).catch(() => {});
+  await fs.rm(path.join(REMOTION_RENDERER_DIR, "public", "music"), { recursive: true, force: true }).catch(() => {});
+}
+
 /**
- * Render an AI-generated Remotion composition to MP4.
- *
+ * Render a free-form AI-generated Remotion composition to MP4.
  * Throws on failure (compilation error, render error, timeout).
  */
 export async function renderReel(input: RenderInput): Promise<RenderResult> {
   const timeoutMs = input.timeoutMs ?? 600_000; // 10 minutes
-  const workDir = path.join(
-    os.tmpdir(),
-    "remotion-render",
-    `${process.pid}-${Date.now()}`,
-  );
+  const workDir = newWorkDir();
   await fs.mkdir(workDir, { recursive: true });
-
   const scaffoldDir = path.join(REMOTION_RENDERER_DIR, "scaffold");
   const startTime = Date.now();
 
   try {
-    // 1. Copy scaffold files
-    await fs.copyFile(
-      path.join(scaffoldDir, "index.template.ts"),
-      path.join(workDir, "index.ts"),
-    );
-    await fs.copyFile(
-      path.join(scaffoldDir, "Root.template.tsx"),
-      path.join(workDir, "Root.tsx"),
-    );
-    await fs.copyFile(
-      path.join(scaffoldDir, "helpers.ts"),
-      path.join(workDir, "helpers.ts"),
-    );
-
-    // 2. Write AI-generated code
+    // Scaffold + AI-generated code
+    await fs.copyFile(path.join(scaffoldDir, "index.template.ts"), path.join(workDir, "index.ts"));
+    await fs.copyFile(path.join(scaffoldDir, "Root.template.tsx"), path.join(workDir, "Root.tsx"));
+    await fs.copyFile(path.join(scaffoldDir, "helpers.ts"), path.join(workDir, "helpers.ts"));
     await fs.writeFile(path.join(workDir, "Reel.tsx"), input.reelTsx);
-    if (input.dataTsx) {
-      await fs.writeFile(path.join(workDir, "data.ts"), input.dataTsx);
-    }
+    if (input.dataTsx) await fs.writeFile(path.join(workDir, "data.ts"), input.dataTsx);
 
-    // 3. Write media files into remotion-renderer/public/ — Remotion resolves
-    //    staticFile() relative to the project's public/ folder, not the workDir.
-    //    Worker is single-threaded, so no concurrent access conflicts.
-    const publicDir = path.join(REMOTION_RENDERER_DIR, "public");
-    const mediaDir = path.join(publicDir, "media");
-    const musicDir = path.join(publicDir, "music");
-    await fs.mkdir(mediaDir, { recursive: true });
-    await fs.mkdir(musicDir, { recursive: true });
-
-    for (const [name, buffer] of input.mediaFiles) {
-      await fs.writeFile(path.join(mediaDir, name), buffer);
-    }
-
-    // 4. Write music file into remotion-renderer/public/music/
-    if (input.musicFile) {
-      await fs.writeFile(
-        path.join(musicDir, input.musicFile.name),
-        input.musicFile.buffer,
-      );
-    }
-
-    // 5. Write tsconfig for the work dir (needed by tsx loader)
-    await fs.writeFile(
-      path.join(workDir, "tsconfig.json"),
-      JSON.stringify({
-        compilerOptions: {
-          target: "ES2022",
-          module: "ES2022",
-          moduleResolution: "bundler",
-          jsx: "react-jsx",
-          strict: true,
-          esModuleInterop: true,
-          skipLibCheck: true,
-        },
-      }),
-    );
-
-    // 6. Spawn the renderer
-    console.log(`[remotion-render] Spawning renderer for ${workDir}`);
-    await spawnRenderer(workDir, timeoutMs);
-
-    const rawPath = path.join(workDir, "output.mp4");
-    if (
-      !(await fs
-        .stat(rawPath)
-        .then(() => true)
-        .catch(() => false))
-    ) {
-      throw new Error("Render completed but output.mp4 not found");
-    }
-
-    const rawSizeMb = (await fs.stat(rawPath)).size / 1024 / 1024;
-    const renderTimeSec = (Date.now() - startTime) / 1000;
-    console.log(
-      `[remotion-render] Rendered in ${renderTimeSec.toFixed(1)}s — ${rawSizeMb.toFixed(1)} MB (raw)`,
-    );
-
-    // The renderer (remotion-renderer/render.ts) now encodes h264 at the target CRF
-    // directly, so we DON'T re-encode here (that was a wasteful 2nd pass). We only
-    // REMUX to move the moov atom to the front (+faststart) for instant web playback
-    // — a stream copy, no re-encode, so it's ~1-2s instead of ~25s.
-    const compressedPath = path.join(workDir, "output-faststart.mp4");
-    console.log(`[remotion-render] Remuxing for faststart (stream copy, no re-encode)...`);
-    const compressStart = Date.now();
-
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn("ffmpeg", [
-        "-i", rawPath,
-        "-c", "copy",
-        "-movflags", "+faststart",
-        "-y", compressedPath,
-      ], { stdio: ["ignore", "pipe", "pipe"] });
-      let stderr = "";
-      child.stdout.on("data", () => {});
-      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      child.on("close", (code: number | null) => {
-        if (code === 0) resolve();
-        else reject(new Error(`ffmpeg remux exit ${code}: ${stderr.slice(0, 300)}`));
-      });
-      child.on("error", reject);
-      setTimeout(() => { child.kill(); reject(new Error("ffmpeg remux timeout")); }, 60000);
-    });
-
-    const compressedSizeMb = (await fs.stat(compressedPath)).size / 1024 / 1024;
-    const compressSec = ((Date.now() - compressStart) / 1000).toFixed(1);
-    console.log(
-      `[remotion-render] Faststart remux in ${compressSec}s: ${compressedSizeMb.toFixed(1)} MB (rendered at target quality, no re-encode)`,
-    );
-
-    // Use the faststart version as the output
-    const outputPath = compressedPath;
-
-    const cleanupPublic = async () => {
-      // Remove media + music from remotion-renderer/public/ to avoid stale files
-      await fs.rm(mediaDir, { recursive: true, force: true }).catch(() => {});
-      await fs.rm(musicDir, { recursive: true, force: true }).catch(() => {});
-    };
-
-    return {
-      outputPath,
-      workDir,
-      renderTimeSec,
-      cleanup: async () => {
-        await fs.rm(workDir, { recursive: true, force: true });
-        await cleanupPublic();
-      },
-    };
+    return await finalizeRender(workDir, input.mediaFiles, input.musicFile, timeoutMs, startTime);
   } catch (err) {
-    // Cleanup on failure — both workDir and public assets
-    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
-    const pubMedia = path.join(REMOTION_RENDERER_DIR, "public", "media");
-    const pubMusic = path.join(REMOTION_RENDERER_DIR, "public", "music");
-    await fs.rm(pubMedia, { recursive: true, force: true }).catch(() => {});
-    await fs.rm(pubMusic, { recursive: true, force: true }).catch(() => {});
+    await cleanupStaged(workDir);
     throw err;
   }
+}
+
+const SCHEMA_REEL_TSX = `import React from "react";
+import { SchemaReel } from "./SchemaReel";
+import { computeDurationInFrames } from "./reelDoc";
+import { doc } from "./doc";
+
+export const REEL_DURATION = computeDurationInFrames(doc);
+export const Reel: React.FC = () => <SchemaReel doc={doc} />;
+`;
+
+const SCHEMA_ROOT_TSX = `import { Composition } from "remotion";
+import { Reel, REEL_DURATION } from "./Reel";
+import { doc } from "./doc";
+
+export const RemotionRoot: React.FC = () => (
+  <Composition id="reel" component={Reel} durationInFrames={REEL_DURATION} fps={doc.fps} width={doc.width} height={doc.height} />
+);
+`;
+
+const SCHEMA_INDEX_TS = `import { registerRoot } from "remotion";
+import { RemotionRoot } from "./Root";
+
+registerRoot(RemotionRoot);
+`;
+
+/**
+ * Render a structured ReelDoc to MP4 via the FIXED SchemaReel renderer. The doc is
+ * written as doc.ts and the renderer's schema files (SchemaReel.tsx, reelDoc.ts,
+ * fonts.ts) are copied into the workdir — no AI code is compiled, so this can't fail
+ * on a syntax error the way the free-form path can.
+ */
+export async function renderReelDoc(input: RenderDocInput): Promise<RenderResult> {
+  const timeoutMs = input.timeoutMs ?? 600_000;
+  const workDir = newWorkDir();
+  await fs.mkdir(workDir, { recursive: true });
+  const schemaDir = path.join(REMOTION_RENDERER_DIR, "schema");
+  const startTime = Date.now();
+
+  try {
+    // Copy the fixed renderer modules into the workdir so relative imports resolve.
+    for (const f of ["SchemaReel.tsx", "reelDoc.ts", "fonts.ts"]) {
+      await fs.copyFile(path.join(schemaDir, f), path.join(workDir, f));
+    }
+    await fs.writeFile(
+      path.join(workDir, "doc.ts"),
+      `import type { ReelDoc } from "./reelDoc";\nexport const doc: ReelDoc = ${JSON.stringify(input.doc, null, 2)};\n`,
+    );
+    await fs.writeFile(path.join(workDir, "Reel.tsx"), SCHEMA_REEL_TSX);
+    await fs.writeFile(path.join(workDir, "Root.tsx"), SCHEMA_ROOT_TSX);
+    await fs.writeFile(path.join(workDir, "index.ts"), SCHEMA_INDEX_TS);
+
+    return await finalizeRender(workDir, input.mediaFiles, input.musicFile, timeoutMs, startTime);
+  } catch (err) {
+    await cleanupStaged(workDir);
+    throw err;
+  }
+}
+
+/**
+ * Shared tail for both render paths: stage media/music into the renderer's public/,
+ * write the workdir tsconfig, spawn the renderer, then remux for faststart. Returns
+ * the RenderResult (its cleanup removes the workdir + staged public assets).
+ */
+async function finalizeRender(
+  workDir: string,
+  mediaFiles: Map<string, Buffer>,
+  musicFile: { name: string; buffer: Buffer } | undefined,
+  timeoutMs: number,
+  startTime: number,
+): Promise<RenderResult> {
+  // Media/music go in remotion-renderer/public/ — Remotion resolves staticFile()
+  // relative to the project's public/ folder, not the workDir. Worker is
+  // single-threaded, so no concurrent-access conflicts.
+  const publicDir = path.join(REMOTION_RENDERER_DIR, "public");
+  const mediaDir = path.join(publicDir, "media");
+  const musicDir = path.join(publicDir, "music");
+  await fs.mkdir(mediaDir, { recursive: true });
+  await fs.mkdir(musicDir, { recursive: true });
+
+  for (const [name, buffer] of mediaFiles) {
+    await fs.writeFile(path.join(mediaDir, name), buffer);
+  }
+  if (musicFile) {
+    await fs.writeFile(path.join(musicDir, musicFile.name), musicFile.buffer);
+  }
+
+  // tsconfig for the tsx loader in the workdir
+  await fs.writeFile(
+    path.join(workDir, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        target: "ES2022",
+        module: "ES2022",
+        moduleResolution: "bundler",
+        jsx: "react-jsx",
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+      },
+    }),
+  );
+
+  console.log(`[remotion-render] Spawning renderer for ${workDir}`);
+  await spawnRenderer(workDir, timeoutMs);
+
+  const rawPath = path.join(workDir, "output.mp4");
+  if (!(await fs.stat(rawPath).then(() => true).catch(() => false))) {
+    throw new Error("Render completed but output.mp4 not found");
+  }
+
+  const rawSizeMb = (await fs.stat(rawPath)).size / 1024 / 1024;
+  const renderTimeSec = (Date.now() - startTime) / 1000;
+  console.log(`[remotion-render] Rendered in ${renderTimeSec.toFixed(1)}s — ${rawSizeMb.toFixed(1)} MB (raw)`);
+
+  // Remux (stream copy) to move the moov atom to the front for instant web playback.
+  // The renderer already encoded h264 at the target CRF, so NO re-encode here.
+  const compressedPath = path.join(workDir, "output-faststart.mp4");
+  console.log(`[remotion-render] Remuxing for faststart (stream copy, no re-encode)...`);
+  const compressStart = Date.now();
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("ffmpeg", [
+      "-i", rawPath,
+      "-c", "copy",
+      "-movflags", "+faststart",
+      "-y", compressedPath,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stdout.on("data", () => {});
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.on("close", (code: number | null) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg remux exit ${code}: ${stderr.slice(0, 300)}`));
+    });
+    child.on("error", reject);
+    setTimeout(() => { child.kill(); reject(new Error("ffmpeg remux timeout")); }, 60000);
+  });
+
+  const compressedSizeMb = (await fs.stat(compressedPath)).size / 1024 / 1024;
+  const compressSec = ((Date.now() - compressStart) / 1000).toFixed(1);
+  console.log(`[remotion-render] Faststart remux in ${compressSec}s: ${compressedSizeMb.toFixed(1)} MB (rendered at target quality, no re-encode)`);
+
+  return {
+    outputPath: compressedPath,
+    workDir,
+    renderTimeSec,
+    cleanup: () => cleanupStaged(workDir),
+  };
 }
 
 /**
@@ -238,7 +273,6 @@ function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
     child.stdout.on("data", (d) => {
       const line = d.toString();
       stdout += line;
-      // Forward render logs to parent's console
       process.stdout.write(`[remotion] ${line}`);
     });
     child.stderr.on("data", (d) => {
@@ -254,9 +288,7 @@ function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
 
     child.on("error", (err) => {
       clearTimeout(timer);
-      reject(
-        new Error(`Failed to spawn renderer: ${err.message}`),
-      );
+      reject(new Error(`Failed to spawn renderer: ${err.message}`));
     });
 
     child.on("close", (code) => {
@@ -264,11 +296,7 @@ function spawnRenderer(workDir: string, timeoutMs: number): Promise<void> {
       if (code === 0) {
         resolve();
       } else {
-        reject(
-          new Error(
-            `Remotion render exited with code ${code}: ${extractRenderError(stdout, stderr)}`,
-          ),
-        );
+        reject(new Error(`Remotion render exited with code ${code}: ${extractRenderError(stdout, stderr)}`));
       }
     });
   });

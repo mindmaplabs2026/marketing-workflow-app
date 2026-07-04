@@ -441,6 +441,10 @@ export async function runReelPipeline(
   const { findAndTrimMusic } = await import("./agent-music");
   const { generateComposition, refineReelComposition, renderWithRepair } = await import("./agent-composition");
   const { evaluateReel } = await import("./agent-reel-evaluator");
+  // Tier 2: structured ReelDoc path (opt-in via REEL_COMPOSITION_MODE=schema).
+  const { generateReelDoc } = await import("./agent-reel-doc");
+  const { renderReelDoc } = await import("@/lib/remotion/render");
+  const COMPOSITION_MODE = process.env.REEL_COMPOSITION_MODE === "schema" ? "schema" : "freeform";
 
   const admin = createAdminClient();
   console.log(`[Worker] Reel Job ${jobId} | START (request ${requestId})`);
@@ -1037,6 +1041,91 @@ export async function runReelPipeline(
 
       // Media + brand assets are downloaded ONCE for the whole job (shared across
       // all variations) — see the shared download block above the loop.
+
+      const musicFileForRender = music.buffer.length > 0
+        ? { name: "track.mp3", buffer: music.buffer }
+        : undefined;
+
+      // ============ Tier 2: structured ReelDoc path (opt-in) ============
+      // Generation + render + eval only; refine/chat stay on the free-form path
+      // (Phase 3 rewires them to JSON mutation). Never hard-fails: generateReelDoc
+      // falls back to a deterministic doc, and the renderer is fixed (no AI code).
+      if (COMPOSITION_MODE === "schema") {
+        console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Generating ReelDoc (schema mode)`);
+        const { doc, source } = await generateReelDoc({
+          script,
+          mediaManifest,
+          hasLogo,
+          hasFooter,
+          hasMusic: music.buffer.length > 0,
+          logoProfile,
+        });
+        console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — ReelDoc (${source}): ${doc.scenes.length} scenes`);
+
+        const schemaRender = await renderReelDoc({ doc, mediaFiles, musicFile: musicFileForRender });
+        console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Rendered in ${schemaRender.renderTimeSec.toFixed(1)}s`);
+
+        const schemaCosts = new CostTracker();
+        schemaCosts.addRenderCall(`reel-render-v${script.variationIndex}`, script.durationSec, schemaRender.renderTimeSec);
+        schemaCosts.addMusicCall(`reel-music-v${script.variationIndex}`, music.source);
+        await appendCosts(jobId, schemaCosts.toJSON());
+
+        // Upload MP4
+        const ts = Date.now();
+        const schemaStoragePath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/reel-${ts}.mp4`;
+        const mp4 = await import("node:fs").then((fs) => fs.promises.readFile(schemaRender.outputPath));
+        const { error: upErr } = await admin.storage.from("designs").upload(schemaStoragePath, mp4, { contentType: "video/mp4", upsert: true });
+        if (upErr) { await schemaRender.cleanup(); throw new Error(`Storage upload failed: ${upErr.message}`); }
+        console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Uploaded: ${schemaStoragePath} (${(mp4.length / 1024 / 1024).toFixed(1)} MB)`);
+
+        // Persist music so future edits reuse the exact soundtrack.
+        let schemaMusicPath: string | undefined;
+        if (music.buffer.length > 0 && music.source !== "fallback-silent") {
+          schemaMusicPath = `${ctx.schoolId}/${requestId}/ai/${script.variationIndex}/music.mp3`;
+          const { error: mErr } = await admin.storage.from("designs").upload(schemaMusicPath, music.buffer, { contentType: "audio/mpeg", upsert: true });
+          if (mErr) { console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Music persist failed (non-fatal): ${mErr.message}`); schemaMusicPath = undefined; }
+        }
+
+        // Evaluate (no refine loop in Phase 2 — eval scores the MP4, format-agnostic).
+        let schemaEval: Record<string, unknown> | null = null;
+        try {
+          const evalCosts = new CostTracker();
+          const evaluation = await evaluateReel({
+            mp4Path: schemaRender.outputPath,
+            schoolName: ctx.schoolName,
+            reelDirection: script.direction,
+            artDirection: { visualRegister: script.visualRegister, colorPalette: script.colorPalette, typography: script.typography },
+            costTracker: evalCosts,
+          });
+          await appendCosts(jobId, evalCosts.toJSON());
+          console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Score: ${evaluation.score}/10 (schema)`);
+          schemaEval = { round: 0, score: evaluation.score, dimensions: evaluation.dimensions, strengths: evaluation.strengths, weaknesses: evaluation.weaknesses, findings: evaluation.findings, feedback: evaluation.feedback };
+        } catch (evalErr) {
+          console.warn(`[Worker] Reel ${jobId} | V${script.variationIndex} — Eval failed (non-fatal): ${evalErr instanceof Error ? evalErr.message : evalErr}`);
+        }
+
+        await admin.from("ai_variations").insert({
+          job_id: jobId,
+          request_id: requestId,
+          variation_index: script.variationIndex,
+          creative_brief: {
+            ...script,
+            _compositionMode: "schema",
+            _reelDoc: doc,
+            _reelDocSource: source,
+            _musicSource: music.source,
+            _musicPath: schemaMusicPath,
+            _musicAttribution: music.attribution ?? null,
+            ...(schemaEval ? { _evaluations: [schemaEval] } : {}),
+          } as unknown as Record<string, unknown>,
+          storage_paths: [schemaStoragePath],
+          poster_type: "reel",
+        });
+
+        await schemaRender.cleanup();
+        return true;
+      }
+      // ============ end schema path ============
 
       // --- Composition Generator (Codex writes Reel.tsx) ---
       console.log(`[Worker] Reel ${jobId} | V${script.variationIndex} — Generating Remotion composition`);
