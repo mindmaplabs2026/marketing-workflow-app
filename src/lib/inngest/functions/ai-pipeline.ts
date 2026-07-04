@@ -60,7 +60,10 @@ export async function fetchContext(requestId: string, opts?: { includeVideos?: b
     if (!isImage && !(isVideo && opts?.includeVideos)) continue;
     const { data: signedData } = await admin.storage
       .from("request-uploads")
-      .createSignedUrl(u.storage_path, 3600);
+      // 6h TTL: these URLs are minted at job start but consumed minutes-to-hours
+      // later (slow transcription/render), so a 1h TTL could expire mid-run and
+      // make Agent 1 see "no data" for every image.
+      .createSignedUrl(u.storage_path, 21600);
     if (signedData?.signedUrl) {
       images.push({
         path: u.storage_path,
@@ -80,7 +83,7 @@ export async function fetchContext(requestId: string, opts?: { includeVideos?: b
   for (const asset of brandAssets ?? []) {
     const { data: signedData } = await admin.storage
       .from("school-assets")
-      .createSignedUrl(asset.storage_path, 3600);
+      .createSignedUrl(asset.storage_path, 21600); // 6h TTL — see request-uploads note above
     brandAssetsWithUrls.push({
       assetType: asset.asset_type,
       storagePath: asset.storage_path,

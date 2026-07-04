@@ -183,6 +183,43 @@ async function processChatEdit(edit: ClaimedChatEdit) {
   }
 }
 
+/**
+ * Self-healing on startup: this worker holds NO jobs the moment it boots, so any
+ * row still in a mid-pipeline status (or a chat-edit still "processing") older
+ * than a few minutes was orphaned by a previous crash / restart / lost Supabase
+ * connection — its terminal status-write never landed. Fail those so the frontend
+ * stops spinning. `queued` is deliberately left alone: it's still claimable.
+ */
+async function reconcileOrphans() {
+  const admin = createAdminClient();
+  const cutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+  try {
+    const { data: jobs } = await admin
+      .from("ai_generation_jobs")
+      .update({
+        status: "failed",
+        error_message: "Orphaned by a worker restart (no live worker); auto-failed on startup.",
+      })
+      .in("status", ["understanding", "creative", "music", "generating"])
+      .lt("created_at", cutoff)
+      .select("id");
+    const { data: edits } = await admin
+      .from("ai_chat_messages")
+      .update({ status: "failed" })
+      .eq("status", "processing")
+      .lt("created_at", cutoff)
+      .select("id");
+    const n = (jobs?.length ?? 0) + (edits?.length ?? 0);
+    if (n > 0) {
+      console.log(
+        `[Worker] Startup reconcile: failed ${n} orphaned item(s) — ${jobs?.length ?? 0} job(s), ${edits?.length ?? 0} chat-edit(s)`,
+      );
+    }
+  } catch (err) {
+    console.warn(`[Worker] Startup reconcile failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 async function loop() {
   initStatusBar(); // pin the floating status bar (no-op unless a TTY)
   // Startup checks
@@ -197,6 +234,8 @@ async function loop() {
   if (!hasWhisper) {
     console.warn("[Worker] NOTE: Whisper not found — video transcription disabled (Agent 1 uses keyframes only). whisper.cpp: brew install whisper-cpp + set WHISPER_CPP_MODEL; or openai-whisper: pipx install openai-whisper");
   }
+
+  await reconcileOrphans(); // fail jobs orphaned by a previous crash so the UI doesn't hang
 
   while (running) {
     // 1) Generation jobs take priority.
