@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { attachUpload, createRequest } from "../actions";
@@ -47,6 +48,11 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
     const title = String(formData.get("title") ?? "").trim();
     if (!title) {
       setError("Give the request a short title.");
+      return;
+    }
+    const dueDate = String(formData.get("due_date") ?? "").trim();
+    if (!dueDate) {
+      setError("Pick a due date for this request.");
       return;
     }
 
@@ -137,7 +143,7 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
           htmlFor="title"
           className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
         >
-          What's this about?
+            What&apos;s this about?
         </label>
         <input
           id="title"
@@ -177,12 +183,13 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
             htmlFor="due_date"
             className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
           >
-            Due date <span className="text-zinc-400">(optional)</span>
+            Due date
           </label>
           <input
             id="due_date"
             name="due_date"
             type="date"
+            required
             className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
           />
         </div>
@@ -262,12 +269,12 @@ export function NewRequestForm({ schools }: { schools: School[] }) {
           {busy ? (progress ?? "Saving…") : "Save"}
         </button>
         {!busy && (
-          <a
+          <Link
             href="/requests"
             className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
           >
             Cancel
-          </a>
+          </Link>
         )}
       </div>
     </form>

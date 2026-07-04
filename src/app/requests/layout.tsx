@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/supabase/auth";
+import { RequestsRouteFrame } from "./requests-route-frame";
 
 export default async function RequestsLayout({
   children,
@@ -10,9 +11,5 @@ export default async function RequestsLayout({
   if (!session) redirect("/login");
   if (session.role === "decision_maker") redirect("/feed");
 
-  return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
-      {children}
-    </div>
-  );
+  return <RequestsRouteFrame>{children}</RequestsRouteFrame>;
 }

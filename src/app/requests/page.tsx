@@ -3,26 +3,71 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/auth";
 import type { RequestStatus } from "@/lib/supabase/types";
-import { STATUS_SHORT, STATUS_BADGE_CLASS, STATUS_DOT_CLASS } from "./status";
-import { bulkApproveRequests, deleteRequest } from "./actions";
-import { BulkApproveSection } from "@/components/bulk-approve";
+import { STATUS_SHORT, STATUS_BADGE_CLASS } from "./status";
+import { archiveRequest, deleteRequest } from "./actions";
 import { ConfirmForm } from "@/components/confirm-form";
 import { SearchInput } from "@/components/search-input";
 import { SelectFilter } from "@/components/select-filter";
 import { Pagination } from "@/components/pagination";
+import { MotionSurface } from "@/components/premium-motion";
+import { RequestRowActions } from "@/components/request-row-actions";
+import { AnimatedNumber } from "@/components/animated-number";
 
-const SECTION_PAGE_SIZE = 10;
+const SECTION_PAGE_SIZE = 3;
 
 const SECTION_PAGE_KEYS = {
   needsYou: "needs-you-page",
-  myWork: "my-work-page",
-  myDrafts: "my-drafts-page",
   inFlight: "in-flight-page",
   published: "published-page",
   archived: "archived-page",
 } as const;
 
 type SectionKey = keyof typeof SECTION_PAGE_KEYS;
+type StatusFilter = "all" | "needs" | "in-flight" | "published" | "archived";
+type OverviewRange = "this-week" | "last-week" | "last-30-days";
+
+type RequestListRow = {
+  id: string;
+  title: string;
+  status: RequestStatus;
+  created_at: string;
+  updated_at: string;
+  due_date: string | null;
+  school_id: string;
+  created_by: string;
+  assigned_designer_id: string | null;
+};
+
+type SchoolLite = { id: string; name: string };
+type ProfileLite = { id: string; full_name: string | null };
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "needs", label: "Needs you" },
+  { value: "in-flight", label: "In flight" },
+  { value: "published", label: "Published" },
+  { value: "archived", label: "Archived" },
+];
+
+const OVERVIEW_RANGE_OPTIONS: { value: OverviewRange; label: string }[] = [
+  { value: "this-week", label: "This week" },
+  { value: "last-week", label: "Last week" },
+  { value: "last-30-days", label: "Last 30 days" },
+];
+
+const ICON_CLASS: Record<"needs" | "design" | "review" | "published", string> = {
+  needs: "bg-orange-50 text-white shadow-orange-100",
+  design: "bg-blue-50 text-white shadow-blue-100",
+  review: "bg-violet-50 text-white shadow-violet-100",
+  published: "bg-emerald-50 text-white shadow-emerald-100",
+};
+
+const ICON_INNER_CLASS: Record<"needs" | "design" | "review" | "published", string> = {
+  needs: "bg-gradient-to-br from-orange-400 to-orange-600 shadow-[0_10px_20px_rgba(249,115,22,0.32)]",
+  design: "bg-gradient-to-br from-blue-400 to-blue-600 shadow-[0_10px_20px_rgba(37,99,235,0.30)]",
+  review: "bg-gradient-to-br from-violet-400 to-violet-700 shadow-[0_10px_20px_rgba(124,58,237,0.30)]",
+  published: "bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_10px_20px_rgba(16,185,129,0.30)]",
+};
 
 function readPage(raw: string | undefined): number {
   const n = parseInt(raw ?? "1", 10);
@@ -43,55 +88,251 @@ function paginate<T>(
   };
 }
 
-type RequestListRow = {
-  id: string;
-  title: string;
-  status: RequestStatus;
-  created_at: string;
-  updated_at: string;
-  school_id: string;
-  created_by: string;
-  assigned_designer_id: string | null;
-};
-
-type SchoolLite = { id: string; name: string };
-type ProfileLite = { id: string; full_name: string | null };
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
+function formatDateOnly(dateOnly: string): string {
+  return new Date(`${dateOnly}T00:00:00+05:30`).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     timeZone: "Asia/Kolkata",
   });
 }
 
-const PROGRESS_PERCENT: Record<RequestStatus, number> = {
-  draft: 10,
-  pending_admin_approval: 25,
-  approved: 40,
-  in_design: 55,
-  design_pending_approval: 70,
-  changes_requested: 60,
-  published: 100,
-  archived: 100,
-};
+function relativeAge(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.max(1, Math.round(diffMs / (1000 * 60)));
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
 
-const PROGRESS_COLOR: Record<RequestStatus, string> = {
-  draft: "bg-zinc-300 dark:bg-zinc-600",
-  pending_admin_approval: "bg-amber-400",
-  approved: "bg-sky-400",
-  in_design: "bg-sky-500",
-  design_pending_approval: "bg-amber-400",
-  changes_requested: "bg-orange-400",
-  published: "bg-emerald-500",
-  archived: "bg-zinc-300 dark:bg-zinc-600",
-};
+function countByStatus(requests: RequestListRow[]) {
+  return requests.reduce(
+    (acc, request) => {
+      acc[request.status] = (acc[request.status] ?? 0) + 1;
+      return acc;
+    },
+    {} as Partial<Record<RequestStatus, number>>,
+  );
+}
+
+function dateOnlyToUtcMs(dateOnly: string): number {
+  const [year, month, day] = dateOnly.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+function todayInKolkataUtcMs(): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return Date.UTC(get("year"), get("month") - 1, get("day"));
+}
+
+function daysUntilDue(dueDate: string | null, todayUtcMs: number): number | null {
+  if (!dueDate) return null;
+  return Math.round((dateOnlyToUtcMs(dueDate) - todayUtcMs) / (24 * 60 * 60 * 1000));
+}
+
+function priorityScore(request: RequestListRow, todayUtcMs: number): number {
+  if (request.status === "published" || request.status === "archived") return 0;
+
+  const dueInDays = daysUntilDue(request.due_date, todayUtcMs);
+  const ageDays = Math.floor((Date.now() - new Date(request.updated_at).getTime()) / (24 * 60 * 60 * 1000));
+
+  let score = 0;
+  if (dueInDays !== null) {
+    if (dueInDays < 0) score += 120 + Math.min(Math.abs(dueInDays), 14);
+    else if (dueInDays === 0) score += 110;
+    else if (dueInDays <= 2) score += 90;
+    else if (dueInDays <= 7) score += 55;
+  }
+
+  if (request.status === "pending_admin_approval") score += 35;
+  else if (request.status === "design_pending_approval") score += 35;
+  else if (request.status === "changes_requested") score += 30;
+  else if (request.status === "approved") score += 25;
+  else if (request.status === "in_design") score += 15;
+
+  if (ageDays >= 5) score += 20;
+  else if (ageDays >= 2) score += 10;
+
+  return score;
+}
+
+function priorityReason(request: RequestListRow, todayUtcMs: number): string {
+  const dueInDays = daysUntilDue(request.due_date, todayUtcMs);
+  if (dueInDays !== null) {
+    if (dueInDays < 0) return `${Math.abs(dueInDays)}d overdue`;
+    if (dueInDays === 0) return "Due today";
+    if (dueInDays === 1) return "Due tomorrow";
+    if (dueInDays <= 7) return `Due in ${dueInDays}d`;
+  }
+
+  if (request.status === "changes_requested") return "Changes requested";
+  if (request.status === "pending_admin_approval" || request.status === "design_pending_approval") return "Awaiting review";
+  if (request.status === "approved") return "Ready for design";
+  return "Active work";
+}
+
+function rowTimingLabel(request: RequestListRow, todayUtcMs: number): string {
+  const dueInDays = daysUntilDue(request.due_date, todayUtcMs);
+  if (dueInDays !== null) {
+    if (dueInDays < 0) return `${Math.abs(dueInDays)}d overdue`;
+    if (dueInDays === 0) return "Due today";
+    if (dueInDays === 1) return "Due tomorrow";
+    return `Due ${formatDateOnly(request.due_date!)}`;
+  }
+  return "NA";
+}
+
+function normalizedFilter(value: string | undefined): StatusFilter {
+  return STATUS_FILTERS.some((item) => item.value === value)
+    ? (value as StatusFilter)
+    : "all";
+}
+
+function normalizedOverviewRange(value: string | undefined): OverviewRange {
+  return OVERVIEW_RANGE_OPTIONS.some((item) => item.value === value)
+    ? (value as OverviewRange)
+    : "this-week";
+}
+
+function RequestIcon({ type, className }: { type: "needs" | "design" | "review" | "published"; className?: string }) {
+  if (type === "needs") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={className}>
+        <path d="M7 4h10M7 20h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M8 4c0 4 2.2 5.9 4 8-1.8 2.1-4 4-4 8M16 4c0 4-2.2 5.9-4 8 1.8 2.1 4 4 4 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M10 8h4M10 17h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "design") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={className}>
+        <path d="M5 16.5V19h2.5L18.2 8.3l-2.5-2.5L5 16.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <path d="M14.6 6.9 17.1 9.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "review") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" className={className}>
+        <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
+        <circle cx="17" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M4 20c.8-3.5 2.9-5.5 5-5.5s4.2 2 5 5.5M14.5 20c.5-2.2 1.8-3.6 3.2-3.6 1.3 0 2.5 1.2 3 3.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M6 12.5l4 4L18 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function Sparkline({
+  color = "violet",
+  extendRight = false,
+}: {
+  color?: "violet" | "orange" | "blue" | "emerald";
+  extendRight?: boolean;
+}) {
+  const stroke = {
+    violet: "#7c3aed",
+    orange: "#f97316",
+    blue: "#2563eb",
+    emerald: "#10b981",
+  }[color];
+  const basePath = "M2 27C13 23 18 18 29 22C39 26 42 30 53 23C63 16 67 14 77 20C88 26 91 22 99 13C107 4 111 14 118 9";
+  const linePath = extendRight
+    ? `${basePath}C124 10 128 13 134 10C137 8 140 11 142 9`
+    : basePath;
+  const fillPath = `${linePath}V34H2V27Z`;
+
+  return (
+    <svg viewBox="0 0 120 34" fill="none" className="h-8 w-full overflow-visible">
+      <path
+        d={fillPath}
+        fill={stroke}
+        opacity="0.12"
+      />
+      <path
+        d={linePath}
+        stroke={stroke}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MiniBars({
+  data,
+}: {
+  data: { label: string; value: number }[];
+}) {
+  const maxValue = Math.max(1, ...data.map((bar) => bar.value));
+  const activeIndex =
+    data.length > 0
+      ? data.reduce(
+          (bestIndex, bar, index) =>
+            bar.value > data[bestIndex].value ? index : bestIndex,
+          0,
+        )
+      : 0;
+
+  return (
+    <div>
+      <div className="flex h-20 items-end gap-2">
+        {data.map((bar, index) => (
+          <span
+            key={bar.label}
+            className={`w-full rounded-t-md ${
+              index === activeIndex ? "bg-violet-600" : "bg-violet-100"
+            }`}
+            style={{ height: `${Math.max(8, Math.round((bar.value / maxValue) * 56))}px` }}
+            title={`${bar.label}: ${bar.value} requests`}
+          />
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-7 text-center text-[10px] font-medium text-slate-400">
+        {data.map((bar) => (
+          <span key={bar.label}>{bar.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Donut({ needs, inFlight, review, published }: { needs: number; inFlight: number; review: number; published: number }) {
+  const total = Math.max(1, needs + inFlight + review + published);
+  const needsDeg = (needs / total) * 360;
+  const inFlightDeg = needsDeg + (inFlight / total) * 360;
+  const reviewDeg = inFlightDeg + (review / total) * 360;
+  return (
+    <span
+      className="relative inline-flex h-20 w-20 rounded-full"
+      style={{
+        background: `conic-gradient(#f97316 0deg ${needsDeg}deg, #2563eb ${needsDeg}deg ${inFlightDeg}deg, #7c3aed ${inFlightDeg}deg ${reviewDeg}deg, #10b981 ${reviewDeg}deg 360deg)`,
+      }}
+    >
+      <span className="absolute inset-3 rounded-full bg-white" />
+    </span>
+  );
+}
 
 export default async function RequestsListPage({
   searchParams,
 }: {
   searchParams: Promise<
-    { school?: string; q?: string } & Partial<
+    { school?: string; q?: string; status?: string; overview?: string } & Partial<
       Record<(typeof SECTION_PAGE_KEYS)[SectionKey], string>
     >
   >;
@@ -100,42 +341,43 @@ export default async function RequestsListPage({
   const schoolFilter = params.school ?? "";
   const rawQuery = params.q ?? "";
   const searchQuery = rawQuery.trim().toLowerCase();
+  const statusFilter = normalizedFilter(params.status);
+  const overviewRange = normalizedOverviewRange(params.overview);
 
   const sectionPages: Record<SectionKey, number> = {
     needsYou: readPage(params[SECTION_PAGE_KEYS.needsYou]),
-    myWork: readPage(params[SECTION_PAGE_KEYS.myWork]),
-    myDrafts: readPage(params[SECTION_PAGE_KEYS.myDrafts]),
     inFlight: readPage(params[SECTION_PAGE_KEYS.inFlight]),
     published: readPage(params[SECTION_PAGE_KEYS.published]),
     archived: readPage(params[SECTION_PAGE_KEYS.archived]),
   };
 
-  function sectionHref(target: SectionKey, page: number): string {
-    const sp = new URLSearchParams();
-    if (rawQuery) sp.set("q", rawQuery);
-    if (schoolFilter) sp.set("school", schoolFilter);
-    for (const key of Object.keys(SECTION_PAGE_KEYS) as SectionKey[]) {
-      const value = key === target ? page : sectionPages[key];
-      if (value > 1) sp.set(SECTION_PAGE_KEYS[key], String(value));
-    }
-    const qs = sp.toString();
-    return qs ? `/requests?${qs}` : "/requests";
-  }
-
   const session = await getSessionUser();
   if (!session) redirect("/login");
-  const { role } = session;
+  const { id: userId, role } = session;
   const supabase = await createClient();
 
   const canRaise = role === "teacher" || role === "school_admin";
   const isReviewer = role === "school_admin" || role === "super_admin";
   const isDesigner = role === "designer" || role === "super_admin";
-  // Same gate as the server action: super_admin and school_admin (RLS has
-  // already scoped their visible rows to their own schools) can hard-delete
-  // requests. School_admin is limited to draft / pending so design history
-  // stays intact downstream; super_admin can delete at any status.
-  const isManagingAdmin =
-    role === "super_admin" || role === "school_admin";
+  const isManagingAdmin = role === "super_admin" || role === "school_admin";
+
+  function canEditRequest(request: RequestListRow): boolean {
+    return (
+      role === "super_admin" ||
+      (request.created_by === userId && request.status === "draft") ||
+      (isManagingAdmin &&
+        (request.status === "draft" || request.status === "pending_admin_approval"))
+    );
+  }
+
+  function canArchiveRequest(request: RequestListRow): boolean {
+    return (
+      (request.created_by === userId || isReviewer) &&
+      request.status !== "archived" &&
+      request.status !== "published"
+    );
+  }
+
   function canDeleteStatus(s: RequestStatus): boolean {
     if (role === "super_admin") return true;
     return s === "draft" || s === "pending_admin_approval";
@@ -145,9 +387,9 @@ export default async function RequestsListPage({
     supabase
       .from("requests")
       .select(
-        "id, title, status, created_at, updated_at, school_id, created_by, assigned_designer_id",
+        "id, title, status, created_at, updated_at, due_date, school_id, created_by, assigned_designer_id",
       )
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .returns<RequestListRow[]>(),
     supabase
       .from("schools")
@@ -160,17 +402,7 @@ export default async function RequestsListPage({
   const schoolsList = schoolsRes.data ?? [];
   const schoolsById = new Map(schoolsList.map((s) => [s.id, s.name]));
 
-  let requests = schoolFilter
-    ? allRequests.filter((r) => r.school_id === schoolFilter)
-    : allRequests;
-  if (searchQuery) {
-    requests = requests.filter((r) =>
-      r.title.toLowerCase().includes(searchQuery),
-    );
-  }
-  const showSchoolFilter = isDesigner && schoolsList.length > 1;
-
-  const creatorIds = Array.from(new Set(requests.map((r) => r.created_by)));
+  const creatorIds = Array.from(new Set(allRequests.map((r) => r.created_by)));
   let creators: ProfileLite[] = [];
   if (creatorIds.length > 0) {
     const { data } = await supabase
@@ -182,104 +414,192 @@ export default async function RequestsListPage({
   }
   const creatorById = new Map(creators.map((p) => [p.id, p.full_name]));
 
+  let requests = schoolFilter
+    ? allRequests.filter((r) => r.school_id === schoolFilter)
+    : allRequests;
+
+  if (searchQuery) {
+    requests = requests.filter((r) => {
+      const schoolName = schoolsById.get(r.school_id) ?? "";
+      const creatorName = creatorById.get(r.created_by) ?? "";
+      return `${r.title} ${schoolName} ${creatorName}`
+        .toLowerCase()
+        .includes(searchQuery);
+    });
+  }
+
   const needsYou: RequestListRow[] = [];
-  const myWork: RequestListRow[] = []; // designer's assigned in-progress work
-  const myDrafts: RequestListRow[] = [];
   const inFlight: RequestListRow[] = [];
   const published: RequestListRow[] = [];
   const archived: RequestListRow[] = [];
 
-  for (const r of requests) {
-    if (r.status === "archived") {
-      archived.push(r);
+  for (const request of requests) {
+    if (request.status === "archived") {
+      archived.push(request);
       continue;
     }
-    if (r.status === "published") {
-      published.push(r);
-      continue;
-    }
-    if (r.status === "draft") {
-      if (r.created_by === session.id) myDrafts.push(r);
-      else if (isReviewer) inFlight.push(r);
+    if (request.status === "published") {
+      published.push(request);
       continue;
     }
 
-    let queued = false;
-    if (isReviewer) {
-      if (
-        r.status === "pending_admin_approval" ||
-        r.status === "design_pending_approval"
-      ) {
-        needsYou.push(r);
-        queued = true;
-      }
+    const needsReviewer =
+      isReviewer &&
+      (request.status === "pending_admin_approval" ||
+        request.status === "design_pending_approval");
+    const needsDesigner = isDesigner && request.status === "approved";
+
+    if (needsReviewer || needsDesigner) {
+      needsYou.push(request);
+      continue;
     }
-    if (!queued && isDesigner) {
-      const mine = r.assigned_designer_id === session.id;
-      if (r.status === "approved") {
-        needsYou.push(r);
-        queued = true;
-      } else if (
-        mine &&
-        (r.status === "in_design" ||
-          r.status === "changes_requested" ||
-          r.status === "design_pending_approval")
-      ) {
-        myWork.push(r);
-        queued = true;
-      }
-    }
-    if (!queued) inFlight.push(r);
+
+    inFlight.push(request);
   }
 
-  // School-admin snapshot: clarity-doc "glances at the analytics from their
-  // last post." Scoped to whatever this user can already see (RLS-filtered).
-  let snapshot: {
-    publishedLast30: number;
-    avgDaysToPublish: number | null;
-    waitingOnYou: number;
-  } | null = null;
-  if (isReviewer) {
-    const since30Ms = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const recentPublished = requests.filter(
-      (r) =>
-        r.status === "published" &&
-        new Date(r.updated_at).getTime() >= since30Ms,
-    );
-    let avg: number | null = null;
-    if (recentPublished.length > 0) {
-      const sumDays = recentPublished.reduce((acc, r) => {
-        const days =
-          (new Date(r.updated_at).getTime() -
-            new Date(r.created_at).getTime()) /
-          (1000 * 60 * 60 * 24);
-        return acc + Math.max(0, days);
-      }, 0);
-      avg = Math.round((sumDays / recentPublished.length) * 10) / 10;
-    }
-    const waiting = requests.filter(
-      (r) =>
-        r.status === "pending_admin_approval" ||
-        r.status === "design_pending_approval",
-    ).length;
-    snapshot = {
-      publishedLast30: recentPublished.length,
-      avgDaysToPublish: avg,
-      waitingOnYou: waiting,
-    };
+  function visibleSection(key: StatusFilter): boolean {
+    return statusFilter === "all" || statusFilter === key;
   }
+
+  const statusCounts = countByStatus(requests);
+  const inDesignCount =
+    (statusCounts.approved ?? 0) +
+    (statusCounts.in_design ?? 0) +
+    (statusCounts.changes_requested ?? 0);
+  const pendingReviewCount =
+    (statusCounts.pending_admin_approval ?? 0) +
+    (statusCounts.design_pending_approval ?? 0);
+  const nowMs = Date.now();
+  const today = new Date(nowMs);
+  today.setHours(0, 0, 0, 0);
+  const dayIndex = (today.getDay() + 6) % 7;
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - dayIndex);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+  const lastWeekStart = new Date(weekStart);
+  lastWeekStart.setDate(weekStart.getDate() - 7);
+  const previousWeekStart = new Date(lastWeekStart);
+  previousWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const last30Start = new Date(today);
+  last30Start.setDate(today.getDate() - 29);
+  const nextDay = new Date(today);
+  nextDay.setDate(today.getDate() + 1);
+  const previous30Start = new Date(last30Start);
+  previous30Start.setDate(last30Start.getDate() - 30);
+  const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const overviewRangeMeta = {
+    "this-week": {
+      label: "This week",
+      comparisonLabel: "vs last week",
+      start: weekStart,
+      end: weekEnd,
+      previousStart: lastWeekStart,
+      previousEnd: weekStart,
+    },
+    "last-week": {
+      label: "Last week",
+      comparisonLabel: "vs previous week",
+      start: lastWeekStart,
+      end: weekStart,
+      previousStart: previousWeekStart,
+      previousEnd: lastWeekStart,
+    },
+    "last-30-days": {
+      label: "Last 30 days",
+      comparisonLabel: "vs previous 30 days",
+      start: last30Start,
+      end: nextDay,
+      previousStart: previous30Start,
+      previousEnd: last30Start,
+    },
+  }[overviewRange];
+  const overviewRequests = requests.filter((request) => {
+    const createdAt = new Date(request.created_at);
+    return createdAt >= overviewRangeMeta.start && createdAt < overviewRangeMeta.end;
+  });
+  const previousOverviewRequests = requests.filter((request) => {
+    const createdAt = new Date(request.created_at);
+    return createdAt >= overviewRangeMeta.previousStart && createdAt < overviewRangeMeta.previousEnd;
+  });
+  const overviewWeekdayCounts = Array.from({ length: 7 }, () => 0);
+
+  for (const request of overviewRequests) {
+    const createdAt = new Date(request.created_at);
+    overviewWeekdayCounts[(createdAt.getDay() + 6) % 7] += 1;
+  }
+
+  const overviewRequestBars = weekdayLabels.map((label, index) => ({
+    label,
+    value: overviewWeekdayCounts[index],
+  }));
+  const overviewStatusCounts = countByStatus(overviewRequests);
+  const overviewNeedsCount =
+    (overviewStatusCounts.pending_admin_approval ?? 0) +
+    (overviewStatusCounts.approved ?? 0);
+  const overviewInFlightCount =
+    (overviewStatusCounts.in_design ?? 0) +
+    (overviewStatusCounts.changes_requested ?? 0);
+  const overviewReviewCount = overviewStatusCounts.design_pending_approval ?? 0;
+  const overviewPublishedCount = overviewStatusCounts.published ?? 0;
+  const overviewTotal = overviewRequests.length;
+  const overviewPercent = (value: number) =>
+    overviewTotal > 0 ? Math.round((value / overviewTotal) * 100) : 0;
+  const overviewChange =
+    previousOverviewRequests.length > 0
+      ? Math.round(((overviewTotal - previousOverviewRequests.length) / previousOverviewRequests.length) * 100)
+      : overviewTotal > 0
+        ? 100
+        : 0;
+  const overviewChangePrefix = overviewChange >= 0 ? "+" : "-";
+  const todayUtcMs = todayInKolkataUtcMs();
+  const highPriority = requests
+    .map((request) => ({
+      request,
+      score: priorityScore(request, todayUtcMs),
+    }))
+    .filter((item) => item.score >= 50)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const aDue = a.request.due_date ? dateOnlyToUtcMs(a.request.due_date) : Number.MAX_SAFE_INTEGER;
+      const bDue = b.request.due_date ? dateOnlyToUtcMs(b.request.due_date) : Number.MAX_SAFE_INTEGER;
+      if (aDue !== bDue) return aDue - bDue;
+      return new Date(a.request.updated_at).getTime() - new Date(b.request.updated_at).getTime();
+    })
+    .map((item) => item.request);
+  const publishedLast30 = published.filter(
+    (request) =>
+      nowMs - new Date(request.updated_at).getTime() <= 30 * 24 * 60 * 60 * 1000,
+  ).length;
 
   const needsYouView = paginate(needsYou, sectionPages.needsYou);
-  const myWorkView = paginate(myWork, sectionPages.myWork);
-  const myDraftsView = paginate(myDrafts, sectionPages.myDrafts);
   const inFlightView = paginate(inFlight, sectionPages.inFlight);
   const publishedView = paginate(published, sectionPages.published);
   const archivedView = paginate(archived, sectionPages.archived);
+  const latestActivity = [...requests]
+    .sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    )
+    .slice(0, 3);
 
-  const needsYouApprovable = needsYou.filter(
-    (r) => r.status === "pending_admin_approval",
-  ).length;
-  const needsYouOthers = needsYou.length - needsYouApprovable;
+  function withParams(next: Partial<Record<string, string>>) {
+    const sp = new URLSearchParams();
+    if (rawQuery) sp.set("q", rawQuery);
+    if (schoolFilter) sp.set("school", schoolFilter);
+    if (statusFilter !== "all") sp.set("status", statusFilter);
+    if (overviewRange !== "this-week") sp.set("overview", overviewRange);
+    for (const [key, value] of Object.entries(next)) {
+      if (value) sp.set(key, value);
+      else sp.delete(key);
+    }
+    const qs = sp.toString();
+    return qs ? `/requests?${qs}` : "/requests";
+  }
+
+  function sectionHref(target: SectionKey, page: number): string {
+    return withParams({ [SECTION_PAGE_KEYS[target]]: page > 1 ? String(page) : "" });
+  }
 
   function sectionPagination(key: SectionKey, totalItems: number) {
     return (
@@ -287,289 +607,677 @@ export default async function RequestsListPage({
         totalItems={totalItems}
         pageSize={SECTION_PAGE_SIZE}
         currentPage={sectionPages[key]}
-        pageHref={(p) => sectionHref(key, p)}
+        pageHref={(page) => sectionHref(key, page)}
       />
     );
   }
 
+  const showSchoolFilter = isDesigner && schoolsList.length > 1;
+
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            Requests
-          </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Everything in flight for your school.
-          </p>
-        </div>
-        {canRaise && (
-          <Link
-            href="/requests/new"
-            className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-600"
-          >
-            + Raise
-          </Link>
-        )}
-      </div>
-
-      {requestsRes.error && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
-          {requestsRes.error.message}
-        </p>
-      )}
-
-      <SearchInput
-        initialValue={searchQuery}
-        placeholder="Search requests..."
-      />
-
-      {showSchoolFilter && (
-        <div className="flex items-center gap-2">
-          <label htmlFor="school-filter" className="text-xs font-medium text-zinc-500">
-            School
-          </label>
-          <SelectFilter
-            paramName="school"
-            ariaLabel="Filter by school"
-            options={schoolsList.map((s) => ({ value: s.id, label: s.name }))}
-            allLabel="All schools"
-          />
-        </div>
-      )}
-
-      {snapshot && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Stat label="Published (30d)" value={snapshot.publishedLast30} />
-          <Stat
-            label="Avg days to publish"
-            value={
-              snapshot.avgDaysToPublish === null
-                ? "—"
-                : snapshot.avgDaysToPublish
-            }
-          />
-          <Stat
-            label="Waiting on you"
-            value={snapshot.waitingOnYou}
-            urgent={snapshot.waitingOnYou > 0}
-          />
-        </div>
-      )}
-
-      {isReviewer && needsYou.length > 0 ? (
-        <BulkApproveSection
-          title="Needs you"
-          items={needsYouView.slice.map((r) => ({
-            id: r.id,
-            title: r.title,
-            status: r.status,
-            creatorName: creatorById.get(r.created_by)?.trim() || "someone",
-            schoolName: schoolsById.get(r.school_id) ?? "",
-            date: r.created_at,
-            canDelete: isManagingAdmin && canDeleteStatus(r.status),
-          }))}
-          totalCount={needsYou.length}
-          totalApprovable={needsYouApprovable}
-          totalOthers={needsYouOthers}
-          pagination={sectionPagination("needsYou", needsYou.length)}
-          approveAction={bulkApproveRequests}
-          deleteAction={isManagingAdmin ? deleteRequest : undefined}
-        />
-      ) : (
-        <Section
-          title="Needs you"
-          items={needsYouView.slice}
-          totalCount={needsYou.length}
-          variant="urgent"
-          pagination={sectionPagination("needsYou", needsYou.length)}
-        />
-      )}
-      {myWork.length > 0 && (
-        <Section
-          title="My work"
-          items={myWorkView.slice}
-          totalCount={myWork.length}
-          variant="urgent"
-          pagination={sectionPagination("myWork", myWork.length)}
-        />
-      )}
-      <Section
-        title="My drafts"
-        items={myDraftsView.slice}
-        totalCount={myDrafts.length}
-        variant="muted"
-        pagination={sectionPagination("myDrafts", myDrafts.length)}
-      />
-      <Section
-        title="In flight"
-        items={inFlightView.slice}
-        totalCount={inFlight.length}
-        pagination={sectionPagination("inFlight", inFlight.length)}
-      />
-      <Section
-        title="Published"
-        items={publishedView.slice}
-        totalCount={published.length}
-        pagination={sectionPagination("published", published.length)}
-      />
-      <Section
-        title="Archived"
-        items={archivedView.slice}
-        totalCount={archived.length}
-        variant="muted"
-        pagination={sectionPagination("archived", archived.length)}
-      />
-
-      {requests.length === 0 && (
-        <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
-            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
-              <path d="M9 4h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" stroke="currentColor" strokeWidth="1.6"/>
-              <path d="M10 9h4M10 13h4M10 17h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    <div className="min-h-full overflow-x-hidden bg-[radial-gradient(circle_at_78%_4%,rgba(124,58,237,0.13),transparent_29%),radial-gradient(circle_at_18%_18%,rgba(14,165,233,0.08),transparent_25%),linear-gradient(180deg,#ffffff_0%,#fbfbff_48%,#f8fafc_100%)] px-3 pb-5 pt-0 text-slate-950 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1360px] space-y-4">
+        <section className="relative min-h-24 overflow-hidden pb-2 pt-2 sm:pt-3">
+          <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[58%] overflow-hidden lg:block">
+            <div className="absolute left-2 top-12 h-16 w-[540px] -rotate-3 rounded-full bg-violet-100/55 blur-3xl" />
+            <svg
+              viewBox="0 0 600 120"
+              fill="none"
+              className="absolute left-9 top-7 h-28 w-[600px] animate-[request-wave-float_7s_ease-in-out_infinite] motion-reduce:animate-none"
+              aria-hidden="true"
+            >
+              <path
+                d="M70 40C138 43 190 58 252 44C318 29 374 20 446 29C511 37 552 27 592 10"
+                stroke="url(#requestTrailD)"
+                strokeWidth="2"
+                strokeLinecap="round"
+                opacity="0.18"
+              />
+              <path
+                d="M68 47C142 52 196 72 260 54C330 32 382 29 452 42C510 53 552 39 590 21"
+                stroke="url(#requestTrailA)"
+                strokeWidth="10"
+                strokeLinecap="round"
+                opacity="0.18"
+              />
+              <path
+                d="M68 62C140 66 204 84 268 66C339 45 397 46 462 58C515 68 554 56 588 38"
+                stroke="url(#requestTrailB)"
+                strokeWidth="6"
+                strokeLinecap="round"
+                opacity="0.30"
+              />
+              <path
+                d="M69 35C142 38 210 56 270 38C343 16 406 24 472 34C522 42 558 30 596 12"
+                stroke="url(#requestTrailC)"
+                strokeWidth="3"
+                strokeLinecap="round"
+                opacity="0.20"
+              />
+              <path
+                d="M71 72C145 80 202 93 266 77C338 59 404 57 468 68C522 78 558 65 590 49"
+                stroke="url(#requestTrailE)"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                opacity="0.16"
+              />
+              <circle cx="202" cy="18" r="3.5" fill="#a78bfa" opacity="0.85" />
+              <circle cx="318" cy="61" r="4" fill="#2563eb" opacity="0.85" />
+              <circle cx="442" cy="23" r="3" fill="#c4b5fd" opacity="0.9" />
+              <circle cx="92" cy="26" r="2.5" fill="#c4b5fd" opacity="0.85" />
+              <circle cx="118" cy="77" r="2" fill="#ddd6fe" opacity="0.9" />
+              <circle cx="252" cy="30" r="2" fill="#a78bfa" opacity="0.75" />
+              <circle cx="548" cy="54" r="2.5" fill="#bfdbfe" opacity="0.75" />
+              <circle cx="158" cy="43" r="2.2" fill="#8b5cf6" opacity="0.55" />
+              <circle cx="286" cy="84" r="2" fill="#c4b5fd" opacity="0.75" />
+              <circle cx="384" cy="75" r="2.5" fill="#7c3aed" opacity="0.45" />
+              <circle cx="512" cy="18" r="2.2" fill="#a78bfa" opacity="0.65" />
+              <defs>
+                <linearGradient id="requestTrailD" x1="70" y1="40" x2="592" y2="10" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#ddd6fe" stopOpacity="0" />
+                  <stop offset="0.42" stopColor="#c4b5fd" />
+                  <stop offset="1" stopColor="#dbeafe" stopOpacity="0" />
+                </linearGradient>
+                <linearGradient id="requestTrailA" x1="68" y1="47" x2="590" y2="21" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#8b5cf6" stopOpacity="0" />
+                  <stop offset="0.35" stopColor="#8b5cf6" />
+                  <stop offset="1" stopColor="#2563eb" stopOpacity="0" />
+                </linearGradient>
+                <linearGradient id="requestTrailB" x1="68" y1="62" x2="588" y2="38" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#c4b5fd" stopOpacity="0" />
+                  <stop offset="0.5" stopColor="#7c3aed" />
+                  <stop offset="1" stopColor="#93c5fd" stopOpacity="0" />
+                </linearGradient>
+                <linearGradient id="requestTrailC" x1="69" y1="35" x2="596" y2="12" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#ddd6fe" stopOpacity="0" />
+                  <stop offset="0.48" stopColor="#a78bfa" />
+                  <stop offset="1" stopColor="#bfdbfe" stopOpacity="0" />
+                </linearGradient>
+                <linearGradient id="requestTrailE" x1="71" y1="72" x2="590" y2="49" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#ede9fe" stopOpacity="0" />
+                  <stop offset="0.5" stopColor="#a78bfa" />
+                  <stop offset="1" stopColor="#bfdbfe" stopOpacity="0" />
+                </linearGradient>
+              </defs>
             </svg>
+            <div className="absolute left-14 top-6 h-16 w-20 rotate-12 animate-[request-card-float_6s_ease-in-out_infinite] overflow-hidden rounded-2xl border border-violet-100/90 bg-white shadow-[0_18px_38px_rgba(124,58,237,0.16)] ring-1 ring-white/80 motion-reduce:animate-none">
+              <div className="h-3 rounded-t-2xl bg-violet-500" />
+              <div className="flex items-center gap-1 px-3 pt-3">
+                <span className="h-1.5 w-1.5 rounded-full bg-violet-700" />
+                <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+              </div>
+              <div className="px-2 pt-0.5">
+                <Sparkline />
+              </div>
+            </div>
           </div>
-          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-            {canRaise ? "Raise your first request." : "Nothing here yet."}
-          </p>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            {canRaise
-              ? "Tap \"New request\" to send it over to the design team."
-              : "Once your team raises requests, you'll see them here."}
-          </p>
-        </div>
-      )}
+
+          <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-lg">
+              <h1 className="text-3xl font-semibold leading-tight tracking-[-0.01em] text-slate-950 sm:text-[2.6rem]">Reguests in motion</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-base">
+                Everything you need to plan, create and deliver impactful marketing.
+              </p>
+            </div>
+            {canRaise && (
+              <Link
+                href="/requests/new"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-violet-500 to-violet-700 px-5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(124,58,237,0.28)] ring-1 ring-violet-400/40 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(124,58,237,0.34)] focus:outline-none focus:ring-4 focus:ring-violet-200 motion-reduce:transform-none"
+              >
+                <span className="text-lg leading-none">+</span>
+                Raise request
+              </Link>
+            )}
+          </div>
+
+          {requestsRes.error && (
+            <p className="relative z-10 mt-5 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {requestsRes.error.message}
+            </p>
+          )}
+        </section>
+
+        <section className="grid min-w-0 gap-6 xl:-mt-2 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0 space-y-5">
+            <Panel
+              title="Request overview"
+              action={<OverviewRangeFilter />}
+              className="md:hidden"
+            >
+              <p className="text-xs font-medium text-zinc-500">Total requests</p>
+              <div className="mt-2 flex items-end gap-3">
+                <p className="text-3xl font-semibold text-zinc-950">
+                  <AnimatedNumber value={overviewTotal} />
+                </p>
+                <p className={`pb-1 text-xs font-semibold ${overviewChange >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                  {overviewChangePrefix}<AnimatedNumber value={Math.abs(overviewChange)} suffix="%" /> {overviewRangeMeta.comparisonLabel}
+                </p>
+              </div>
+              <div className="mt-5">
+                <MiniBars data={overviewRequestBars} />
+              </div>
+              <div className="mt-5 flex items-center gap-4">
+                <Donut
+                  needs={overviewNeedsCount}
+                  inFlight={overviewInFlightCount}
+                  review={overviewReviewCount}
+                  published={overviewPublishedCount}
+                />
+                <div className="min-w-0 flex-1 space-y-2 text-xs">
+                  <Legend color="bg-orange-500" label="Needs you" value={overviewPercent(overviewNeedsCount)} suffix="%" />
+                  <Legend color="bg-blue-500" label="In flight" value={overviewPercent(overviewInFlightCount)} suffix="%" />
+                  <Legend color="bg-violet-500" label="In review" value={overviewPercent(overviewReviewCount)} suffix="%" />
+                  <Legend color="bg-emerald-500" label="Published" value={overviewPercent(overviewPublishedCount)} suffix="%" />
+                </div>
+              </div>
+            </Panel>
+
+            <section className="grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
+              <MetricCard
+                label="Needs you"
+                value={needsYou.length}
+                note="Action required"
+                icon="needs"
+                color="orange"
+              />
+              <MetricCard
+                label="Design"
+                value={inDesignCount}
+                note="Across schools"
+                icon="design"
+                color="blue"
+              />
+              <MetricCard
+                label="In review"
+                value={pendingReviewCount}
+                note="Awaiting feedback"
+                icon="review"
+                color="violet"
+              />
+              <MetricCard
+                label="Published"
+                value={publishedLast30}
+                note="Last 30 days"
+                icon="published"
+                color="emerald"
+              />
+            </section>
+
+            <div className="rounded-2xl border border-white/80 bg-white/86 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.07)] ring-1 ring-slate-200/70 backdrop-blur-xl">
+              <div className="grid gap-3 xl:flex xl:items-end xl:gap-2">
+                <div className="xl:min-w-0 xl:flex-[1_1_260px]">
+                  <SearchInput
+                    initialValue={rawQuery}
+                    placeholder="Search by title, school or owner..."
+                    resetParams={Object.values(SECTION_PAGE_KEYS)}
+                  />
+                </div>
+                {showSchoolFilter ? (
+                  <div className="xl:w-32 xl:shrink-0">
+                    <label htmlFor="school-filter" className="mb-1.5 block text-xs font-semibold text-slate-500">
+                      School
+                    </label>
+                    <SelectFilter
+                      paramName="school"
+                      ariaLabel="Filter by school"
+                      options={schoolsList.map((s) => ({
+                        value: s.id,
+                        label: s.name,
+                      }))}
+                      allLabel="All schools"
+                      resetParams={Object.values(SECTION_PAGE_KEYS)}
+                    />
+                  </div>
+                ) : (
+                  <div className="hidden xl:block xl:w-32 xl:shrink-0" />
+                )}
+                <div className="xl:shrink-0">
+                  <p className="mb-1.5 text-xs font-semibold text-slate-500">Status</p>
+                  <div className="flex flex-wrap items-center gap-1 xl:flex-nowrap">
+                    {STATUS_FILTERS.map((item) => {
+                      const active = statusFilter === item.value;
+                      return (
+                        <Link
+                          key={item.value}
+                          href={withParams({
+                            status: item.value === "all" ? "" : item.value,
+                            ...Object.fromEntries(
+                              Object.values(SECTION_PAGE_KEYS).map((key) => [key, ""]),
+                            ),
+                          })}
+                          className={`whitespace-nowrap rounded-full px-2 py-1.5 text-[11px] font-semibold shadow-sm ring-1 transition duration-200 hover:-translate-y-0.5 motion-reduce:transform-none ${
+                            active
+                              ? "bg-gradient-to-b from-violet-500 to-violet-700 text-white ring-violet-400/40 shadow-violet-200"
+                              : item.value === "needs"
+                                ? "bg-orange-50 text-orange-600 ring-orange-100 hover:bg-orange-100"
+                                : item.value === "in-flight"
+                                  ? "bg-blue-50 text-blue-600 ring-blue-100 hover:bg-blue-100"
+                                  : item.value === "published"
+                                    ? "bg-emerald-50 text-emerald-700 ring-emerald-100 hover:bg-emerald-100"
+                                    : "bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          {item.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                  {(rawQuery || schoolFilter || statusFilter !== "all") && (
+                    <Link
+                      href="/requests"
+                      className="mt-2 inline-flex w-full justify-end rounded-full px-2 text-xs font-semibold text-violet-600 transition hover:text-violet-700"
+                    >
+                      Clear all
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {visibleSection("needs") && (
+              <RequestSection
+                title="Needs you"
+                count={needsYou.length}
+                items={needsYouView.slice}
+                tone="orange"
+                pagination={sectionPagination("needsYou", needsYou.length)}
+              />
+            )}
+            {visibleSection("in-flight") && (
+              <RequestSection
+                title="In flight"
+                count={inFlight.length}
+                items={inFlightView.slice}
+                tone="blue"
+                pagination={sectionPagination("inFlight", inFlight.length)}
+              />
+            )}
+            {visibleSection("published") && (
+              <RequestSection
+                title="Published"
+                count={published.length}
+                items={publishedView.slice}
+                tone="emerald"
+                pagination={sectionPagination("published", published.length)}
+              />
+            )}
+            {visibleSection("archived") && (
+              <RequestSection
+                title="Archived"
+                count={archived.length}
+                items={archivedView.slice}
+                tone="zinc"
+                pagination={sectionPagination("archived", archived.length)}
+              />
+            )}
+
+            {requests.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/80 p-10 text-center shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+                <p className="text-sm font-semibold text-slate-950">
+                  {canRaise ? "Raise your first request." : "Nothing here yet."}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {canRaise
+                    ? "Tap Raise request to send a brief to the design team."
+                    : "Once your team raises requests, they will appear here."}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <aside className="min-w-0 space-y-4 xl:-mt-8">
+            <Panel
+              title="Request overview"
+              action={<OverviewRangeFilter />}
+              className="hidden md:block"
+            >
+              <p className="text-xs font-medium text-zinc-500">Total requests</p>
+              <div className="mt-2 flex items-end gap-3">
+                <p className="text-3xl font-semibold text-zinc-950">
+                  <AnimatedNumber value={overviewTotal} />
+                </p>
+                <p className={`pb-1 text-xs font-semibold ${overviewChange >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                  {overviewChangePrefix}<AnimatedNumber value={Math.abs(overviewChange)} suffix="%" /> {overviewRangeMeta.comparisonLabel}
+                </p>
+              </div>
+              <div className="mt-5">
+                <MiniBars data={overviewRequestBars} />
+              </div>
+              <div className="mt-5 flex items-center gap-4">
+                <Donut
+                  needs={overviewNeedsCount}
+                  inFlight={overviewInFlightCount}
+                  review={overviewReviewCount}
+                  published={overviewPublishedCount}
+                />
+                <div className="min-w-0 flex-1 space-y-2 text-xs">
+                  <Legend color="bg-orange-500" label="Needs you" value={overviewPercent(overviewNeedsCount)} suffix="%" />
+                  <Legend color="bg-blue-500" label="In flight" value={overviewPercent(overviewInFlightCount)} suffix="%" />
+                  <Legend color="bg-violet-500" label="In review" value={overviewPercent(overviewReviewCount)} suffix="%" />
+                  <Legend color="bg-emerald-500" label="Published" value={overviewPercent(overviewPublishedCount)} suffix="%" />
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title="High priority" badge={String(highPriority.length)}>
+              <div className="space-y-3">
+                {highPriority.slice(0, 3).map((request) => (
+                  <Link
+                    key={request.id}
+                    href={`/requests/${request.id}`}
+                    className="flex items-center gap-3 rounded-xl p-1.5 transition hover:bg-zinc-50"
+                  >
+                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-50 text-xs font-semibold text-violet-600">
+                      {(schoolsById.get(request.school_id) ?? "S").slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-semibold text-zinc-950">
+                        {request.title}
+                      </span>
+                      <span className="block truncate text-xs text-zinc-500">
+                        {schoolsById.get(request.school_id) ?? "School"} - {STATUS_SHORT[request.status]}
+                      </span>
+                    </span>
+                    <span className="text-[11px] font-semibold text-orange-600">
+                      {priorityReason(request, todayUtcMs)}
+                    </span>
+                  </Link>
+                ))}
+                {highPriority.length === 0 && (
+                  <p className="rounded-xl bg-zinc-50 px-3 py-4 text-center text-sm text-zinc-500">
+                    No urgent requests right now.
+                  </p>
+                )}
+              </div>
+              <Link
+                href="/requests"
+                className="mt-4 flex h-9 items-center justify-center rounded-xl bg-violet-50 text-sm font-semibold text-violet-600 transition hover:bg-violet-100"
+              >
+                View all requests →
+              </Link>
+            </Panel>
+
+            <Panel title="Latest activity">
+              <div className="space-y-3">
+                {latestActivity.map((request) => (
+                  <Link
+                    key={request.id}
+                    href={`/requests/${request.id}`}
+                    className="flex items-center gap-3 rounded-xl p-1.5 transition hover:bg-zinc-50"
+                  >
+                    <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${activityIconClass(request.status)}`}>
+                      <RequestIcon type={activityIconType(request.status)} className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-semibold text-zinc-950">
+                        {STATUS_SHORT[request.status]}
+                      </span>
+                      <span className="block truncate text-xs text-zinc-500">
+                        {request.title}
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-zinc-400">
+                      {relativeAge(request.updated_at)}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+              <Link
+                href="/notifications"
+                className="mt-4 flex h-9 items-center justify-center rounded-xl bg-violet-50 text-sm font-semibold text-violet-600 transition hover:bg-violet-100"
+              >
+                View all activity →
+              </Link>
+            </Panel>
+          </aside>
+        </section>
+      </div>
     </div>
   );
 
-  function Section({
+  function RequestSection({
     title,
+    count,
     items,
-    totalCount,
-    variant,
+    tone,
     pagination,
   }: {
     title: string;
+    count: number;
     items: RequestListRow[];
-    totalCount?: number;
-    variant?: "urgent" | "muted";
-    pagination?: React.ReactNode;
+    tone: "orange" | "blue" | "emerald" | "zinc";
+    pagination: React.ReactNode;
   }) {
-    const headerCount = totalCount ?? items.length;
-    if (headerCount === 0) return null;
+    if (count === 0) return null;
+    const titleClass = {
+      orange: "text-orange-600",
+      blue: "text-blue-600",
+      emerald: "text-emerald-600",
+      zinc: "text-zinc-500",
+    }[tone];
+
     return (
       <section className="space-y-2">
-        <h2
-          className={
-            variant === "urgent"
-              ? "text-sm font-medium text-amber-700 dark:text-amber-300"
-              : variant === "muted"
-                ? "text-xs font-medium uppercase tracking-widest text-zinc-500"
-                : "text-sm font-medium text-zinc-700 dark:text-zinc-300"
-          }
-        >
-          {title} ({headerCount})
+        <h2 className={`flex items-center gap-1.5 text-sm font-semibold ${titleClass}`}>
+          {title} ({count}) <span className="text-xs opacity-70">⌄</span>
         </h2>
-        <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
-          {items.map((r) => {
-            const creatorName =
-              creatorById.get(r.created_by)?.trim() || "someone";
-            const schoolName = schoolsById.get(r.school_id) ?? "";
-            const showDelete = isManagingAdmin && canDeleteStatus(r.status);
+        <div className="overflow-hidden rounded-2xl border border-white/70 bg-white/82 shadow-[0_18px_60px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/70 backdrop-blur-xl">
+          {items.map((request) => {
+            const schoolName = schoolsById.get(request.school_id) ?? "School";
+            const showEdit = canEditRequest(request);
+            const showArchive = canArchiveRequest(request);
+            const showDelete = isManagingAdmin && canDeleteStatus(request.status);
+            const showActions = showEdit || showArchive || showDelete;
             return (
-              <li key={r.id} className="relative">
-                <div className="flex items-stretch">
-                  <Link
-                    href={`/requests/${r.id}`}
-                    className="flex min-w-0 flex-1 flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                        {r.title}
-                      </p>
-                      <p className="mt-0.5 truncate text-xs text-zinc-500">
-                        {creatorName}
-                        {schoolName ? ` · ${schoolName}` : ""} ·{" "}
-                        {formatDate(r.created_at)}
-                      </p>
-                    </div>
-                    <span
-                      className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_BADGE_CLASS[r.status]}`}
-                    >
-                      <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT_CLASS[r.status]}`} />
-                      {STATUS_SHORT[r.status]}
+              <div
+                key={request.id}
+                className="group relative flex items-center gap-2 border-b border-slate-100/90 px-4 py-3.5 last:border-b-0 transition duration-200 hover:bg-white hover:shadow-[inset_3px_0_0_rgba(124,58,237,0.22)]"
+              >
+                <Link href={`/requests/${request.id}`} className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 lg:grid-cols-[auto_minmax(0,1fr)_92px_54px]">
+                  <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-lg transition duration-200 group-hover:scale-105 motion-reduce:transform-none ${rowIconClass(request.status)}`}>
+                    <RequestIcon type={activityIconType(request.status)} className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold tracking-[-0.005em] text-slate-950">
+                      {request.title}
                     </span>
-                  </Link>
-                  {showDelete && (
-                    <ConfirmForm
-                      action={deleteRequest}
-                      title="Delete request?"
-                      message={`Permanently delete "${r.title}"? Attachments are removed too. Use Archive to keep a record.`}
-                      confirmLabel="Delete"
-                      className="flex items-center pr-3"
-                    >
-                      <input type="hidden" name="id" value={r.id} />
-                      <button
-                        type="submit"
-                        aria-label={`Delete ${r.title}`}
-                        className="rounded-md border border-rose-300 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950"
-                      >
-                        Delete
-                      </button>
-                    </ConfirmForm>
-                  )}
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-100 dark:bg-zinc-800">
-                  <div
-                    className={`h-full ${PROGRESS_COLOR[r.status]} transition-all`}
-                    style={{ width: `${PROGRESS_PERCENT[r.status]}%` }}
-                  />
-                </div>
-              </li>
+                    <span className="mt-0.5 block truncate text-xs font-medium text-slate-500">
+                      {schoolName}
+                    </span>
+                  </span>
+                  <span className={`hidden justify-self-start rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm ring-1 ring-white/70 sm:inline-flex lg:justify-self-end ${STATUS_BADGE_CLASS[request.status]}`}>
+                    {STATUS_SHORT[request.status]}
+                  </span>
+                  <span className="hidden items-center gap-2 text-xs font-medium text-slate-500 md:flex lg:justify-self-end">
+                    <span className={`h-1.5 w-1.5 rounded-full ${daysUntilDue(request.due_date, todayUtcMs) !== null && daysUntilDue(request.due_date, todayUtcMs)! < 0 ? "bg-rose-500" : request.status === "published" ? "bg-emerald-500" : request.status === "archived" ? "bg-zinc-400" : "bg-orange-500"}`} />
+                    {rowTimingLabel(request, todayUtcMs)}
+                  </span>
+                </Link>
+                {showActions && (
+                  <span className="flex w-9 shrink-0 justify-end">
+                    <RequestRowActions label={`Actions for ${request.title}`}>
+                      {showEdit && (
+                        <Link
+                          href={`/requests/${request.id}/edit`}
+                          className="block px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Edit
+                        </Link>
+                      )}
+                      {showArchive && (
+                        <ConfirmForm
+                          action={archiveRequest}
+                          message="Archive this request? It will be moved to the archived section."
+                        >
+                          <input type="hidden" name="id" value={request.id} />
+                          <button
+                            type="submit"
+                            className="block w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            Archive
+                          </button>
+                        </ConfirmForm>
+                      )}
+                      {showDelete && (
+                        <ConfirmForm
+                          action={deleteRequest}
+                          title="Delete request?"
+                          message={`Permanently delete "${request.title}"? Attachments are removed too. Use Archive to keep a record.`}
+                          confirmLabel="Delete"
+                        >
+                          <input type="hidden" name="id" value={request.id} />
+                          <button
+                            type="submit"
+                            className="block w-full px-3 py-2 text-left text-xs font-semibold text-rose-600 transition hover:bg-rose-50"
+                          >
+                            Delete
+                          </button>
+                        </ConfirmForm>
+                      )}
+                    </RequestRowActions>
+                  </span>
+                )}
+              </div>
             );
           })}
-        </ul>
+        </div>
         {pagination}
       </section>
     );
   }
 }
 
-function Stat({
+function MetricCard({
   label,
   value,
-  urgent,
+  note,
+  icon,
+  color,
 }: {
   label: string;
-  value: number | string;
-  urgent?: boolean;
+  value: number;
+  note: string;
+  icon: "needs" | "design" | "review" | "published";
+  color: "orange" | "blue" | "violet" | "emerald";
+}) {
+  const sparklineClass = "-ml-3.5 w-[calc(100%+0.875rem)]";
+
+  return (
+    <MotionSurface className="group relative grid h-32 min-w-0 grid-rows-[auto_1fr] overflow-hidden rounded-2xl border border-white/75 bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(248,250,252,0.82))] p-3.5 shadow-[0_18px_55px_rgba(15,23,42,0.09)] ring-1 ring-slate-200/70 backdrop-blur-xl transition duration-300">
+      <span className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent" />
+      <span className="pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full bg-violet-100/45 blur-2xl transition group-hover:bg-violet-200/50" />
+      <div className="relative flex items-start gap-3">
+        <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-lg ring-1 ring-white/70 transition duration-300 group-hover:scale-105 motion-reduce:transform-none ${ICON_CLASS[icon]}`}>
+          <span className={`inline-flex h-7 w-7 items-center justify-center rounded-xl ${ICON_INNER_CLASS[icon]}`}>
+            <RequestIcon type={icon} className="h-4.5 w-4.5" />
+          </span>
+        </span>
+        <span className="min-w-0">
+          <span className="block text-2xl font-semibold leading-none tracking-[-0.02em] text-slate-950">
+            <AnimatedNumber value={value} />
+          </span>
+          <span className="mt-1.5 block whitespace-nowrap text-[14px] font-semibold leading-none text-slate-900">
+            {label}
+          </span>
+          <span
+            className={`mt-1 block text-[10px] font-medium leading-none ${
+              color === "orange"
+                ? "text-orange-600"
+                : color === "blue"
+                  ? "text-blue-600"
+                  : color === "emerald"
+                    ? "text-emerald-600"
+                    : "text-violet-600"
+            }`}
+          >
+            {note}
+          </span>
+        </span>
+      </div>
+      <div className={`relative flex items-end ${sparklineClass}`}>
+        <Sparkline color={color} extendRight />
+      </div>
+    </MotionSurface>
+  );
+}
+
+function Panel({
+  title,
+  children,
+  action,
+  badge,
+  className = "",
+}: {
+  title: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+  badge?: string;
+  className?: string;
 }) {
   return (
-    <div
-      className={
-        urgent
-          ? "rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20"
-          : "rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-      }
-    >
-      <p
-        className={
-          urgent
-            ? "text-3xl font-semibold text-amber-900 dark:text-amber-200"
-            : "text-3xl font-semibold text-zinc-900 dark:text-zinc-50"
-        }
-      >
-        {value}
-      </p>
-      <p
-        className={
-          urgent
-            ? "mt-1 text-sm text-amber-800 dark:text-amber-300"
-            : "mt-1 text-sm text-zinc-600 dark:text-zinc-400"
-        }
-      >
-        {label}
-      </p>
+    <MotionSurface className={`rounded-2xl border border-white/75 bg-white/82 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/70 backdrop-blur-xl ${className}`}>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-sm font-semibold tracking-[-0.005em] text-slate-950">
+          {title}
+          {badge && (
+            <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-600 ring-1 ring-violet-200/60">
+              {badge}
+            </span>
+          )}
+        </h2>
+        {action && (
+          <span className="inline-flex">
+            {action}
+          </span>
+        )}
+      </div>
+      {children}
+    </MotionSurface>
+  );
+}
+
+function OverviewRangeFilter() {
+  return (
+    <SelectFilter
+      paramName="overview"
+      ariaLabel="Filter request overview range"
+      allLabel="This week"
+      options={OVERVIEW_RANGE_OPTIONS.filter((item) => item.value !== "this-week")}
+      className="h-8 rounded-lg border border-slate-200 bg-white/70 px-2.5 text-xs font-medium text-slate-600 shadow-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
+    />
+  );
+}
+
+function Legend({ color, label, value, suffix = "" }: { color: string; label: string; value: number; suffix?: string }) {
+  return (
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+      <span className={`h-2 w-2 rounded-full ${color}`} />
+      <span className="truncate text-slate-600">{label}</span>
+      <span className="font-semibold text-slate-900">
+        <AnimatedNumber value={value} suffix={suffix} />
+      </span>
     </div>
   );
+}
+
+function rowIconClass(status: RequestStatus): string {
+  if (status === "published") return "bg-gradient-to-br from-emerald-50 to-teal-100 text-emerald-600 shadow-emerald-100";
+  if (status === "archived") return "bg-gradient-to-br from-slate-50 to-slate-100 text-slate-500 shadow-slate-100";
+  if (status === "in_design" || status === "approved") return "bg-gradient-to-br from-blue-50 to-sky-100 text-blue-600 shadow-blue-100";
+  if (status === "design_pending_approval") return "bg-gradient-to-br from-violet-50 to-purple-100 text-violet-600 shadow-violet-100";
+  return "bg-gradient-to-br from-orange-50 to-amber-100 text-orange-600 shadow-orange-100";
+}
+
+function activityIconClass(status: RequestStatus): string {
+  if (status === "published") return "bg-gradient-to-br from-emerald-50 to-teal-100 text-emerald-600 shadow-sm shadow-emerald-100";
+  if (status === "in_design" || status === "approved") return "bg-gradient-to-br from-blue-50 to-sky-100 text-blue-600 shadow-sm shadow-blue-100";
+  if (status === "design_pending_approval") return "bg-gradient-to-br from-violet-50 to-purple-100 text-violet-600 shadow-sm shadow-violet-100";
+  return "bg-gradient-to-br from-orange-50 to-amber-100 text-orange-600 shadow-sm shadow-orange-100";
+}
+
+function activityIconType(status: RequestStatus): "needs" | "design" | "review" | "published" {
+  if (status === "published") return "published";
+  if (status === "in_design" || status === "approved") return "design";
+  if (status === "design_pending_approval") return "review";
+  return "needs";
 }

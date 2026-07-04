@@ -50,14 +50,14 @@ export function SearchInput({
         onChange={(e) => setValue(e.target.value)}
         placeholder={placeholder}
         aria-busy={isPending}
-        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 pr-8 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        className="h-10 w-full rounded-xl border border-slate-200 bg-white/85 px-3 py-2 pr-8 text-sm font-medium text-slate-900 shadow-sm shadow-slate-200/50 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
       />
       {value && (
         <button
           type="button"
           onClick={() => setValue("")}
           aria-label="Clear search"
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md px-1.5 text-base leading-none text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md px-1.5 text-base leading-none text-slate-400 transition hover:text-slate-700 dark:hover:text-zinc-200"
         >
           ×
         </button>

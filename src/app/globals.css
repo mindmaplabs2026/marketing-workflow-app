@@ -214,6 +214,28 @@ body {
   }
 }
 
+@keyframes request-card-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(12deg);
+  }
+  50% {
+    transform: translate3d(0, -8px, 0) rotate(10deg);
+  }
+}
+
+@keyframes request-wave-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+  50% {
+    transform: translate3d(10px, -5px, 0);
+    opacity: 0.92;
+  }
+}
+
 [data-sonner-toast] {
   animation: toast-enter-from-right 450ms cubic-bezier(0.21, 1.02, 0.73, 1);
 }

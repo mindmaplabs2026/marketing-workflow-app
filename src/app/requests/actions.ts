@@ -101,6 +101,7 @@ export async function createRequest(
 
   if (!title) return { error: "Give the request a short title." };
   if (!schoolId) return { error: "Pick a school." };
+  if (!dueDate) return { error: "Pick a due date for this request." };
 
   const actor = await loadActor();
   if ("error" in actor) return { error: actor.error };

@@ -46,7 +46,7 @@ export function SelectFilter({
       onChange={(e) => onChange(e.currentTarget.value)}
       className={
         className ??
-        "rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        "h-10 w-full rounded-xl border border-slate-200 bg-white/85 px-3 py-1.5 text-sm font-medium text-slate-900 shadow-sm shadow-slate-200/50 outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
       }
     >
       <option value="">{allLabel}</option>
