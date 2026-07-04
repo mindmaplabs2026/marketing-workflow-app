@@ -967,7 +967,7 @@ export async function renderWithRepair(input: {
  * (driven by an error) or refine (driven by visual feedback), this makes the
  * specific change the user asked for while keeping everything else intact.
  */
-export async function editComposition(input: {
+type EditCompositionInput = {
   originalCode: string;
   /** The user's natural-language edit request. */
   instruction: string;
@@ -978,19 +978,140 @@ export async function editComposition(input: {
   hasFooter?: boolean;
   hasMusic: boolean;
   timeoutMs?: number;
-}): Promise<CompositionCode> {
+};
+
+/** Files the composition is allowed to reference, formatted for an edit prompt. */
+function editMediaLines(input: EditCompositionInput): string {
+  const lines: string[] = [];
+  for (const [filename, info] of input.mediaManifest) {
+    const orientTag = info.type === "video" && info.orientation ? ` [${info.orientation.toUpperCase()}]` : "";
+    lines.push(`- media/${filename} (${info.type})${orientTag} — ${info.description}`);
+  }
+  if (input.hasLogo) lines.push(`- media/logo.png (image)`);
+  if (input.hasFooter) lines.push(`- media/footer.png (image)`);
+  if (input.hasMusic) lines.push(`- music/track.mp3 (audio)`);
+  return lines.join("\n") || "(none)";
+}
+
+type EditBlock = { search: string; replace: string };
+
+/** Parse aider-style SEARCH/REPLACE blocks out of the model's reply. */
+function parseSearchReplaceBlocks(raw: string): EditBlock[] {
+  const blocks: EditBlock[] = [];
+  const re = /<{5,}\s*SEARCH\s*\r?\n([\s\S]*?)\r?\n?={5,}\s*\r?\n([\s\S]*?)\r?\n?>{5,}\s*REPLACE/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) blocks.push({ search: m[1], replace: m[2] });
+  return blocks;
+}
+
+/**
+ * Apply SEARCH/REPLACE blocks to the original source. Exact-match only (indexOf):
+ * every byte OUTSIDE a matched block is preserved verbatim, so a chat edit can
+ * never silently rewrite the whole file (the old full-file-rewrite path did). Any
+ * block whose SEARCH text isn't found is reported back so the caller can retry or
+ * fall back — a partial application is discarded (only an all-match result is used).
+ */
+function applyEditBlocks(original: string, blocks: EditBlock[]): { result: string; failed: EditBlock[] } {
+  let result = original;
+  const failed: EditBlock[] = [];
+  for (const b of blocks) {
+    if (!b.search.trim()) { failed.push(b); continue; } // empty SEARCH = ambiguous insertion
+    const idx = result.indexOf(b.search);
+    if (idx === -1) { failed.push(b); continue; }
+    result = result.slice(0, idx) + b.replace + result.slice(idx + b.search.length);
+  }
+  return { result, failed };
+}
+
+/**
+ * SURGICAL edit path: ask Codex for minimal SEARCH/REPLACE blocks and apply them
+ * deterministically, so only the targeted regions change. Returns null (→ caller
+ * falls back to a full-file rewrite) if no clean patch could be produced in 2 tries.
+ */
+async function editCompositionSurgical(input: EditCompositionInput): Promise<CompositionCode | null> {
+  const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS;
+  const workDir = path.join(os.tmpdir(), "codex-edit", `${process.pid}-${Date.now()}-sr`);
+  await fs.mkdir(workDir, { recursive: true });
+  try {
+    let feedback = "";
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const prompt = `You are editing a WORKING Remotion composition (React/TypeScript) for an Instagram Reel. Make the SMALLEST change that satisfies the user's request by emitting SEARCH/REPLACE blocks. Do NOT output the whole file. Do NOT touch anything the request doesn't mention.
+
+USER'S EDIT REQUEST:
+"${input.instruction}"
+
+CURRENT Reel.tsx:
+\`\`\`tsx
+${input.originalCode}
+\`\`\`
+
+FILES THAT EXIST (referencing anything else fails the render):
+${editMediaLines(input)}
+${input.hasMusic ? `\nAUDIO MIX (only if the request touches music/voice/BGM/ducking):\n${audioMixGuidance(input.script, input.hasMusic)}\n` : ""}
+OUTPUT — one or more blocks in EXACTLY this format, and NOTHING else:
+<<<<<<< SEARCH
+(lines copied VERBATIM from the current Reel.tsx above, including indentation)
+=======
+(the replacement lines)
+>>>>>>> REPLACE
+
+BLOCK RULES:
+1. SEARCH text must be copied CHARACTER-FOR-CHARACTER from the current file (same indentation, quotes, spacing) or it will not match.
+2. Include just enough surrounding lines in SEARCH to be UNIQUE in the file — but keep blocks small.
+3. Emit a block ONLY for a region that actually changes; leave everything else alone. Do not reformat/rename/renumber unrelated code.
+4. To DELETE code, leave the REPLACE section empty.
+5. Keep exporting "Reel" and "REEL_DURATION". Only change REEL_DURATION (in its own block) if the edit adds/removes time.
+6. Only reference files from the list above; staticFile("media/<file>") / staticFile("music/track.mp3") with NO "public/" prefix.
+${input.hasLogo ? `7. If you touch the logo, keep its longest visible edge ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px (size the <Img> itself, objectFit:"contain"; never a padded square card).\n` : ""}8. Keep text/logo inside the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom); no font smaller than ${MIN_FONT_PX}px.
+${feedback}BEGIN:`;
+
+      console.log(`[Edit] Surgical attempt ${attempt}/2 — requesting SEARCH/REPLACE blocks (${prompt.length} chars)`);
+      const outFile = path.join(workDir, `sr${attempt}.txt`);
+      await runCodexCapture(prompt, outFile, workDir, timeoutMs);
+      const raw = (await fs.readFile(outFile, "utf8")).trim();
+      const blocks = parseSearchReplaceBlocks(raw);
+      if (blocks.length === 0) {
+        console.warn(`[Edit] attempt ${attempt}: no SEARCH/REPLACE blocks in output`);
+        feedback = `\nYOUR PREVIOUS REPLY contained no valid SEARCH/REPLACE blocks. Emit blocks in EXACTLY the format shown above.\n`;
+        continue;
+      }
+      const { result, failed } = applyEditBlocks(input.originalCode, blocks);
+      if (failed.length === 0) {
+        console.log(`[Edit] Applied ${blocks.length} surgical block(s) — ${input.originalCode.length}→${result.length} chars (rest preserved verbatim)`);
+        return { reelTsx: sanitizeGeneratedCode(result) };
+      }
+      console.warn(`[Edit] attempt ${attempt}: ${failed.length}/${blocks.length} block(s) did not match the file`);
+      feedback = `\nThese SEARCH blocks did NOT match the current file — copy the text EXACTLY (including indentation), or choose a different anchor:\n${failed.map((b, i) => `#${i + 1}:\n${b.search}`).join("\n---\n")}\n`;
+    }
+    return null;
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Apply a user's chat edit to a reel composition. Tries the SURGICAL path first
+ * (minimal SEARCH/REPLACE patch — everything untouched stays byte-identical), and
+ * only falls back to the legacy FULL-FILE rewrite if no clean patch was produced.
+ */
+export async function editComposition(input: EditCompositionInput): Promise<CompositionCode> {
+  try {
+    const patched = await editCompositionSurgical(input);
+    if (patched) return patched;
+    console.log(`[Edit] No clean surgical patch — falling back to full-file rewrite`);
+  } catch (err) {
+    if (err instanceof CodexUsageLimitError) throw err; // fallback would just hit the same limit
+    console.warn(`[Edit] Surgical path errored (${err instanceof Error ? err.message : err}) — falling back to full-file rewrite`);
+  }
+  return editCompositionFullFile(input);
+}
+
+/** Legacy fallback: rewrite the ENTIRE Reel.tsx. Drifts (reformats/renames), so it
+ *  is only used when a surgical patch can't be produced. */
+async function editCompositionFullFile(input: EditCompositionInput): Promise<CompositionCode> {
   const timeoutMs = input.timeoutMs ?? COMPOSITION_TIMEOUT_MS;
   const workDir = path.join(os.tmpdir(), "codex-edit", `${process.pid}-${Date.now()}`);
   await fs.mkdir(workDir, { recursive: true });
-
-  const mediaLines: string[] = [];
-  for (const [filename, info] of input.mediaManifest) {
-    const orientTag = info.type === "video" && info.orientation ? ` [${info.orientation.toUpperCase()}]` : "";
-    mediaLines.push(`- media/${filename} (${info.type})${orientTag} — ${info.description}`);
-  }
-  if (input.hasLogo) mediaLines.push(`- media/logo.png (image)`);
-  if (input.hasFooter) mediaLines.push(`- media/footer.png (image)`);
-  if (input.hasMusic) mediaLines.push(`- music/track.mp3 (audio)`);
 
   try {
     const prompt = `You are editing a WORKING Remotion composition (React/TypeScript) for an Instagram Reel based on a user's request. Apply ONLY the requested change; keep everything else (structure, other scenes, branding, timing not affected) intact.
@@ -1004,7 +1125,7 @@ ${input.originalCode}
 \`\`\`
 
 THE ONLY FILES THAT EXIST (referencing anything else will fail the render):
-${mediaLines.join("\n") || "(none)"}
+${editMediaLines(input)}
 
 AUDIO MIX REFERENCE (apply if the request touches music/voice/BGM/ducking):
 ${audioMixGuidance(input.script, input.hasMusic)}
