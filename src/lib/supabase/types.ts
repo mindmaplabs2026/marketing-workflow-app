@@ -52,6 +52,18 @@ export type NotificationType =
   | "ai_generation_completed"
   | "ai_generation_failed";
 
+export type RequestActivityType =
+  | "request_created"
+  | "request_submitted"
+  | "request_approved"
+  | "request_sent_back"
+  | "request_picked_up"
+  | "design_submitted"
+  | "design_approved"
+  | "design_changes_requested"
+  | "request_published"
+  | "request_archived";
+
 export type AiJobStatus =
   | "queued"
   | "understanding"
@@ -381,6 +393,33 @@ export type Database = {
           read_at?: Timestamp | null;
           pushed_at?: Timestamp | null;
           emailed_at?: Timestamp | null;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      request_activities: {
+        Row: {
+          id: string;
+          request_id: string;
+          actor_id: string | null;
+          type: RequestActivityType;
+          metadata: Record<string, unknown>;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          request_id: string;
+          actor_id?: string | null;
+          type: RequestActivityType;
+          metadata?: Record<string, unknown>;
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          request_id?: string;
+          actor_id?: string | null;
+          type?: RequestActivityType;
+          metadata?: Record<string, unknown>;
           created_at?: Timestamp;
         };
         Relationships: [];

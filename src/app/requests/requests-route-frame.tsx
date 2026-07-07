@@ -1,11 +1,19 @@
 "use client";
 
-import { useSelectedLayoutSegment } from "next/navigation";
+import { usePathname, useSelectedLayoutSegment } from "next/navigation";
 
 export function RequestsRouteFrame({ children }: { children: React.ReactNode }) {
   const segment = useSelectedLayoutSegment();
+  const pathname = usePathname();
 
   if (segment === null) {
+    return <>{children}</>;
+  }
+
+  const parts = pathname.split("/").filter(Boolean);
+  const isRequestDetail = parts[0] === "requests" && parts.length === 2;
+
+  if (isRequestDetail) {
     return <>{children}</>;
   }
 

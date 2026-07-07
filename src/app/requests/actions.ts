@@ -10,6 +10,7 @@ import type {
   UserRole,
   RequestStatus,
   SocialPlatform,
+  RequestActivityType,
 } from "@/lib/supabase/types";
 
 export type ActionState = { error?: string; success?: boolean };
@@ -39,6 +40,35 @@ type Actor = {
   userId: string;
   role: UserRole;
 };
+
+async function recordRequestActivity({
+  supabase,
+  requestId,
+  actorId,
+  type,
+  metadata,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  requestId: string;
+  actorId: string | null;
+  type: RequestActivityType;
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await supabase.from("request_activities").insert({
+    request_id: requestId,
+    actor_id: actorId,
+    type,
+    metadata: metadata ?? {},
+  });
+
+  if (error && error.code !== "42P01") {
+    console.warn("Could not record request activity", {
+      requestId,
+      type,
+      error: error.message,
+    });
+  }
+}
 
 async function loadActor(): Promise<Actor | { error: string }> {
   const supabase = await createClient();
@@ -135,6 +165,24 @@ export async function createRequest(
 
   if (error || !data) return { error: error?.message ?? "Could not create." };
 
+  await recordRequestActivity({
+    supabase,
+    requestId: data.id,
+    actorId: actor.userId,
+    type: "request_created",
+    metadata: { initialStatus },
+  });
+
+  if (initialStatus === "approved") {
+    await recordRequestActivity({
+      supabase,
+      requestId: data.id,
+      actorId: actor.userId,
+      type: "request_approved",
+      metadata: { autoApproved: true },
+    });
+  }
+
   revalidatePath("/requests");
   await dispatchPendingPushes();
   return { requestId: data.id };
@@ -206,6 +254,13 @@ export async function submitDraft(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "request_submitted",
+  });
+
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
   await dispatchPendingPushes();
@@ -233,6 +288,13 @@ export async function approveRequest(formData: FormData) {
     .update({ status: "approved", approved_by: actor.userId })
     .eq("id", id);
   if (error) throw new Error(error.message);
+
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "request_approved",
+  });
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
@@ -266,6 +328,14 @@ export async function sendBackForChanges(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "request_sent_back",
+    metadata: feedback ? { feedback } : {},
+  });
+
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
   await dispatchPendingPushes();
@@ -292,6 +362,13 @@ export async function archiveRequest(formData: FormData) {
     .update({ status: "archived" })
     .eq("id", id);
   if (error) throw new Error(error.message);
+
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "request_archived",
+  });
 
   // Mark all unread notifications for this request as read
   await supabase
@@ -446,6 +523,13 @@ export async function pickUpRequest(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "request_picked_up",
+  });
+
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
 }
@@ -497,6 +581,14 @@ export async function attachDesign(formData: FormData) {
     .eq("id", requestId);
   if (updateErr) throw new Error(updateErr.message);
 
+  await recordRequestActivity({
+    supabase,
+    requestId,
+    actorId: actor.userId,
+    type: "design_submitted",
+    metadata: { version: nextVersion },
+  });
+
   revalidatePath(`/requests/${requestId}`);
   revalidatePath("/requests");
   await dispatchPendingPushes();
@@ -545,6 +637,13 @@ export async function approveDesign(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "design_approved",
+  });
+
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
   await dispatchPendingPushes();
@@ -582,6 +681,14 @@ export async function requestDesignChanges(formData: FormData) {
     })
     .eq("id", id);
   if (error) throw new Error(error.message);
+
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "design_changes_requested",
+    metadata: feedback ? { feedback } : {},
+  });
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
@@ -655,6 +762,14 @@ export async function publishRequest(formData: FormData) {
     .eq("id", id);
   if (statusErr) throw new Error(statusErr.message);
 
+  await recordRequestActivity({
+    supabase,
+    requestId: id,
+    actorId: actor.userId,
+    type: "request_published",
+    metadata: { platforms: links.map((link) => link.platform) },
+  });
+
   await supabase
     .from("calendar_items")
     .update({ status: "fulfilled" })
@@ -677,12 +792,24 @@ export async function bulkApproveRequests(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data: approvedRows, error } = await supabase
     .from("requests")
     .update({ status: "approved", approved_by: actor.userId })
+    .select("id")
     .in("id", ids)
-    .eq("status", "pending_admin_approval");
+    .eq("status", "pending_admin_approval")
+    .returns<{ id: string }[]>();
   if (error) throw new Error(error.message);
+
+  for (const row of approvedRows ?? []) {
+    await recordRequestActivity({
+      supabase,
+      requestId: row.id,
+      actorId: actor.userId,
+      type: "request_approved",
+      metadata: { bulk: true },
+    });
+  }
 
   revalidatePath("/requests");
   await dispatchPendingPushes();

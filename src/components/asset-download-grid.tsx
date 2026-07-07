@@ -27,6 +27,7 @@ type Props = {
   heading: ReactNode;
   // For the design list we render a version chip above the preview.
   showVersion?: boolean;
+  collapseAfter?: number;
 };
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -155,8 +156,10 @@ export function AssetDownloadGrid({
   items,
   heading,
   showVersion,
+  collapseAfter,
 }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showAll, setShowAll] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   // Tracks which single-item quick-download is in-flight so we can spin
@@ -167,6 +170,9 @@ export function AssetDownloadGrid({
 
   const allSelected = selected.size === items.length;
   const selectionCount = selected.size;
+  const shouldCollapse = collapseAfter !== undefined && items.length > collapseAfter;
+  const visibleItems = shouldCollapse && !showAll ? items.slice(0, collapseAfter) : items;
+  const hiddenCount = Math.max(items.length - (collapseAfter ?? items.length), 0);
 
   function toggleOne(id: string) {
     setSelected((prev) => {
@@ -255,8 +261,8 @@ export function AssetDownloadGrid({
         </p>
       )}
 
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {items.map((item) => {
+      <ul className="grid grid-cols-4 gap-2 md:grid-cols-3 md:gap-3 lg:grid-cols-4">
+        {visibleItems.map((item) => {
           const checked = selected.has(item.id);
           const url = item.signedUrl;
           const img = isImage(item.mimeType, item.name);
@@ -284,7 +290,7 @@ export function AssetDownloadGrid({
             >
               <label
                 onClick={(e) => e.stopPropagation()}
-                className="absolute left-2 top-2 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded bg-white/90 shadow-sm dark:bg-zinc-900/90"
+                className="absolute left-1.5 top-1.5 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded bg-white/90 shadow-sm md:left-2 md:top-2 dark:bg-zinc-900/90"
               >
                 <input
                   type="checkbox"
@@ -303,7 +309,7 @@ export function AssetDownloadGrid({
                 }}
                 disabled={isBusy}
                 aria-label={`Download ${item.name}`}
-                className="absolute right-2 top-2 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded bg-white/90 text-zinc-700 shadow-sm hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-violet-400"
+                className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded bg-white/90 text-zinc-700 shadow-sm hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-50 md:right-2 md:top-2 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-violet-400"
                 title="Download this file"
               >
                 {isBusy ? (
@@ -384,6 +390,15 @@ export function AssetDownloadGrid({
           );
         })}
       </ul>
+      {shouldCollapse && (
+        <button
+          type="button"
+          onClick={() => setShowAll((value) => !value)}
+          className="inline-flex h-9 items-center rounded-lg border border-violet-200 bg-white px-3 text-xs font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50 dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
+        >
+          {showAll ? "Show less" : `View ${hiddenCount} more`}
+        </button>
+      )}
     </section>
   );
 }

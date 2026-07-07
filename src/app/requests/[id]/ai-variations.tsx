@@ -31,11 +31,12 @@ export function AiVariations({
   totalCostUsd?: number | null;
 }) {
   const router = useRouter();
-  const [variations, setVariations] = useState(initialVariations);
+  const [variations] = useState(initialVariations);
   const [signedUrls, setSignedUrls] = useState<Map<string, string[]>>(
     new Map(),
   );
   const [accepting, setAccepting] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [carouselIndex, setCarouselIndex] = useState<Map<string, number>>(
     new Map(),
   );
@@ -84,6 +85,8 @@ export function AiVariations({
   }
 
   const accepted = variations.find((v) => v.is_accepted);
+  const visibleVariations = showAll ? variations : variations.slice(0, 8);
+  const hiddenCount = Math.max(variations.length - 8, 0);
 
   if (accepted) {
     const allAcceptedUrls = signedUrls.get(accepted.id) ?? [];
@@ -144,8 +147,8 @@ export function AiVariations({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {variations.map((v) => {
+      <div className="grid grid-cols-3 gap-2 lg:grid-cols-4 lg:gap-4">
+        {visibleVariations.map((v) => {
           const allUrls = signedUrls.get(v.id) ?? [];
           // Single posters: chat edits are appended (history) — show only the
           // LATEST version. Carousels: show every page.
@@ -156,10 +159,10 @@ export function AiVariations({
           return (
             <div
               key={v.id}
-              className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+              className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
             >
               {/* Media preview */}
-              <div className={`relative ${v.poster_type === "reel" ? "aspect-[9/16]" : "aspect-square"} bg-zinc-100 dark:bg-zinc-800`}>
+              <div className={`relative ${v.poster_type === "reel" ? "aspect-[4/5] max-h-[340px]" : "aspect-[5/4] lg:aspect-[5/3]"} bg-zinc-100 dark:bg-zinc-800`}>
                 {urls.length > 0 ? (
                   <>
                     {v.poster_type === "reel" ? (
@@ -220,12 +223,12 @@ export function AiVariations({
               </div>
 
               {/* Brief info */}
-              <div className="space-y-2 p-3">
-                <p className="text-xs font-medium text-zinc-900 dark:text-zinc-50">
+              <div className="space-y-1.5 p-2 lg:p-2.5">
+                <p className="line-clamp-2 text-[11px] font-medium leading-tight text-zinc-900 lg:text-xs dark:text-zinc-50">
                   {brief.direction ?? `Variation ${v.variation_index}`}
                 </p>
                 {brief.textContent?.headline && (
-                  <p className="text-xs text-zinc-500 line-clamp-2">
+                  <p className="line-clamp-2 text-[10px] text-zinc-500 lg:text-xs">
                     &ldquo;{brief.textContent.headline}&rdquo;
                   </p>
                 )}
@@ -234,14 +237,14 @@ export function AiVariations({
                     {brief.colorPalette.slice(0, 5).map((hex, i) => (
                       <div
                         key={i}
-                        className="h-4 w-4 rounded-full border border-zinc-200 dark:border-zinc-700"
+                        className="h-2.5 w-2.5 rounded-full border border-zinc-200 lg:h-3.5 lg:w-3.5 dark:border-zinc-700"
                         style={{ backgroundColor: hex }}
                         title={hex}
                       />
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-zinc-400">
+                <p className="text-[9px] text-zinc-400 lg:text-[10px]">
                   {v.poster_type === "reel"
                     ? "Video reel"
                     : v.poster_type === "carousel"
@@ -253,10 +256,10 @@ export function AiVariations({
               </div>
 
               {/* Actions */}
-              <div className="flex gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
+              <div className="grid grid-cols-1 gap-1.5 border-t border-zinc-200 p-2 lg:flex lg:gap-2 lg:p-2.5 dark:border-zinc-800">
                 <a
                   href={`/requests/${requestId}/chat/${v.id}`}
-                  className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-center text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-center text-[10px] font-medium text-zinc-700 hover:bg-zinc-50 lg:px-3 lg:text-[11px] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                 >
                   Chat &amp; Edit
                 </a>
@@ -264,7 +267,7 @@ export function AiVariations({
                   type="button"
                   disabled={accepting !== null}
                   onClick={() => handleAccept(v.id)}
-                  className="flex-1 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
+                  className="flex-1 rounded-md bg-violet-600 px-2 py-1.5 text-[10px] font-medium text-white hover:bg-violet-700 disabled:opacity-50 lg:px-3 lg:text-[11px] dark:bg-violet-500 dark:hover:bg-violet-600"
                 >
                   {accepting === v.id ? "Accepting…" : "Accept"}
                 </button>
@@ -273,6 +276,15 @@ export function AiVariations({
           );
         })}
       </div>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((value) => !value)}
+          className="inline-flex h-9 items-center rounded-lg border border-violet-200 bg-white px-3 text-xs font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50 dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
+        >
+          {showAll ? "Show less" : `View ${hiddenCount} more`}
+        </button>
+      )}
     </div>
   );
 }

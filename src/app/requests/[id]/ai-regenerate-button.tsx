@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Clapperboard, Cpu, Sparkles, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
 import { regenerateAi } from "../actions";
 
@@ -10,6 +11,42 @@ const REEL_LENGTH_OPTIONS = [
   { value: 180, label: "Long (up to 3 min)" },
   { value: 300, label: "Full (use all content, max 5 min)" },
 ];
+
+function AiActionButton({
+  children,
+  icon,
+  tone,
+  onClick,
+}: {
+  children: React.ReactNode;
+  icon: React.ReactNode;
+  tone: "primary" | "violet" | "emerald" | "sky";
+  onClick: () => void;
+}) {
+  const toneClass = {
+    primary:
+      "border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700",
+    violet:
+      "border-violet-500 bg-white text-violet-700 shadow-sm hover:bg-violet-50 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950",
+    emerald:
+      "border-emerald-600 bg-white text-emerald-700 shadow-sm hover:bg-emerald-50 dark:bg-zinc-900 dark:text-emerald-300 dark:hover:bg-emerald-950",
+    sky:
+      "border-sky-600 bg-white text-sky-700 shadow-sm hover:bg-sky-50 dark:bg-zinc-900 dark:text-sky-300 dark:hover:bg-sky-950",
+  }[tone];
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-center text-[10px] font-semibold leading-tight transition sm:gap-2 sm:px-3 sm:text-xs xl:text-sm ${toneClass}`}
+    >
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+        {icon}
+      </span>
+      <span className="min-w-0 text-balance">{children}</span>
+    </button>
+  );
+}
 
 export function AiRegenerateButton({
   requestId,
@@ -78,42 +115,47 @@ export function AiRegenerateButton({
 
   if (!showOptions) {
     return (
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={() => open("cloud")}
-          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-600"
-        >
-          Regenerate with AI
-        </button>
-        <button
-          type="button"
-          onClick={() => open("local")}
-          className="rounded-md border border-violet-600 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 dark:border-violet-500 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
-        >
-          Regenerate with Local AI
-        </button>
-        <button
-          type="button"
-          onClick={() => open("local-v2")}
-          className="rounded-md border border-emerald-600 bg-white px-4 py-2 text-sm font-medium text-emerald-700 shadow-sm hover:bg-emerald-50 dark:border-emerald-500 dark:bg-zinc-900 dark:text-emerald-300 dark:hover:bg-emerald-950"
-        >
-          Regenerate with Local AI v2
-        </button>
-        <button
-          type="button"
-          onClick={() => open("local-v3")}
-          className="rounded-md border border-sky-600 bg-white px-4 py-2 text-sm font-medium text-sky-700 shadow-sm hover:bg-sky-50 dark:border-sky-500 dark:bg-zinc-900 dark:text-sky-300 dark:hover:bg-sky-950"
-        >
-          Regenerate with Local AI v3
-        </button>
-        <button
-          type="button"
-          onClick={() => open("reel")}
-          className="rounded-md border border-violet-600 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 dark:border-violet-500 dark:bg-zinc-900 dark:text-violet-300 dark:hover:bg-violet-950"
-        >
-          Generate Reel
-        </button>
+      <div className="space-y-2">
+        <h2 className="text-base font-semibold text-slate-950 dark:text-zinc-50">
+          AI generation
+        </h2>
+        <div className="grid grid-cols-3 gap-2 lg:grid-cols-5">
+          <AiActionButton
+            onClick={() => open("cloud")}
+            tone="primary"
+            icon={<WandSparkles className="h-4 w-4" aria-hidden="true" />}
+          >
+            Regenerate with AI
+          </AiActionButton>
+          <AiActionButton
+            onClick={() => open("local")}
+            tone="violet"
+            icon={<Cpu className="h-4 w-4" aria-hidden="true" />}
+          >
+            Regenerate with Local AI
+          </AiActionButton>
+          <AiActionButton
+            onClick={() => open("local-v2")}
+            tone="emerald"
+            icon={<Sparkles className="h-4 w-4" aria-hidden="true" />}
+          >
+            Regenerate with Local AI v2
+          </AiActionButton>
+          <AiActionButton
+            onClick={() => open("local-v3")}
+            tone="sky"
+            icon={<Cpu className="h-4 w-4" aria-hidden="true" />}
+          >
+            Regenerate with Local AI v3
+          </AiActionButton>
+          <AiActionButton
+            onClick={() => open("reel")}
+            tone="violet"
+            icon={<Clapperboard className="h-4 w-4" aria-hidden="true" />}
+          >
+            Generate Reel
+          </AiActionButton>
+        </div>
       </div>
     );
   }
