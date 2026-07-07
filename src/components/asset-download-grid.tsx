@@ -261,7 +261,7 @@ export function AssetDownloadGrid({
         </p>
       )}
 
-      <ul className="grid grid-cols-4 gap-2 md:grid-cols-3 md:gap-3 lg:grid-cols-4">
+      <ul className="grid grid-cols-3 gap-2 md:gap-3 lg:grid-cols-4">
         {visibleItems.map((item) => {
           const checked = selected.has(item.id);
           const url = item.signedUrl;

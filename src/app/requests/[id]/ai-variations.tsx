@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { acceptAiVariation } from "../actions";
@@ -20,6 +20,176 @@ type Variation = {
   is_accepted: boolean;
   chat_rounds_used: number;
 };
+
+function formatMediaTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "0:00";
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0");
+  return `${minutes}:${remainder}`;
+}
+
+function MobileReelPreview({
+  src,
+}: {
+  src: string;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+
+  function togglePlayback() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play();
+      setPlaying(true);
+    } else {
+      video.pause();
+      setPlaying(false);
+    }
+  }
+
+  function toggleMute() {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextMuted = !muted;
+    video.muted = nextMuted;
+    setMuted(nextMuted);
+  }
+
+  function cycleSpeed() {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextRate = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
+    video.playbackRate = nextRate;
+    setPlaybackRate(nextRate);
+  }
+
+  function seek(value: string) {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextTime = Number(value);
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }
+
+  function openFullscreen() {
+    void frameRef.current?.requestFullscreen?.();
+  }
+
+  return (
+    <div ref={frameRef} className="relative h-full w-full lg:hidden">
+      <video
+        ref={videoRef}
+        playsInline
+        muted={muted}
+        preload="metadata"
+        className="h-full w-full rounded-t-lg object-cover"
+        src={src}
+        onClick={togglePlayback}
+        onLoadedMetadata={(event) => {
+          setDuration(event.currentTarget.duration || 0);
+          event.currentTarget.playbackRate = playbackRate;
+        }}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+      />
+
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          openFullscreen();
+        }}
+        className="absolute right-11 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white shadow-sm backdrop-blur hover:bg-black/70"
+        aria-label="View fullscreen"
+      >
+        <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+          <path d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      <div className="absolute inset-x-2 bottom-2 rounded-xl bg-black/60 p-1.5 text-white shadow-sm backdrop-blur">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              togglePlayback();
+            }}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-zinc-950"
+            aria-label={playing ? "Pause preview" : "Play preview"}
+          >
+            {playing ? (
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+                <path d="M6 4.5h2.5v11H6v-11Zm5.5 0H14v11h-2.5v-11Z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 translate-x-px" aria-hidden="true">
+                <path d="M6.5 4.5v11l8-5.5-8-5.5Z" />
+              </svg>
+            )}
+          </button>
+
+          <input
+            type="range"
+            min="0"
+            max={duration || 0}
+            step="0.1"
+            value={Math.min(currentTime, duration || 0)}
+            onChange={(event) => seek(event.target.value)}
+            className="h-1 min-w-0 flex-1 accent-violet-400"
+            aria-label="Video timeline"
+          />
+
+          <span className="w-8 shrink-0 text-right text-[9px] font-semibold tabular-nums">
+            {formatMediaTime(currentTime)}
+          </span>
+        </div>
+        <div className="mt-1 flex items-center justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleMute();
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15"
+            aria-label={muted ? "Unmute preview" : "Mute preview"}
+          >
+            {muted ? (
+              <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+                <path d="M4 8.25v3.5h2.5L10 15V5L6.5 8.25H4Z" fill="currentColor" />
+                <path d="m13.25 8 3 3m0-3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
+                <path d="M4 8.25v3.5h2.5L10 15V5L6.5 8.25H4Z" fill="currentColor" />
+                <path d="M12.5 7.25c.75.65 1.1 1.55 1.1 2.75s-.35 2.1-1.1 2.75M14.8 5.5c1.15 1.1 1.8 2.55 1.8 4.5s-.65 3.4-1.8 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              cycleSpeed();
+            }}
+            className="rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-semibold"
+          >
+            {playbackRate}x
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function AiVariations({
   requestId,
@@ -86,7 +256,8 @@ export function AiVariations({
 
   const accepted = variations.find((v) => v.is_accepted);
   const visibleVariations = showAll ? variations : variations.slice(0, 8);
-  const hiddenCount = Math.max(variations.length - 8, 0);
+  const mobileHiddenCount = Math.max(variations.length - 2, 0);
+  const desktopHiddenCount = Math.max(variations.length - 8, 0);
 
   if (accepted) {
     const allAcceptedUrls = signedUrls.get(accepted.id) ?? [];
@@ -147,8 +318,8 @@ export function AiVariations({
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 lg:grid-cols-4 lg:gap-4">
-        {visibleVariations.map((v) => {
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-4">
+        {visibleVariations.map((v, index) => {
           const allUrls = signedUrls.get(v.id) ?? [];
           // Single posters: chat edits are appended (history) — show only the
           // LATEST version. Carousels: show every page.
@@ -159,19 +330,24 @@ export function AiVariations({
           return (
             <div
               key={v.id}
-              className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+              className={`min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${
+                !showAll && index >= 2 ? "hidden lg:block" : ""
+              }`}
             >
               {/* Media preview */}
               <div className={`relative ${v.poster_type === "reel" ? "aspect-[4/5] max-h-[340px]" : "aspect-[5/4] lg:aspect-[5/3]"} bg-zinc-100 dark:bg-zinc-800`}>
                 {urls.length > 0 ? (
                   <>
                     {v.poster_type === "reel" ? (
-                      <video
-                        controls
-                        playsInline
-                        className="h-full w-full rounded-t-lg object-cover"
-                        src={urls[0]}
-                      />
+                      <>
+                        <MobileReelPreview src={urls[0]} />
+                        <video
+                          controls
+                          playsInline
+                          className="hidden h-full w-full rounded-t-lg object-cover lg:block"
+                          src={urls[0]}
+                        />
+                      </>
                     ) : (
                       <img
                         src={urls[idx]}
@@ -276,13 +452,22 @@ export function AiVariations({
           );
         })}
       </div>
-      {hiddenCount > 0 && (
+      {mobileHiddenCount > 0 && (
         <button
           type="button"
           onClick={() => setShowAll((value) => !value)}
-          className="inline-flex h-9 items-center rounded-lg border border-violet-200 bg-white px-3 text-xs font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50 dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
+          className="inline-flex h-9 items-center rounded-lg border border-violet-200 bg-white px-3 text-xs font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50 lg:hidden dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
         >
-          {showAll ? "Show less" : `View ${hiddenCount} more`}
+          {showAll ? "Show less" : `View ${mobileHiddenCount} more`}
+        </button>
+      )}
+      {desktopHiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((value) => !value)}
+          className="hidden h-9 items-center rounded-lg border border-violet-200 bg-white px-3 text-xs font-semibold text-violet-700 shadow-sm transition hover:bg-violet-50 lg:inline-flex dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
+        >
+          {showAll ? "Show less" : `View ${desktopHiddenCount} more`}
         </button>
       )}
     </div>

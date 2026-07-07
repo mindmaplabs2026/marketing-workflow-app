@@ -820,7 +820,7 @@ export default async function RequestDetailPage({
         <AssetDownloadGrid
           requestId={req.id}
           heading={<>From the school ({uploadsList.length})</>}
-          collapseAfter={4}
+          collapseAfter={3}
           items={uploadsList.map<AssetItem>((u) => {
             const name = u.storage_path.split("/").pop() ?? "file";
             const canDelete =
