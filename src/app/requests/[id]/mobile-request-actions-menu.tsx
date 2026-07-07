@@ -53,7 +53,7 @@ export function MobileRequestActionsMenu({
         aria-label="Open request actions"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/90 bg-white/90 text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.1)] ring-1 ring-slate-200/70 backdrop-blur-xl transition hover:bg-white hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-violet-100 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-300"
+        className="flex h-11 w-11 items-center justify-center rounded-full border border-white/90 bg-white/90 text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.1)] ring-1 ring-slate-200/70 backdrop-blur-xl transition hover:bg-white hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-violet-100 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-300"
       >
         <MoreVertical className="h-5 w-5" aria-hidden="true" />
       </button>

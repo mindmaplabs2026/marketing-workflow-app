@@ -519,7 +519,7 @@ export default async function RequestDetailPage({
       : statusLabel;
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-[radial-gradient(circle_at_18%_8%,rgba(147,197,253,0.18),transparent_28%),radial-gradient(circle_at_76%_5%,rgba(167,139,250,0.2),transparent_32%),linear-gradient(180deg,#ffffff_0%,#f8fbff_48%,#ffffff_100%)] px-3 pb-48 pt-3 sm:px-6 lg:min-h-[calc(100dvh-3.5rem)] lg:px-8 lg:pb-3 xl:px-10 dark:bg-none dark:bg-zinc-950">
+    <div className="relative min-h-dvh overflow-hidden bg-[radial-gradient(circle_at_18%_8%,rgba(147,197,253,0.18),transparent_28%),radial-gradient(circle_at_76%_5%,rgba(167,139,250,0.2),transparent_32%),linear-gradient(180deg,#ffffff_0%,#f8fbff_48%,#ffffff_100%)] px-3 pb-28 pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:px-6 lg:min-h-[calc(100dvh-3.5rem)] lg:px-8 lg:pb-3 lg:pt-3 xl:px-10 dark:bg-none dark:bg-zinc-950">
       <div className="mx-auto grid w-full max-w-[1328px] items-start gap-5 lg:grid-cols-[minmax(0,1fr)_292px] lg:gap-7 xl:grid-cols-[minmax(0,1fr)_312px]">
         <main className="min-w-0 space-y-4">
       <div className="flex items-center justify-between gap-3 lg:hidden">
@@ -527,7 +527,7 @@ export default async function RequestDetailPage({
           <Link
             href="/requests"
             aria-label="Back to all requests"
-            className="group inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/90 bg-white/90 text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.1)] ring-1 ring-slate-200/70 backdrop-blur-xl transition hover:-translate-x-0.5 hover:bg-white hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-violet-100 motion-reduce:transform-none dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-300"
+            className="group inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/90 bg-white/90 text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.1)] ring-1 ring-slate-200/70 backdrop-blur-xl transition hover:-translate-x-0.5 hover:bg-white hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-violet-100 motion-reduce:transform-none dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-300"
           >
             <svg
               viewBox="0 0 24 24"
@@ -549,12 +549,14 @@ export default async function RequestDetailPage({
           </p>
         </div>
 
-        <MobileRequestActionsMenu
-          requestId={req.id}
-          canEdit={canEdit}
-          canArchive={canArchive}
-          canDelete={canDelete}
-        />
+        <div className="flex justify-end">
+          <MobileRequestActionsMenu
+            requestId={req.id}
+            canEdit={canEdit}
+            canArchive={canArchive}
+            canDelete={canDelete}
+          />
+        </div>
       </div>
 
       <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)] ring-1 ring-white/80 backdrop-blur-xl lg:hidden dark:border-zinc-800 dark:bg-zinc-900/85">
@@ -1042,7 +1044,7 @@ export default async function RequestDetailPage({
         />
       )}
 
-      <section className="fixed inset-x-3 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-50 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-[0_18px_60px_rgba(15,23,42,0.18)] ring-1 ring-white/80 backdrop-blur-xl sm:grid-cols-4 lg:static lg:z-auto lg:flex lg:flex-wrap lg:items-center lg:gap-2 lg:rounded-none lg:border-x-0 lg:border-b-0 lg:border-t lg:bg-transparent lg:p-0 lg:pt-6 lg:shadow-none lg:ring-0 dark:border-zinc-800 dark:bg-zinc-950/95 lg:dark:bg-transparent">
+      <section className="fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-50 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-[0_18px_60px_rgba(15,23,42,0.18)] ring-1 ring-white/80 backdrop-blur-xl sm:grid-cols-4 lg:static lg:z-auto lg:flex lg:flex-wrap lg:items-center lg:gap-2 lg:rounded-none lg:border-x-0 lg:border-b-0 lg:border-t lg:bg-transparent lg:p-0 lg:pt-6 lg:shadow-none lg:ring-0 dark:border-zinc-800 dark:bg-zinc-950/95 lg:dark:bg-transparent">
         {canEdit && (
           <Link
             href={`/requests/${req.id}/edit`}
