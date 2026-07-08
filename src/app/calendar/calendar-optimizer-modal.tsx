@@ -325,7 +325,7 @@ export function CalendarOptimizerModal({
             </div>
           )}
 
-          <div className="sticky bottom-0 -mx-4 mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-4 pb-1 pt-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:justify-end sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-0">
+          <div className="sticky bottom-0 -mx-4 mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:justify-end sm:border-t-0 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-0">
             <button
               type="button"
               onClick={() => setOpen(false)}
