@@ -9,9 +9,5 @@ export default async function CalendarLayout({
   const session = await getSessionUser();
   if (!session) redirect("/login");
 
-  return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
-      {children}
-    </div>
-  );
+  return <div className="w-full px-4 pb-6 pt-3 sm:px-6 lg:pl-8 lg:pr-4">{children}</div>;
 }

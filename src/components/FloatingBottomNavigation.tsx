@@ -9,7 +9,8 @@ import {
   UserCog,
   type LucideIcon,
 } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UserRole } from "@/lib/supabase/types";
 
@@ -128,7 +129,6 @@ function getActiveId(pathname: string, visibleItems: readonly NavigationItem[]):
 
 export function FloatingBottomNavigation({ role }: { role: UserRole }) {
   const pathname = usePathname();
-  const router = useRouter();
   const navRef = useRef<HTMLDivElement>(null);
   const [navWidth, setNavWidth] = useState(400);
   const visibleItems = useMemo(
@@ -201,13 +201,12 @@ export function FloatingBottomNavigation({ role }: { role: UserRole }) {
 
             return (
               <li key={item.id} className="relative flex h-full items-center justify-center">
-                <button
-                  type="button"
+                <Link
+                  href={routeById[item.id]}
                   aria-label={item.label}
                   aria-current={active ? "page" : undefined}
                   onClick={() => {
                     setActiveTab(item.id);
-                    router.push(routeById[item.id]);
                   }}
                   className="group relative flex h-full w-full items-center justify-center rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                 >
@@ -262,7 +261,7 @@ export function FloatingBottomNavigation({ role }: { role: UserRole }) {
                       </motion.span>
                     ) : null}
                   </AnimatePresence>
-                </button>
+                </Link>
               </li>
             );
           })}

@@ -236,13 +236,10 @@ export function AppSidebar({
 
         {(showRequestTip || showCalendarTip) && (
           <div className="mx-3 mt-4 overflow-hidden rounded-2xl border border-violet-100/90 bg-white/90 p-3 shadow-[0_18px_50px_rgba(124,58,237,0.12)] ring-1 ring-white/70">
-            <div className="relative mb-2 flex h-16 items-center justify-center overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#f3e8ff_0%,#ffffff_48%,#ede9fe_100%)]">
-              <span className="absolute -left-10 top-7 h-3 w-44 rotate-[-18deg] rounded-full bg-white/80 blur-[1px]" />
-              <span className="absolute -left-7 top-12 h-2 w-40 rotate-[-18deg] rounded-full bg-violet-200/55 blur-[1px]" />
+            <div className="relative mb-2 flex h-16 items-center justify-center overflow-hidden rounded-2xl bg-violet-50">
               <span className="absolute left-8 top-5 h-1.5 w-1.5 rounded-full bg-white shadow-sm" />
               <span className="absolute right-9 top-5 h-1.5 w-1.5 rounded-full bg-violet-300" />
               <span className="absolute bottom-8 right-7 h-2 w-2 rounded-full bg-violet-400/70" />
-              <span className="absolute inset-0 bg-[radial-gradient(circle_at_78%_18%,rgba(124,58,237,0.16),transparent_20%),radial-gradient(circle_at_16%_80%,rgba(255,255,255,0.92),transparent_24%)]" />
               <span className="relative -rotate-12">
                 <TipPlaneIcon />
               </span>
