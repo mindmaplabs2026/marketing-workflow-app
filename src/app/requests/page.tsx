@@ -13,7 +13,6 @@ import { CollapsibleRows } from "@/components/collapsible-rows";
 import { MotionSurface } from "@/components/premium-motion";
 import { RequestRowActions } from "@/components/request-row-actions";
 import { AnimatedNumber } from "@/components/animated-number";
-import { StatusFilterChips } from "@/components/status-filter-chips";
 
 const SECTION_PAGE_SIZE = 10;
 const SECTION_COLLAPSED_ROWS = 3;
@@ -26,7 +25,6 @@ const SECTION_PAGE_KEYS = {
 } as const;
 
 type SectionKey = keyof typeof SECTION_PAGE_KEYS;
-type StatusFilter = "all" | "needs" | "in-flight" | "published" | "archived";
 type OverviewRange = "this-week" | "last-week" | "last-30-days";
 
 type RequestListRow = {
@@ -44,13 +42,6 @@ type RequestListRow = {
 type SchoolLite = { id: string; name: string };
 type ProfileLite = { id: string; full_name: string | null };
 
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "needs", label: "Needs you" },
-  { value: "in-flight", label: "In flight" },
-  { value: "published", label: "Published" },
-  { value: "archived", label: "Archived" },
-];
 
 const OVERVIEW_RANGE_OPTIONS: { value: OverviewRange; label: string }[] = [
   { value: "this-week", label: "This week" },
@@ -213,12 +204,6 @@ function rowTimingDotClass(request: RequestListRow, todayUtcMs: number): string 
   return dueInDays !== null && dueInDays < 0 ? "bg-rose-500" : "bg-orange-500";
 }
 
-function normalizedFilter(value: string | undefined): StatusFilter {
-  return STATUS_FILTERS.some((item) => item.value === value)
-    ? (value as StatusFilter)
-    : "all";
-}
-
 function normalizedOverviewRange(value: string | undefined): OverviewRange {
   return OVERVIEW_RANGE_OPTIONS.some((item) => item.value === value)
     ? (value as OverviewRange)
@@ -356,7 +341,7 @@ export default async function RequestsListPage({
   searchParams,
 }: {
   searchParams: Promise<
-    { school?: string; q?: string; status?: string; overview?: string } & Partial<
+    { school?: string; q?: string; overview?: string } & Partial<
       Record<(typeof SECTION_PAGE_KEYS)[SectionKey], string>
     >
   >;
@@ -365,7 +350,6 @@ export default async function RequestsListPage({
   const schoolFilter = params.school ?? "";
   const rawQuery = params.q ?? "";
   const searchQuery = rawQuery.trim().toLowerCase();
-  const statusFilter = normalizedFilter(params.status);
   const overviewRange = normalizedOverviewRange(params.overview);
 
   const sectionPages: Record<SectionKey, number> = {
@@ -481,10 +465,6 @@ export default async function RequestsListPage({
     }
 
     inFlight.push(request);
-  }
-
-  function visibleSection(key: StatusFilter): boolean {
-    return statusFilter === "all" || statusFilter === key;
   }
 
   const statusCounts = countByStatus(requests);
@@ -616,7 +596,6 @@ export default async function RequestsListPage({
     const sp = new URLSearchParams();
     if (rawQuery) sp.set("q", rawQuery);
     if (schoolFilter) sp.set("school", schoolFilter);
-    if (statusFilter !== "all") sp.set("status", statusFilter);
     if (overviewRange !== "this-week") sp.set("overview", overviewRange);
     for (const [key, value] of Object.entries(next)) {
       if (value) sp.set(key, value);
@@ -642,33 +621,6 @@ export default async function RequestsListPage({
   }
 
   const showSchoolFilter = isDesigner && schoolsList.length > 1;
-  const filteredEmptyState =
-    statusFilter === "all"
-      ? null
-      : {
-          needs: {
-            count: needsSectionCount,
-            title: isTeacher ? "No requests created by you yet." : "No requests need your action right now.",
-            description: isTeacher
-              ? "Requests you raise will appear here as they move through the workflow."
-              : "When a request needs your review or design action, it will appear here.",
-          },
-          "in-flight": {
-            count: inFlight.length,
-            title: "No in-flight requests right now.",
-            description: "Active requests will appear here once they are moving through the workflow.",
-          },
-          published: {
-            count: published.length,
-            title: "No published requests yet.",
-            description: "Completed requests will appear here after they are published.",
-          },
-          archived: {
-            count: archived.length,
-            title: "No archived requests yet.",
-            description: "Requests moved out of the active workflow will appear here.",
-          },
-        }[statusFilter];
 
   return (
     <div className="min-h-full overflow-x-hidden bg-[radial-gradient(circle_at_78%_4%,rgba(124,58,237,0.13),transparent_29%),radial-gradient(circle_at_18%_18%,rgba(14,165,233,0.08),transparent_25%),linear-gradient(180deg,#ffffff_0%,#fbfbff_48%,#f8fafc_100%)] px-3 pb-5 pt-0 text-slate-950 sm:px-6 lg:px-8">
@@ -860,7 +812,7 @@ export default async function RequestsListPage({
             </Panel>
 
             <div className="rounded-2xl border border-white/80 bg-white/86 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.07)] ring-1 ring-slate-200/70 backdrop-blur-xl">
-              <div className={`grid gap-3 xl:items-end ${showSchoolFilter ? "xl:grid-cols-[minmax(0,1fr)_128px_auto]" : "xl:grid-cols-[minmax(300px,1fr)_auto]"}`}>
+              <div className={`grid gap-3 xl:items-end ${showSchoolFilter ? "xl:grid-cols-[minmax(0,1fr)_220px]" : "xl:grid-cols-1"}`}>
                 <div className="min-w-0">
                   <SearchInput
                     initialValue={rawQuery}
@@ -885,80 +837,48 @@ export default async function RequestsListPage({
                     />
                   </div>
                 ) : null}
-                <div className="xl:shrink-0">
-                  <p className="mb-1.5 text-xs font-semibold text-slate-500">Status</p>
-                  <StatusFilterChips
-                    filters={STATUS_FILTERS}
-                    active={statusFilter}
-                    resetParams={Object.values(SECTION_PAGE_KEYS)}
-                    labelOverride={isTeacher ? { needs: "My requests" } : undefined}
-                  />
-                  {(rawQuery || schoolFilter || statusFilter !== "all") && (
-                    <Link
-                      href="/requests"
-                      scroll={false}
-                      className="mt-2 inline-flex w-full justify-end rounded-full px-2 text-xs font-semibold text-violet-600 transition hover:text-violet-700"
-                    >
-                      Clear all
-                    </Link>
-                  )}
-                </div>
               </div>
+              {(rawQuery || schoolFilter) && (
+                <div className="mt-2 flex justify-end">
+                  <Link
+                    href="/requests"
+                    scroll={false}
+                    className="rounded-full px-2 text-xs font-semibold text-violet-600 transition hover:text-violet-700"
+                  >
+                    Clear all
+                  </Link>
+                </div>
+              )}
             </div>
 
-            {visibleSection("needs") && (
-              <RequestSection
-                title={needsSectionTitle}
-                count={needsSectionCount}
-                items={isTeacher ? myRequestsView.slice : needsYouView.slice}
-                tone="orange"
-                pagination={sectionPagination("needsYou", needsSectionCount)}
-              />
-            )}
-            {visibleSection("in-flight") && (
-              <RequestSection
-                title="In flight"
-                count={inFlight.length}
-                items={inFlightView.slice}
-                tone="blue"
-                pagination={sectionPagination("inFlight", inFlight.length)}
-              />
-            )}
-            {visibleSection("published") && (
-              <RequestSection
-                title="Published"
-                count={published.length}
-                items={publishedView.slice}
-                tone="emerald"
-                pagination={sectionPagination("published", published.length)}
-              />
-            )}
-            {visibleSection("archived") && (
-              <RequestSection
-                title="Archived"
-                count={archived.length}
-                items={archivedView.slice}
-                tone="zinc"
-                pagination={sectionPagination("archived", archived.length)}
-              />
-            )}
-
-            {filteredEmptyState && filteredEmptyState.count === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/80 p-8 text-center shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur sm:p-10">
-                <p className="text-sm font-semibold text-slate-950">
-                  {filteredEmptyState.title}
-                </p>
-                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-slate-500">
-                  {filteredEmptyState.description}
-                </p>
-                <Link
-                  href="/requests"
-                  className="mt-4 inline-flex h-9 items-center justify-center rounded-xl bg-violet-50 px-4 text-sm font-semibold text-violet-600 transition hover:bg-violet-100"
-                >
-                  View all requests
-                </Link>
-              </div>
-            )}
+            <RequestSection
+              title={needsSectionTitle}
+              count={needsSectionCount}
+              items={isTeacher ? myRequestsView.slice : needsYouView.slice}
+              tone="orange"
+              pagination={sectionPagination("needsYou", needsSectionCount)}
+            />
+            <RequestSection
+              title="In flight"
+              count={inFlight.length}
+              items={inFlightView.slice}
+              tone="blue"
+              pagination={sectionPagination("inFlight", inFlight.length)}
+            />
+            <RequestSection
+              title="Published"
+              count={published.length}
+              items={publishedView.slice}
+              tone="emerald"
+              pagination={sectionPagination("published", published.length)}
+            />
+            <RequestSection
+              title="Archived"
+              count={archived.length}
+              items={archivedView.slice}
+              tone="zinc"
+              pagination={sectionPagination("archived", archived.length)}
+            />
 
             {requests.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/80 p-10 text-center shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur">
