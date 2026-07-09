@@ -559,7 +559,7 @@ export function LoginForm({
           </div>
         </section>
 
-        <section className="relative -ml-16 hidden min-h-0 overflow-hidden px-8 py-5 lg:block xl:-ml-20 xl:px-10">
+        <section className="relative hidden min-h-0 overflow-hidden px-8 py-5 lg:block xl:px-10">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_12%,rgba(124,58,237,0.20),transparent_30%),radial-gradient(circle_at_92%_80%,rgba(37,99,235,0.18),transparent_34%)]" />
           <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.72),rgba(237,233,254,0.62),rgba(219,234,254,0.72))]" />
           <div className="absolute -right-40 top-12 h-[620px] w-[760px] rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.24),rgba(96,165,250,0.18)_42%,transparent_68%)] blur-sm" />
@@ -588,7 +588,7 @@ export function LoginForm({
           </svg>
           <div className="absolute bottom-16 left-12 right-12 h-40 rounded-[32px] bg-white/30 blur-2xl" />
 
-          <div className="relative ml-0 mr-auto flex h-full max-w-3xl origin-top flex-col justify-start pt-4 xl:pt-6 [@media(max-height:760px)]:scale-[0.78]">
+          <div className="relative ml-0 mr-auto flex h-full max-w-3xl origin-top flex-col justify-start pl-16 pt-4 xl:pt-6 [@media(max-height:760px)]:scale-[0.78]">
             <div className="mb-6">
               <h2 className="max-w-xl text-3xl font-semibold tracking-tight text-zinc-950">
                 From request to published.
@@ -656,7 +656,7 @@ export function LoginForm({
               </div>
             </div>
 
-            <div className="-ml-28 mt-16 grid grid-cols-4 gap-0 bg-transparent pt-4 xl:-ml-32">
+            <div className="mt-16 grid grid-cols-4 gap-0 bg-transparent pt-4">
               {productHighlights.map((item) => {
                 const Icon = item.icon;
                 return (
