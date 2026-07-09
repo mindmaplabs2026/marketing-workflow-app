@@ -9,12 +9,14 @@ import { ConfirmForm } from "@/components/confirm-form";
 import { SearchInput } from "@/components/search-input";
 import { SelectFilter } from "@/components/select-filter";
 import { Pagination } from "@/components/pagination";
+import { CollapsibleRows } from "@/components/collapsible-rows";
 import { MotionSurface } from "@/components/premium-motion";
 import { RequestRowActions } from "@/components/request-row-actions";
 import { AnimatedNumber } from "@/components/animated-number";
 import { StatusFilterChips } from "@/components/status-filter-chips";
 
-const SECTION_PAGE_SIZE = 3;
+const SECTION_PAGE_SIZE = 10;
+const SECTION_COLLAPSED_ROWS = 3;
 
 const SECTION_PAGE_KEYS = {
   needsYou: "needs-you-page",
@@ -91,6 +93,14 @@ function paginate<T>(
 
 function formatDateOnly(dateOnly: string): string {
   return new Date(`${dateOnly}T00:00:00+05:30`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+function formatIsoDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     timeZone: "Asia/Kolkata",
@@ -180,7 +190,10 @@ function priorityReason(request: RequestListRow, todayUtcMs: number): string {
 }
 
 function rowTimingLabel(request: RequestListRow, todayUtcMs: number): string {
-  if (request.status === "published" || request.status === "archived") return "NA";
+  // Terminal states have no due date to track; show when they wrapped up.
+  if (request.status === "published" || request.status === "archived") {
+    return formatIsoDate(request.updated_at);
+  }
 
   const dueInDays = daysUntilDue(request.due_date, todayUtcMs);
   if (dueInDays !== null) {
@@ -189,7 +202,8 @@ function rowTimingLabel(request: RequestListRow, todayUtcMs: number): string {
     if (dueInDays === 1) return "Due tomorrow";
     return `Due ${formatDateOnly(request.due_date!)}`;
   }
-  return "NA";
+  // No due date set: fall back to the date the request was raised.
+  return formatIsoDate(request.created_at);
 }
 
 function rowTimingDotClass(request: RequestListRow, todayUtcMs: number): string {
@@ -1097,7 +1111,10 @@ export default async function RequestsListPage({
         <h2 className={`flex items-center gap-1.5 text-sm font-semibold ${titleClass}`}>
           {title} ({count}) <span className="text-xs opacity-70">⌄</span>
         </h2>
-        <div className="overflow-visible rounded-2xl border border-white/70 bg-white/82 shadow-[0_18px_60px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/70 backdrop-blur-xl">
+        <CollapsibleRows
+          collapsedCount={SECTION_COLLAPSED_ROWS}
+          className="overflow-visible rounded-2xl border border-white/70 bg-white/82 shadow-[0_18px_60px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/70 backdrop-blur-xl"
+        >
           {items.map((request) => {
             const schoolName = schoolsById.get(request.school_id) ?? "School";
             const showEdit = canEditRequest(request);
@@ -1176,7 +1193,7 @@ export default async function RequestsListPage({
               </div>
             );
           })}
-        </div>
+        </CollapsibleRows>
         {pagination}
       </section>
     );
