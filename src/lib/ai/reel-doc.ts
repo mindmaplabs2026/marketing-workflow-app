@@ -49,6 +49,10 @@ const mediaFields = {
   radius: z.number().optional(),
   trimStartSec: z.number().optional(),
   trimEndSec: z.number().optional(),
+  // Video only: mute silences the clip's own audio (original voices/noise) so only
+  // the reel BGM is heard; volume (0..1) sets clip level when not muted.
+  mute: z.boolean().optional(),
+  volume: z.number().optional(),
   kenBurns: z.object({
     from: z.number(), to: z.number(),
     panX: z.number().optional(), panY: z.number().optional(),

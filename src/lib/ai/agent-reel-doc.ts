@@ -36,6 +36,23 @@ export type ReelDocInput = {
 };
 
 const sec2frames = (s: number) => Math.max(1, Math.round((s || 0) * FPS));
+
+/**
+ * Enforce the reel's audio intent on the doc's video clips. `bgm-only` mutes every
+ * clip so only the BGM is heard (clips otherwise play their own voices/noise ON TOP
+ * of the BGM — the #1 audio complaint). `voice-led`/`mixed` leave clip audio audible
+ * (the BGM is ducked via music.gainDb elsewhere). Applied to BOTH the deterministic
+ * and Codex docs so the policy holds regardless of what the model emitted.
+ */
+function applyAudioPolicy(doc: ReelDoc, audioStyle: string | undefined): ReelDoc {
+  const muteClips = audioStyle === "bgm-only";
+  for (const scene of doc.scenes) {
+    for (const el of scene.elements) {
+      if (el.type === "video") el.mute = muteClips;
+    }
+  }
+  return doc;
+}
 const basename = (p: string) => p.split("/").pop() ?? p;
 
 function mediaFilename(beat: SceneBeat, manifest: ReelDocInput["mediaManifest"]): string | null {
@@ -139,7 +156,7 @@ export function scriptToReelDoc(input: ReelDocInput): ReelDoc {
     ...(input.hasMusic ? { music: { src: "music/track.mp3", gainDb: script.audioStyle === "voice-led" ? -12 : 0 } } : {}),
     scenes,
   };
-  return doc;
+  return applyAudioPolicy(doc, script.audioStyle);
 }
 
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
@@ -193,7 +210,7 @@ export async function generateReelDoc(input: ReelDocInput): Promise<{ doc: ReelD
         continue;
       }
       console.log(`[ReelDoc] Codex produced a valid ReelDoc (${result.data.scenes.length} scenes)`);
-      return { doc: result.data, source: "codex" };
+      return { doc: applyAudioPolicy(result.data, input.script.audioStyle), source: "codex" };
     } catch (err) {
       console.warn(`[ReelDoc] attempt ${attempt} failed: ${err instanceof Error ? err.message : err}`);
       feedback = `\nYour previous reply was not valid JSON. Return ONLY a JSON object, no prose.`;
@@ -202,6 +219,79 @@ export async function generateReelDoc(input: ReelDocInput): Promise<{ doc: ReelD
 
   console.log(`[ReelDoc] Falling back to deterministic scriptToReelDoc`);
   return { doc: scriptToReelDoc(input), source: "deterministic" };
+}
+
+/**
+ * Apply a user's chat edit to an existing ReelDoc (the schema-reel counterpart of
+ * editComposition). Codex returns the FULL updated doc; we zod-validate + check
+ * media refs with a retry. No deterministic fallback — an arbitrary NL edit can't
+ * be applied mechanically — so on failure it throws, and the caller (which only
+ * swaps storage_paths after a verified re-render+upload) leaves the reel intact.
+ */
+export async function editReelDoc(input: {
+  doc: ReelDoc;
+  instruction: string;
+  mediaManifest: Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>;
+  hasLogo: boolean;
+  hasFooter: boolean;
+  hasMusic: boolean;
+  timeoutMs?: number;
+}): Promise<ReelDoc> {
+  const available = new Set<string>([
+    ...[...input.mediaManifest.keys()].map((f) => `media/${f}`),
+    ...(input.hasLogo ? ["media/logo.png"] : []),
+    ...(input.hasFooter ? ["media/footer.png"] : []),
+  ]);
+  const mediaList = [...input.mediaManifest.entries()]
+    .map(([fn, i]) => `- media/${fn} (${i.type}${i.orientation ? `, ${i.orientation}` : ""})`)
+    .join("\n");
+
+  let feedback = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const prompt = `You are editing an existing Instagram Reel described as a structured JSON document (a "ReelDoc"). Apply ONLY the user's requested change and keep EVERYTHING else byte-for-byte identical — same scenes, same order, same durations, same element positions/text/colors — except what the request touches. Output ONLY the full updated JSON object (no prose, no code fence).
+
+USER'S EDIT REQUEST:
+"${input.instruction}"
+
+CURRENT ReelDoc:
+${JSON.stringify(input.doc)}
+
+FILES THAT EXIST (staticFile paths — reference ONLY these):
+${mediaList || "(no photos/videos)"}
+${input.hasLogo ? "- media/logo.png (logo)\n" : ""}${input.hasFooter ? "- media/footer.png (footer strip)\n" : ""}${input.hasMusic ? "- music/track.mp3 (music)\n" : ""}
+RULES:
+- Keep the SAME schema shape as the input. Positions are % of a 1080x1920 canvas; font sizes are px.
+- Change the minimum needed. Do NOT restyle, reorder, or re-time unrelated scenes/elements.
+- Only reference files listed above; staticFile("media/<file>") with no "public/" prefix.
+- The logo element uses src "media/logo.png" and should keep objectFit "contain" (never stretch it). To put a backing/glow behind the logo, add a shape element BEHIND it (earlier in the scene's elements array), don't distort the logo.
+- AUDIO: every video element supports "mute" (true = the clip's ORIGINAL voices/background noise are silenced) and the reel has "music": { "gainDb": n } (0 = full BGM, negative = quieter e.g. -6/-12, positive up to +6 = louder). To keep ONLY the background music / remove the original voices/noise, set "mute": true on EVERY video element (and leave gainDb at 0). To make the music louder, raise music.gainDb toward 0 or positive. To bring clip audio back, set "mute": false.${feedback}
+
+Output the full updated JSON now:`;
+
+      console.log(`[ReelDoc] Edit attempt ${attempt}/2 — asking Codex to mutate the doc (${input.doc.scenes.length} scenes)`);
+      const raw = await codexText({ prompt, timeoutMs: input.timeoutMs });
+      const parsed = JSON.parse(stripJsonFences(raw));
+      const result = ReelDocSchema.safeParse(parsed);
+      if (!result.success) {
+        feedback = `\nYour previous JSON failed validation:\n${result.error.issues.slice(0, 12).map((i) => `- ${i.path.join(".")}: ${i.message}`).join("\n")}\nReturn corrected JSON.`;
+        console.warn(`[ReelDoc] edit attempt ${attempt}: zod validation failed (${result.error.issues.length} issue(s))`);
+        continue;
+      }
+      const missing = collectMediaSrcs(result.data).filter((s) => !available.has(s));
+      if (missing.length) {
+        feedback = `\nThese media srcs don't exist: ${[...new Set(missing)].join(", ")}. Only use the listed files.`;
+        console.warn(`[ReelDoc] edit attempt ${attempt}: ${missing.length} invalid media ref(s)`);
+        continue;
+      }
+      console.log(`[ReelDoc] Edit produced a valid ReelDoc (${result.data.scenes.length} scenes)`);
+      return result.data;
+    } catch (err) {
+      console.warn(`[ReelDoc] edit attempt ${attempt} failed: ${err instanceof Error ? err.message : err}`);
+      feedback = `\nYour previous reply was not valid JSON. Return ONLY the JSON object.`;
+    }
+  }
+  throw new Error("Could not produce a valid edited ReelDoc after 2 attempts (reel left unchanged)");
 }
 
 function buildDocPrompt(input: ReelDocInput, mediaList: string, sceneList: string, feedback: string): string {

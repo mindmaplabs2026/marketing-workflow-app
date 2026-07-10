@@ -205,10 +205,25 @@ Keep EVERYTHING else exactly the same — same layout, same images, same colors,
   const timestamp = Date.now();
   const storagePath = `${schoolId}/${requestId}/ai/${variation.variation_index}/edits/${round}-${timestamp}.png`;
   console.log(`[chat-edit] Step 4: Uploading edited image → ${storagePath}`);
-  await admin.storage.from("designs").upload(storagePath, imageBuffer, {
-    contentType: "image/png",
-    upsert: false,
-  });
+  // Verify the upload BEFORE updating storage_paths. An unchecked failed upload
+  // used to leave a dead path (blank page for carousels / broken latest for
+  // singles). Retry transient failures; throw on hard failure so the edit is
+  // marked failed and the existing design stays live.
+  let uploaded = false;
+  let lastUploadErr = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { error } = await admin.storage.from("designs").upload(storagePath, imageBuffer, {
+      contentType: "image/png",
+      upsert: true,
+    });
+    if (!error) { uploaded = true; break; }
+    lastUploadErr = error.message;
+    console.warn(`[chat-edit] upload attempt ${attempt}/3 failed: ${error.message}`);
+    await new Promise((r) => setTimeout(r, 500 * attempt));
+  }
+  if (!uploaded) {
+    throw new Error(`Edit generated but upload failed after 3 attempts (existing design left intact): ${lastUploadErr}`);
+  }
 
   // Store assistant message
   await admin.from("ai_chat_messages").insert({
@@ -260,10 +275,13 @@ async function runReelChatEdit(
 
   console.log(`[reel-chat] ── START ── variation=${variation.id}, message="${message.slice(0, 80)}"`);
 
-  // Extract composition code and script from creative_brief
+  // Extract composition code and script from creative_brief. Reels come in two
+  // flavours: free-form (Codex-written Reel.tsx → _compositionCode) and schema
+  // (structured _reelDoc, Tier 2). They edit via different mechanisms below.
   const brief = variation.creative_brief as Record<string, unknown>;
   const compositionCode = (brief._compositionCode as string) ?? "";
-  if (!compositionCode) throw new Error("No composition code found in variation brief");
+  const isSchemaReel = brief._compositionMode === "schema" || !!brief._reelDoc;
+  if (!isSchemaReel && !compositionCode) throw new Error("No composition code found in variation brief");
 
   // Step 1: Get text confirmation of the edit
   const { data: history } = await admin
@@ -430,52 +448,90 @@ async function runReelChatEdit(
   // a silent safety-net track it removes the Audio element rather than playing silence.
   const hasMusic = hasRealMusic;
 
-  // Step 3: Apply the user's edit to the composition code.
-  const { editComposition, renderWithRepair } = await import("./agent-composition");
-  const edited = await editComposition({
-    originalCode: compositionCode,
-    instruction: message,
-    script: reelScript,
-    mediaManifest,
-    hasLogo,
-    logoProfile,
-    hasFooter,
-    hasMusic,
-  });
-  console.log(`[reel-chat] Got edited composition: ${edited.reelTsx.length} chars`);
+  // Step 3+4: Apply the edit and re-render. Two paths by reel flavour; both produce
+  // a `renderResult` and the composition-specific creative_brief fields to persist.
+  let renderResult: Awaited<ReturnType<typeof import("@/lib/remotion/render")["renderReelDoc"]>>;
+  let usedFallback = false;
+  let briefComposition: Record<string, unknown>;
 
-  // Step 4: Re-render with the same self-correcting repair loop as generation.
-  // Carry the persisted data.ts through if the edit didn't emit its own (most
-  // compositions are single-file, so this is the common case).
-  console.log(`[reel-chat] Re-rendering with ${mediaFiles.size} media files, music=${hasMusic}`);
-  const { renderResult, composition: working, usedFallback } = await renderWithRepair({
-    composition: {
-      reelTsx: edited.reelTsx,
-      dataTsx: edited.dataTsx ?? (brief._compositionDataCode as string | undefined),
-    },
-    script: reelScript,
-    assets: { mediaFiles, mediaManifest, musicFile, hasLogo, hasFooter, hasMusic },
-    label: `edit r${round}`,
-  });
-  console.log(`[reel-chat] Rendered in ${renderResult.renderTimeSec.toFixed(1)}s${usedFallback ? " (fallback slideshow)" : ""}`);
+  if (isSchemaReel) {
+    // SCHEMA reel: mutate the ReelDoc JSON (validated) and render it with the fixed
+    // renderer. No code patching, no repair loop needed (the renderer is fixed).
+    const { editReelDoc } = await import("./agent-reel-doc");
+    const { renderReelDoc } = await import("@/lib/remotion/render");
+    const currentDoc = brief._reelDoc as import("./reel-doc").ReelDoc;
+    console.log(`[reel-chat] Schema reel — editing ReelDoc (${currentDoc.scenes?.length ?? 0} scenes)`);
+    const newDoc = await editReelDoc({ doc: currentDoc, instruction: message, mediaManifest, hasLogo, hasFooter, hasMusic });
+    console.log(`[reel-chat] Re-rendering edited ReelDoc (${newDoc.scenes.length} scenes) with ${mediaFiles.size} media files, music=${hasMusic}`);
+    renderResult = await renderReelDoc({ doc: newDoc, mediaFiles, musicFile });
+    briefComposition = { _reelDoc: newDoc, _compositionMode: "schema" };
+    console.log(`[reel-chat] Rendered in ${renderResult.renderTimeSec.toFixed(1)}s`);
+  } else {
+    // FREE-FORM reel: surgical TSX edit + self-correcting render/repair loop.
+    const { editComposition, renderWithRepair } = await import("./agent-composition");
+    const edited = await editComposition({
+      originalCode: compositionCode,
+      instruction: message,
+      script: reelScript,
+      mediaManifest,
+      hasLogo,
+      logoProfile,
+      hasFooter,
+      hasMusic,
+    });
+    console.log(`[reel-chat] Got edited composition: ${edited.reelTsx.length} chars`);
+    console.log(`[reel-chat] Re-rendering with ${mediaFiles.size} media files, music=${hasMusic}`);
+    const r = await renderWithRepair({
+      composition: {
+        reelTsx: edited.reelTsx,
+        dataTsx: edited.dataTsx ?? (brief._compositionDataCode as string | undefined),
+      },
+      script: reelScript,
+      assets: { mediaFiles, mediaManifest, musicFile, hasLogo, hasFooter, hasMusic },
+      label: `edit r${round}`,
+    });
+    renderResult = r.renderResult;
+    usedFallback = r.usedFallback;
+    briefComposition = { _compositionCode: r.composition.reelTsx, _compositionDataCode: r.composition.dataTsx };
+    console.log(`[reel-chat] Rendered in ${renderResult.renderTimeSec.toFixed(1)}s${usedFallback ? " (fallback slideshow)" : ""}`);
+  }
 
-  // Step 5: Upload the new reel and update the variation.
+  // Step 5: Upload the new reel, THEN update the variation. The upload MUST be
+  // verified before we touch storage_paths: a silently-failed upload here used to
+  // overwrite the live pointer with a dead path — blanking the player AND
+  // de-referencing the previous render (data loss). Retry transient failures; on a
+  // hard failure, throw so the edit is marked failed and the existing reel is left
+  // completely intact.
   const timestamp = Date.now();
   const storagePath = `${schoolId}/${requestId}/ai/${variation.variation_index}/edits/${round}-reel-${timestamp}.mp4`;
   const fsPromises = await import("node:fs").then((m) => m.promises);
   const mp4Buffer = await fsPromises.readFile(renderResult.outputPath);
 
-  await admin.storage.from("designs").upload(storagePath, mp4Buffer, {
-    contentType: "video/mp4",
-    upsert: false,
-  });
+  let uploaded = false;
+  let lastUploadErr = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { error } = await admin.storage.from("designs").upload(storagePath, mp4Buffer, {
+      contentType: "video/mp4",
+      upsert: true,
+    });
+    if (!error) { uploaded = true; break; }
+    lastUploadErr = error.message;
+    console.warn(`[reel-chat] upload attempt ${attempt}/3 failed: ${error.message}`);
+    await new Promise((r) => setTimeout(r, 800 * attempt));
+  }
+  if (!uploaded) {
+    await renderResult.cleanup();
+    // storage_paths is deliberately NOT updated — the existing reel stays live.
+    throw new Error(`Edit rendered but upload failed after 3 attempts (existing reel left intact): ${lastUploadErr}`);
+  }
+  console.log(`[reel-chat] Uploaded edit: ${storagePath} (${(mp4Buffer.length / 1024 / 1024).toFixed(1)} MB)`);
 
   await admin.from("ai_chat_messages").insert({
     variation_id: variation.id,
     role: "assistant",
     content: assistantText,
     image_paths: [storagePath],
-    metadata: { model: "codex-composition", round, usedFallback },
+    metadata: { model: isSchemaReel ? "codex-reeldoc" : "codex-composition", round, usedFallback },
   });
 
   await admin
@@ -485,8 +541,7 @@ async function runReelChatEdit(
       storage_paths: [storagePath],
       creative_brief: {
         ...brief,
-        _compositionCode: working.reelTsx,
-        _compositionDataCode: working.dataTsx,
+        ...briefComposition,
         _musicPath: musicPath,
         _musicSource: musicSource,
       } as unknown as Record<string, unknown>,
