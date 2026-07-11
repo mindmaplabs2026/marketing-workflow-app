@@ -259,7 +259,7 @@ async function deepAnalysis(
 Your job is to:
 1. Understand the theme, audience, and tone from the title and description.
 2. Analyze every image AND video frame for quality, composition, content, and relevance to the theme.
-3. Curate a shortlist of the best media (max 10-15) ranked by relevance.
+3. Curate a shortlist of the best media (the ${images.length} below are already pre-filtered — keep every clearly relevant, high-quality item; do not trim below what genuinely fits) ranked by relevance.
 4. Reject media that is blurry, irrelevant, or low quality — explain why.
 5. For each curated item, write a detailed description of what's in it (people, setting, action, mood).
 6. Identify the core message that should come through in the output.

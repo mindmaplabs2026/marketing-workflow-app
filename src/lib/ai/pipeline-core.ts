@@ -287,6 +287,10 @@ export async function runPosterPipeline(
       images: ctx.images,
       brandAssetTypes: ctx.brandAssets.map((a) => a.assetType),
       schoolGuidelines: ctx.schoolGuidelines,
+      // Carousels scale page count with curated-image count (see agent-creative
+      // PAGE COUNT rules: <10→3, 10-15→4, >15→5). Raise the cap above 15 so the
+      // top tier is reachable; singles only ever need one strong hero image.
+      maxShortlist: posterType === "carousel" ? 20 : undefined,
     }, a1Costs);
     await appendCosts(jobId, a1Costs.toJSON());
 

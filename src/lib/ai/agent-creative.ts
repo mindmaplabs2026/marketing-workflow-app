@@ -138,8 +138,9 @@ ASSET SELECTION:
 RULES for carousel:
 PAGE COUNT:
 - Carousel page count depends on how many curated images are available:
-  - Fewer than 15 curated images → 3 pages (cover + 1 middle photo page + closing)
-  - 15+ curated images → 4 or 5 pages (cover + 2-3 middle photo pages + closing)
+  - Fewer than 10 curated images → 3 pages (cover + 1 middle photo page + closing)
+  - 10 to 15 curated images → 4 pages (cover + 2 middle photo pages + closing)
+  - More than 15 curated images → 5 pages (cover + 3 middle photo pages + closing)
   - 0 photos (event-based) → 3 pages
 
 TYPOGRAPHY (CRITICAL — must be identical across ALL pages):
@@ -247,7 +248,7 @@ export async function runCreativeAgent(
     .join("\n");
 
   const userMessage = `## School: ${input.schoolName}
-## Poster type: ${input.posterType}${input.posterType === "carousel" ? ` (${input.understanding.curatedImages.length < 15 ? "3" : "4-5"} pages — ${input.understanding.curatedImages.length} curated images available)` : ""}
+## Poster type: ${input.posterType}${input.posterType === "carousel" ? ` (${input.understanding.curatedImages.length < 10 ? "3" : input.understanding.curatedImages.length <= 15 ? "4" : "5"} pages — ${input.understanding.curatedImages.length} curated images available)` : ""}
 
 ## Theme Analysis (from prior agent)
 - Theme: ${input.understanding.theme}
