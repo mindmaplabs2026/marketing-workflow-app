@@ -762,9 +762,37 @@ export async function runGenerationAgentV3(
     if (buf) photoBuffers.set(img.path, buf);
   }
 
-  const brandAssetsForPrompt = input.brandAssets
-    .map((a) => `- ${a.assetType}${a.label ? ` (${a.label})` : ""}: ${a.storagePath}`)
-    .join("\n");
+  // Real brand assets are composited onto every page AFTER the SVG render (exactly
+  // like the photos), so the EXACT asset-library logo/footer appear — never an
+  // AI-drawn approximation. The SVG is told to leave those areas clear (see prompt).
+  const logoAsset = input.brandAssets.find((a) => a.assetType === "logo") ?? input.brandAssets.find((a) => a.assetType === "header");
+  const footerAsset = input.brandAssets.find((a) => a.assetType === "footer");
+  const logoBuf = logoAsset ? await downloadImage(logoAsset.signedUrl) : null;
+  const footerBuf = footerAsset ? await downloadImage(footerAsset.signedUrl) : null;
+  console.log(`[Agent3:v3] Brand assets to composite: logo=${!!logoBuf}, footer=${!!footerBuf}`);
+
+  async function compositeBrand(pageBuffer: Buffer): Promise<Buffer> {
+    const sharpMod = (await import("sharp")).default;
+    const W = 1024, H = 1536;
+    const overlays: { input: Buffer; left: number; top: number }[] = [];
+    if (logoBuf) {
+      // Top-left, contained in a ~22%×10% box (aspect preserved), with padding.
+      const pad = 40;
+      const resized = await sharpMod(logoBuf)
+        .rotate()
+        .resize({ width: Math.round(W * 0.22), height: Math.round(H * 0.1), fit: "inside", withoutEnlargement: false, background: { r: 255, g: 255, b: 255, alpha: 0 } })
+        .png()
+        .toBuffer();
+      overlays.push({ input: resized, left: pad, top: pad });
+    }
+    if (footerBuf) {
+      // Full-width strip pinned to the bottom.
+      const resized = await sharpMod(footerBuf).resize({ width: W, fit: "inside" }).png().toBuffer();
+      const h = (await sharpMod(resized).metadata()).height ?? 60;
+      overlays.push({ input: resized, left: 0, top: Math.max(0, H - h) });
+    }
+    return overlays.length ? await sharpMod(pageBuffer).composite(overlays).png().toBuffer() : pageBuffer;
+  }
 
   function pathsForPage(page: typeof pages[number] | undefined): string[] {
     const raw = brief.layout.type === "carousel" && page?.selectedImages?.length
@@ -830,6 +858,7 @@ Hard constraints:
 - Do NOT draw people or faces.
 - Reserve the photo slots below as clean empty frames/placeholders. Do not put text, logos, or decorations inside them.
 - The worker will paste the real uploaded photos into those exact slots after SVG render.
+- BRANDING IS ADDED AUTOMATICALLY AFTER RENDER: the real school logo is pasted TOP-LEFT and the real footer/contact strip is pasted along the BOTTOM. Do NOT draw any logo, wordmark, monogram, brand badge, or footer/contact bar yourself. Leave the top-left corner (~24% wide × ~12% tall) and the bottom ~8% of the canvas CLEAR of text and graphics.
 - Keep all text readable and inside bounds.
 - Use SVG shapes, gradients, patterns, borders, ornamental motifs, and typography to create a polished school marketing poster.
 
@@ -841,8 +870,6 @@ Poster page: ${pageLabel}
 Headline/text for this page: ${headline}
 Subheadline: ${pageIndex === pages.length - 1 ? (brief.textContent.subheadline || brief.textContent.callToAction || "") : brief.textContent.subheadline}
 Creative vision: ${(page?.creativeVision || (brief as Record<string, unknown>).creativeVision || brief.designPrompt || "").toString()}
-Brand assets available:
-${brandAssetsForPrompt || "(none)"}
 
 Reserved photo slots:
 ${frameManifest(frames) || "(none)"}
@@ -879,7 +906,9 @@ Return only SVG.`;
     console.log(`[Agent3:v3] Page ${i + 1}/${pages.length}: generating SVG composition, then stitching ${photos.length} photo(s)`);
     const composition = await composeSvg(i, frames, pagePaths);
     const background = await (await import("sharp")).default(Buffer.from(composition.svg)).png().toBuffer();
-    const finalBuffer = await compositeOriginalPhotos({ background, photos, frames });
+    const withPhotos = await compositeOriginalPhotos({ background, photos, frames });
+    // Paste the REAL logo (top-left) + footer (bottom) over the composed page.
+    const finalBuffer = await compositeBrand(withPhotos as Buffer);
 
     imageUrls.push(`data:image/png;base64,${finalBuffer.toString("base64")}`);
     prompts.push(composition.prompt);
