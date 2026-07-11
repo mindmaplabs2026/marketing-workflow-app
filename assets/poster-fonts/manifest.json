@@ -1,0 +1,180 @@
+{
+  "note": "Curated poster font library for the schema renderer (Strategy B). Files are TrueType, latin subset, from Google Fonts (OFL/Apache-2.0). The renderer loads these with opentype.js and outlines text to SVG <path>, so NO font install/fontconfig is needed on any machine.",
+  "fonts": [
+    {
+      "family": "Inter",
+      "file": "inter-400.ttf",
+      "weight": 400,
+      "category": "sans-body",
+      "vibe": "neutral, modern UI sans"
+    },
+    {
+      "family": "Roboto",
+      "file": "roboto-400.ttf",
+      "weight": 400,
+      "category": "sans-body",
+      "vibe": "clean, ubiquitous sans"
+    },
+    {
+      "family": "Open Sans",
+      "file": "open-sans-400.ttf",
+      "weight": 400,
+      "category": "sans-body",
+      "vibe": "friendly, highly legible"
+    },
+    {
+      "family": "Lato",
+      "file": "lato-400.ttf",
+      "weight": 400,
+      "category": "sans-body",
+      "vibe": "warm humanist sans"
+    },
+    {
+      "family": "Work Sans",
+      "file": "work-sans-500.ttf",
+      "weight": 500,
+      "category": "sans-body",
+      "vibe": "crisp, contemporary"
+    },
+    {
+      "family": "Source Sans 3",
+      "file": "source-sans-3-400.ttf",
+      "weight": 400,
+      "category": "sans-body",
+      "vibe": "calm, professional"
+    },
+    {
+      "family": "Montserrat",
+      "file": "montserrat-700.ttf",
+      "weight": 700,
+      "category": "sans-heading",
+      "vibe": "geometric, confident headline"
+    },
+    {
+      "family": "Poppins",
+      "file": "poppins-700.ttf",
+      "weight": 700,
+      "category": "sans-heading",
+      "vibe": "rounded geometric, upbeat"
+    },
+    {
+      "family": "Raleway",
+      "file": "raleway-700.ttf",
+      "weight": 700,
+      "category": "sans-heading",
+      "vibe": "elegant thin-to-bold display sans"
+    },
+    {
+      "family": "Barlow",
+      "file": "barlow-700.ttf",
+      "weight": 700,
+      "category": "sans-heading",
+      "vibe": "tall, sporty, grotesk"
+    },
+    {
+      "family": "Bebas Neue",
+      "file": "bebas-neue-400.ttf",
+      "weight": 400,
+      "category": "display",
+      "vibe": "tall all-caps poster type"
+    },
+    {
+      "family": "Oswald",
+      "file": "oswald-600.ttf",
+      "weight": 600,
+      "category": "display",
+      "vibe": "condensed news/poster headline"
+    },
+    {
+      "family": "Anton",
+      "file": "anton-400.ttf",
+      "weight": 400,
+      "category": "display",
+      "vibe": "ultra-bold impact headline"
+    },
+    {
+      "family": "Archivo Black",
+      "file": "archivo-black-400.ttf",
+      "weight": 400,
+      "category": "display",
+      "vibe": "heavy grotesk statement"
+    },
+    {
+      "family": "Abril Fatface",
+      "file": "abril-fatface-400.ttf",
+      "weight": 400,
+      "category": "display",
+      "vibe": "high-contrast editorial display"
+    },
+    {
+      "family": "Alfa Slab One",
+      "file": "alfa-slab-one-400.ttf",
+      "weight": 400,
+      "category": "display",
+      "vibe": "chunky slab poster type"
+    },
+    {
+      "family": "Playfair Display",
+      "file": "playfair-display-700.ttf",
+      "weight": 700,
+      "category": "serif",
+      "vibe": "elegant high-contrast serif"
+    },
+    {
+      "family": "Merriweather",
+      "file": "merriweather-700.ttf",
+      "weight": 700,
+      "category": "serif",
+      "vibe": "sturdy readable serif"
+    },
+    {
+      "family": "Lora",
+      "file": "lora-500.ttf",
+      "weight": 500,
+      "category": "serif",
+      "vibe": "balanced contemporary serif"
+    },
+    {
+      "family": "Libre Baskerville",
+      "file": "libre-baskerville-400.ttf",
+      "weight": 400,
+      "category": "serif",
+      "vibe": "classic bookish serif"
+    },
+    {
+      "family": "Cormorant Garamond",
+      "file": "cormorant-garamond-600.ttf",
+      "weight": 600,
+      "category": "serif",
+      "vibe": "refined, luxurious serif"
+    },
+    {
+      "family": "Pacifico",
+      "file": "pacifico-400.ttf",
+      "weight": 400,
+      "category": "script",
+      "vibe": "casual friendly brush script"
+    },
+    {
+      "family": "Dancing Script",
+      "file": "dancing-script-700.ttf",
+      "weight": 700,
+      "category": "script",
+      "vibe": "lively formal script"
+    },
+    {
+      "family": "Caveat",
+      "file": "caveat-600.ttf",
+      "weight": 600,
+      "category": "script",
+      "vibe": "handwritten marker feel"
+    },
+    {
+      "family": "Fredoka",
+      "file": "fredoka-600.ttf",
+      "weight": 600,
+      "category": "rounded",
+      "vibe": "soft rounded, kid-friendly"
+    }
+  ]
+}
