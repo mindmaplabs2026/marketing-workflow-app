@@ -893,6 +893,109 @@ Return only SVG.`;
     return { svg: sanitizeSvg(response.choices[0]?.message?.content ?? ""), prompt };
   }
 
+  // The SVG author is BLIND — it writes coordinates without seeing the result.
+  // critiquePage renders judgement on the FINAL composited page (photos + logo +
+  // footer already pasted) and reports only chrome defects; repairSvg rewrites the
+  // SVG to fix them. Photos/brand are re-composited deterministically each round,
+  // so repair never touches them.
+  async function critiquePage(
+    pngBuffer: Buffer,
+    frames: NormalizedPhotoFrame[],
+    pageIndex: number,
+  ): Promise<{ ok: boolean; issues: string[] }> {
+    const reserved = [
+      "- LOGO zone: top-left ~24% wide x ~12% tall (real logo already composited here)",
+      "- FOOTER zone: bottom ~8% full width (real contact strip already composited here)",
+      ...(frames.length
+        ? [`- PHOTO slots (real photos already composited here — an empty-looking frame is INTENTIONAL, never flag it as blank/dead space):\n${frameManifest(frames)}`]
+        : []),
+    ].join("\n");
+
+    const prompt = `You are a strict poster layout auditor. The image is a FINISHED Instagram poster (1024x1536). The real photos, the real logo (top-left), and the real footer strip are ALREADY composited in — those areas are correct by construction; do NOT critique them.
+
+Reserved areas (already handled — never flag these as empty, missing, or wrong):
+${reserved}
+
+Inspect ONLY the designed chrome (background, headings, subtext, dividers, chips, decorative shapes/lines). Report real, visible defects:
+- OVERLAP: two chrome elements colliding, or a decoration/shape sitting on top of text
+- CROSSING_LINE: a rule/underline/line passing THROUGH text
+- CLIPPED_TEXT: text cut off, running off-canvas, or touching a canvas edge (<24px margin)
+- DEAD_SPACE: a large empty region that is NOT a reserved photo slot and makes the layout look unbalanced
+- COLOR: clashing or low-contrast colour pairing that hurts legibility
+- INTRUSION: chrome text/decoration sitting inside a reserved photo/logo/footer zone
+
+Return ONLY JSON:
+{ "ok": true|false, "issues": [{ "type": "OVERLAP|CROSSING_LINE|CLIPPED_TEXT|DEAD_SPACE|COLOR|INTRUSION", "where": "short location e.g. 'title underline'", "fix": "one concrete corrective instruction for the SVG author" }] }
+Set ok=true ONLY when there are zero defects. Do not invent issues.`;
+
+    const response = await withRateLimitRetry(() => openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You audit poster layouts and return only strict JSON. You never critique the real photos, logo, or footer — only the designed chrome." },
+        { role: "user", content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: `data:image/png;base64,${pngBuffer.toString("base64")}`, detail: "high" } },
+        ] },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 800,
+    }));
+    costTracker?.addLLMCall(`agent3_v3_audit_p${pageIndex + 1}`, "gpt-4o-mini", response.usage);
+    try {
+      const parsed = JSON.parse(response.choices[0]?.message?.content ?? "{}") as {
+        ok?: boolean;
+        issues?: { type?: string; where?: string; fix?: string }[];
+      };
+      const issues = Array.isArray(parsed.issues)
+        ? parsed.issues.map((it) => `[${it.type ?? "ISSUE"}] ${it.where ?? ""} — ${it.fix ?? ""}`.trim())
+        : [];
+      return { ok: parsed.ok === true && issues.length === 0, issues };
+    } catch {
+      // Fail OPEN — a malformed audit must never block or degrade generation.
+      return { ok: true, issues: [] };
+    }
+  }
+
+  async function repairSvg(
+    currentSvg: string,
+    issues: string[],
+    pageIndex: number,
+    frames: NormalizedPhotoFrame[],
+  ): Promise<string> {
+    const prompt = `You are fixing an SVG poster composition. Below is the CURRENT SVG and the layout defects a design auditor found in the rendered result. Rewrite the SVG to fix EVERY defect while preserving the overall look, palette, and text content. Move/resize/remove only what's needed.
+
+Hard constraints (unchanged):
+- Output ONLY raw SVG. width="1024", height="1536", viewBox="0 0 1024 1536".
+- No raster photos, external URLs, scripts, animation, or foreignObject. No people or faces.
+- Leave the top-left corner (~24% wide x ~12% tall) and the bottom ~8% of the canvas CLEAR — the real logo and footer are composited there afterward. Draw no logo/wordmark/footer yourself.
+- Keep these photo slots as clean EMPTY frames (no text/decoration inside them):
+${frameManifest(frames) || "(none)"}
+- Keep all text inside bounds with at least a 24px margin from every edge.
+
+DEFECTS TO FIX:
+${issues.map((s, idx) => `${idx + 1}. ${s}`).join("\n")}
+
+CURRENT SVG:
+${currentSvg}
+
+Return only the corrected SVG.`;
+
+    const response = await withRateLimitRetry(() => openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You repair SVG poster compositions. You never use external URLs, scripts, foreignObject, raster image tags, or markdown fences." },
+        { role: "user", content: prompt },
+      ],
+      max_tokens: 6000,
+    }));
+    costTracker?.addLLMCall(`agent3_v3_repair_p${pageIndex + 1}`, "gpt-4o-mini", response.usage);
+    return sanitizeSvg(response.choices[0]?.message?.content ?? "");
+  }
+
+  // Up to this many audit→repair passes per page (each = 1 vision call + at most
+  // 1 repair render). Bounded so a stubborn page can't loop forever.
+  const MAX_AUDIT_ROUNDS = 2;
+
   for (let i = 0; i < pages.length; i++) {
     const pagePaths = pathsForPage(pages[i]);
     const frames = defaultPhotoFrames(pagePaths, i, pages.length);
@@ -904,18 +1007,44 @@ Return only SVG.`;
       .filter((p): p is { path: string; buffer: Buffer } => !!p);
 
     console.log(`[Agent3:v3] Page ${i + 1}/${pages.length}: generating SVG composition, then stitching ${photos.length} photo(s)`);
+
+    // Rasterize an SVG and paste the real photos + brand assets over it.
+    const renderComposite = async (svgStr: string): Promise<Buffer> => {
+      const background = await (await import("sharp")).default(Buffer.from(svgStr)).png().toBuffer();
+      const withPhotos = await compositeOriginalPhotos({ background, photos, frames });
+      // Paste the REAL logo (top-left) + footer (bottom) over the composed page.
+      return compositeBrand(withPhotos as Buffer);
+    };
+
     const composition = await composeSvg(i, frames, pagePaths);
-    const background = await (await import("sharp")).default(Buffer.from(composition.svg)).png().toBuffer();
-    const withPhotos = await compositeOriginalPhotos({ background, photos, frames });
-    // Paste the REAL logo (top-left) + footer (bottom) over the composed page.
-    const finalBuffer = await compositeBrand(withPhotos as Buffer);
+    let svg = composition.svg;
+    let finalBuffer = await renderComposite(svg);
+
+    // Vision feedback loop: audit the rendered page and repair the chrome
+    // (overlaps, crossing lines, clipped text, dead space, colour clashes,
+    // intrusions). The blind SVG author can't self-correct without this.
+    for (let round = 0; round < MAX_AUDIT_ROUNDS; round++) {
+      const audit = await critiquePage(finalBuffer, frames, i);
+      if (audit.ok) {
+        if (round > 0) console.log(`[Agent3:v3] Page ${i + 1}: layout clean after ${round} repair(s)`);
+        break;
+      }
+      console.log(`[Agent3:v3] Page ${i + 1}: audit ${round + 1} found ${audit.issues.length} issue(s): ${audit.issues.join(" | ")}`);
+      try {
+        svg = await repairSvg(svg, audit.issues, i, frames);
+        finalBuffer = await renderComposite(svg);
+      } catch (err) {
+        console.warn(`[Agent3:v3] Page ${i + 1}: repair failed (${err instanceof Error ? err.message : String(err)}) — keeping previous render`);
+        break;
+      }
+    }
 
     imageUrls.push(`data:image/png;base64,${finalBuffer.toString("base64")}`);
     prompts.push(composition.prompt);
     artifacts.push({
       relativePath: `composition/page${i + 1}.svg`,
       contentType: "image/svg+xml",
-      body: composition.svg,
+      body: svg,
     });
     artifacts.push({
       relativePath: `composition/page${i + 1}.manifest.json`,
