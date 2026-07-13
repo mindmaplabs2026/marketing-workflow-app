@@ -113,6 +113,10 @@ const PhotoGridBand = z.object({
   radius: z.number().optional(),
   borderWidth: z.number().optional(),
   borderColor: ColorSchema.optional(),
+  /** Soft drop-shadow behind each photo for depth (default true). */
+  shadow: z.boolean().optional(),
+  /** "plain" = bordered photo; "card" = white matte + thin accent hairline (framed look). */
+  frameStyle: z.enum(["plain", "card"]).optional(),
   /** Share of leftover vertical space (default 1 — photo grids grow to fill). */
   flex: z.number().optional(),
 });
@@ -146,6 +150,10 @@ const PageSchema = z.object({
   /** Hold the top-left logo zone / bottom footer zone clear (brand composited later). */
   reserveLogo: z.boolean().optional(),
   reserveFooter: z.boolean().optional(),
+  /** Deterministic ornament layer drawn behind content, keyed to the palette.
+   *  Compose freely, e.g. ["arcs","dots"]. Kept in margins/corners so it reads
+   *  as texture and never fights text or photos. */
+  decor: z.array(z.enum(["arcs", "dots", "corners", "bars"])).optional(),
   bands: z.array(BandSchema).min(1),
 });
 

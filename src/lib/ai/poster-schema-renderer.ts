@@ -349,6 +349,68 @@ function renderBackground(bg: PosterBackground, palette: PosterPalette): string 
     `<polygon points="0,0 ${xb + 200},0 ${xb - 200},${CANVAS_H} 0,${CANVAS_H}" fill="${c1}"/>`;
 }
 
+// ── Decoration / ornament layer ──────────────────────────────────────────────
+// Drawn behind content, keyed to the palette, kept in margins/corners so it
+// reads as texture and never fights text or photos. Fully deterministic.
+
+/** Concentric quarter-arcs sweeping through the corners (EKAM-style). */
+function ornArcs(palette: PosterPalette): string {
+  const c = color("accent2", palette, palette.accent);
+  const arc = (cx: number, cy: number, r: number, op: number) =>
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${c}" stroke-width="2" opacity="${op}"/>`;
+  const corners: [number, number][] = [[-70, -70], [CANVAS_W + 70, -70], [-70, CANVAS_H + 70], [CANVAS_W + 70, CANVAS_H + 70]];
+  return corners.map(([cx, cy], i) =>
+    [250, 320, 390].map((r, j) => arc(cx, cy, r, i < 2 ? 0.22 - j * 0.04 : 0.12 - j * 0.03)).join(""),
+  ).join("");
+}
+
+/** Small dots scattered down the side margins + corners. Deterministic pattern. */
+function ornDots(palette: PosterPalette): string {
+  const c = color("accent2", palette, palette.accent);
+  // Fixed positions in the outer margins (x normalized), avoiding the content column.
+  const pts: [number, number, number][] = [
+    [30, 300, 5], [46, 420, 3], [26, 560, 6], [40, 720, 4], [30, 980, 5], [48, 1180, 3],
+    [994, 300, 5], [978, 440, 3], [998, 600, 6], [982, 780, 4], [994, 1040, 5], [976, 1200, 3],
+    [120, 210, 4], [900, 210, 4], [150, 1340, 4], [880, 1340, 4],
+  ];
+  return pts.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}" opacity="0.7"/>`).join("");
+}
+
+/** Thin L-brackets framing the four corners. */
+function ornCorners(palette: PosterPalette): string {
+  const c = color("accent2", palette, palette.accent);
+  const inset = 30, arm = 58, w = 3;
+  const L = (x: number, y: number, dx: number, dy: number) =>
+    `<path d="M${x + dx * arm} ${y} L${x} ${y} L${x} ${y + dy * arm}" fill="none" stroke="${c}" stroke-width="${w}" opacity="0.5" stroke-linecap="round"/>`;
+  return [
+    L(inset, inset, 1, 1),
+    L(CANVAS_W - inset, inset, -1, 1),
+    L(inset, CANVAS_H - inset, 1, -1),
+    L(CANVAS_W - inset, CANVAS_H - inset, -1, -1),
+  ].join("");
+}
+
+/** A few short accent bars, lower-left (HillRock-style flourish). */
+function ornBars(palette: PosterPalette): string {
+  const a = color("accent", palette, palette.accent);
+  const a2 = color("accent2", palette, palette.accent);
+  const y = CANVAS_H - 190;
+  return `<rect x="64" y="${y}" width="120" height="8" rx="4" fill="${a2}"/>` +
+    `<rect x="196" y="${y}" width="46" height="8" rx="4" fill="${a}"/>`;
+}
+
+function renderDecor(styles: string[] | undefined, palette: PosterPalette): string {
+  if (!styles || !styles.length) return "";
+  const map: Record<string, (p: PosterPalette) => string> = { arcs: ornArcs, dots: ornDots, corners: ornCorners, bars: ornBars };
+  return styles.map((s) => map[s]?.(palette) ?? "").join("");
+}
+
+/** Soft drop-shadow filter (once per SVG) for photo depth. */
+function shadowDefs(): string {
+  return `<defs><filter id="pshadow" x="-20%" y="-20%" width="140%" height="140%">` +
+    `<feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.22"/></filter></defs>`;
+}
+
 // ── Band rendering ───────────────────────────────────────────────────────────
 function renderBand(
   doc: PosterDoc, b: PosterBand, p: Placed, contentX: number, contentW: number,
@@ -439,17 +501,29 @@ function renderBand(
       const rect: PxRect = { x: contentX, y: p.y, w: contentW, h: p.height };
       const rects = photoRects(rect, b.photos.length, b.layout, gap);
       const radius = b.radius ?? 24;
+      const shadow = b.shadow ?? true;
+      const card = (b.frameStyle ?? "plain") === "card";
+      const cardPad = card ? 14 : 0;
       const parts: string[] = [];
       b.photos.forEach((photoPath, i) => {
         const r = rects[i];
         if (!r) return;
+        const rr = (n: number) => n.toFixed(1);
+        // Soft shadow behind the (composited) photo, for depth.
+        if (shadow) {
+          parts.push(`<rect x="${rr(r.x - cardPad)}" y="${rr(r.y - cardPad)}" width="${rr(r.w + cardPad * 2)}" height="${rr(r.h + cardPad * 2)}" rx="${radius}" fill="#ffffff" filter="url(#pshadow)"/>`);
+        }
+        // Card matte: a white mat + thin accent hairline (framed-photo look).
+        if (card) {
+          parts.push(`<rect x="${rr(r.x - cardPad)}" y="${rr(r.y - cardPad)}" width="${rr(r.w + cardPad * 2)}" height="${rr(r.h + cardPad * 2)}" rx="${radius}" fill="#ffffff" stroke="${color("accent2", palette, palette.accent)}" stroke-width="2"/>`);
+        }
         // Faint placeholder (photo is composited on top afterward).
-        parts.push(`<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${r.w.toFixed(1)}" height="${r.h.toFixed(1)}" rx="${radius}" fill="${color("muted", palette, "#e8e2d0")}" opacity="0.35"/>`);
+        parts.push(`<rect x="${rr(r.x)}" y="${rr(r.y)}" width="${rr(r.w)}" height="${rr(r.h)}" rx="${radius}" fill="${color("muted", palette, "#e8e2d0")}" opacity="0.35"/>`);
         frames.push({
           path: photoPath,
           x: r.x / CANVAS_W, y: r.y / CANVAS_H, width: r.w / CANVAS_W, height: r.h / CANVAS_H,
           fit: "cover", radius,
-          borderWidth: b.borderWidth ?? 8,
+          borderWidth: b.borderWidth ?? (card ? 0 : 6),
           borderColor: color(b.borderColor, palette, "#ffffff"),
         });
       });
@@ -472,7 +546,8 @@ export function renderPosterDoc(doc: PosterDoc, pageIndex: number): { svg: strin
   if (!page) throw new Error(`PosterDoc has no page ${pageIndex}`);
   const { placed, contentX, contentW } = layout(doc, page);
 
-  const layers: string[] = [renderBackground(page.background, doc.palette)];
+  // Layer order: shadow filter defs -> background -> ornaments -> content.
+  const layers: string[] = [shadowDefs(), renderBackground(page.background, doc.palette), renderDecor(page.decor, doc.palette)];
   const photoFrames: NormalizedPhotoFrame[] = [];
   for (const p of placed) {
     const { svg, frames } = renderBand(doc, p.band, p, contentX, contentW);
