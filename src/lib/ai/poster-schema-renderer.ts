@@ -255,15 +255,38 @@ function gridCells(rect: PxRect, cols: number, rows: number, gap: number): PxRec
   return cells;
 }
 
+/** Split a rect into horizontal bands of the given fractional heights (sum≈1). */
+function hBands(rect: PxRect, fracs: number[], gap: number): PxRect[] {
+  const avail = rect.h - gap * (fracs.length - 1);
+  const bands: PxRect[] = [];
+  let y = rect.y;
+  for (const f of fracs) {
+    const h = avail * f;
+    bands.push({ x: rect.x, y, w: rect.w, h });
+    y += h + gap;
+  }
+  return bands;
+}
+
+/** Default layout for a photo count — favours editorial collages over flat grids. */
+function autoLayout(n: number): string {
+  return n <= 1 ? "single" : n === 2 ? "duo" : n === 3 ? "trio" : n === 4 ? "quadFeature" : n === 5 ? "featured" : "mosaic6";
+}
+
 function photoRects(rect: PxRect, n: number, layoutName: string | undefined, gap: number): PxRect[] {
-  const kind = layoutName ?? (n === 1 ? "single" : n === 2 ? "duo" : n === 3 ? "trio" : n === 4 ? "quad" : "grid6");
+  const kind = layoutName ?? autoLayout(n);
+  const splitLR = (leftFrac: number) => {
+    const leftW = rect.w * leftFrac - gap / 2;
+    const rightX = rect.x + leftW + gap;
+    return { leftW, rightX, rightW: rect.w - leftW - gap };
+  };
   switch (kind) {
     case "single": return [rect];
     case "duo": return gridCells(rect, 2, 1, gap);
+    case "duoV": return gridCells(rect, 1, 2, gap);
     case "trio": {
-      const leftW = rect.w * 0.6 - gap / 2;
-      const rightX = rect.x + leftW + gap;
-      const rightW = rect.w - leftW - gap;
+      // Editorial: one tall feature left, two stacked right.
+      const { leftW, rightX, rightW } = splitLR(0.6);
       const rh = (rect.h - gap) / 2;
       return [
         { x: rect.x, y: rect.y, w: leftW, h: rect.h },
@@ -271,11 +294,31 @@ function photoRects(rect: PxRect, n: number, layoutName: string | undefined, gap
         { x: rightX, y: rect.y + rh + gap, w: rightW, h: rh },
       ];
     }
+    case "trioRow": return gridCells(rect, 3, 1, gap);
     case "quad": return gridCells(rect, 2, 2, gap);
+    case "quadFeature": {
+      // One tall feature left, three stacked right.
+      const { leftW, rightX, rightW } = splitLR(0.6);
+      const rh = (rect.h - gap * 2) / 3;
+      return [
+        { x: rect.x, y: rect.y, w: leftW, h: rect.h },
+        ...[0, 1, 2].map((i) => ({ x: rightX, y: rect.y + i * (rh + gap), w: rightW, h: rh })),
+      ];
+    }
+    case "featured": {
+      // Hero on top, the rest as a 2-column grid below.
+      const [top, bottom] = hBands(rect, [0.5, 0.5], gap);
+      const rest = gridCells(bottom, 2, Math.max(1, Math.ceil((n - 1) / 2)), gap).slice(0, n - 1);
+      return [top, ...rest];
+    }
+    case "mosaic6": {
+      // EKAM-style collage: 3 across, one wide feature, 2 across.
+      const [top, mid, bot] = hBands(rect, [0.3, 0.4, 0.3], gap);
+      return [...gridCells(top, 3, 1, gap), mid, ...gridCells(bot, 2, 1, gap)].slice(0, n);
+    }
     case "hero-strip": {
-      const heroH = rect.h * 0.6 - gap / 2;
-      const stripCells = Math.max(1, n - 1);
-      const strip = gridCells({ x: rect.x, y: rect.y + heroH + gap, w: rect.w, h: rect.h - heroH - gap }, stripCells, 1, gap);
+      const heroH = rect.h * 0.62 - gap / 2;
+      const strip = gridCells({ x: rect.x, y: rect.y + heroH + gap, w: rect.w, h: rect.h - heroH - gap }, Math.max(1, n - 1), 1, gap);
       return [{ x: rect.x, y: rect.y, w: rect.w, h: heroH }, ...strip];
     }
     case "grid6":

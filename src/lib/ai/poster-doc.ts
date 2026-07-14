@@ -108,7 +108,10 @@ const PhotoGridBand = z.object({
   type: z.literal("photoGrid"),
   /** Storage paths/ids of the photos to place, in order. */
   photos: z.array(z.string()).min(1),
-  layout: z.enum(["single", "duo", "trio", "quad", "grid6", "hero-strip"]).optional(),
+  layout: z.enum([
+    "single", "duo", "duoV", "trio", "trioRow", "quad", "quadFeature",
+    "featured", "mosaic6", "grid6", "hero-strip",
+  ]).optional(),
   gap: z.number().optional(),
   radius: z.number().optional(),
   borderWidth: z.number().optional(),
