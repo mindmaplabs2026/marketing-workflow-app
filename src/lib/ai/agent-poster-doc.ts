@@ -1,7 +1,7 @@
 import "server-only";
 import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
-import { PosterDocSchema, type PosterDoc, type PosterPalette, type PosterPage } from "./poster-doc";
+import { PosterDocSchema, type PosterDoc, type PosterPalette, type PosterPage, type PosterBand } from "./poster-doc";
 import { fontMenu, autoLayout } from "./poster-schema-renderer";
 import type { VariationBrief } from "./agent-creative";
 import type { CostTracker } from "./cost-tracker";
@@ -298,7 +298,38 @@ export function sanitize(doc: PosterDoc, input: PosterDocInput): PosterDoc {
     return { ...page, reserveLogo: true, reserveFooter: true, decor, bands: bands.length ? bands : page.bands };
   });
 
-  return { version: 1, palette, fonts, footer, pages };
+  // Titles must be DISTINCT — Codex sometimes repeats the cover headline on
+  // every page. Standardise style, not text: keep the cover's headline, and give
+  // any duplicated non-cover page its own title from Agent 2's page description.
+  // Also drop a middle page's subheading when it just echoes the cover's tagline.
+  const headingKey = (b: PosterBand) => (b.type === "heading" ? b.lines.map((l) => l.text).join(" ").trim().toLowerCase() : "");
+  const coverSub = (() => {
+    const b = pages[0]?.bands.find((x) => x.type === "subheading");
+    return b && b.type === "subheading" ? b.text.trim().toLowerCase() : "";
+  })();
+  const seenHeadings = new Set<string>();
+  const lastIndex = pages.length - 1;
+  const distinctPages = pages.map((page, i) => {
+    const bands = page.bands.flatMap((b) => {
+      if (b.type === "heading") {
+        const key = headingKey(b);
+        if (i > 0 && key && seenHeadings.has(key)) {
+          const desc = input.brief.layout.pages[i]?.description ?? "";
+          const title = (shorten(desc, 4) || "Highlights").toUpperCase();
+          return [{ ...b, lines: [{ text: title, color: b.lines[0]?.color }] }];
+        }
+        seenHeadings.add(key);
+      }
+      // Drop a repeated tagline subheading on middle pages (keep cover + closing).
+      if (b.type === "subheading" && i > 0 && i < lastIndex && coverSub && b.text.trim().toLowerCase() === coverSub) {
+        return [];
+      }
+      return [b];
+    });
+    return { ...page, bands: bands.length ? bands : page.bands };
+  });
+
+  return { version: 1, palette, fonts, footer, pages: distinctPages };
 }
 
 /** Build the native footer from Agent 2's contact info (undefined if none). */
@@ -365,7 +396,8 @@ RULES:
 - Colour values may be a hex OR a palette role name ("bg","ink","accent","accent2","muted").
 - CONTRAST IS CRITICAL: every text colour must clearly contrast with its page background. On a light background use dark text (ink/accent); on a dark background use light text (bg/accent2). Never put dark text on a dark background or light on light.
 - BIG, BOLD HEADINGS: the cover headline should dominate the page — set a large heading "size" (~110). Make it two-tone (per-line colour). Middle/closing headings are smaller (~74) but still strong.
-- ONE CONSISTENT SYSTEM across ALL pages: use the SAME "decor" array, the SAME heading colour scheme, and the SAME icon colour on every page. The carousel must read as one unified series, not five different designs.
+- ONE CONSISTENT VISUAL SYSTEM across ALL pages: SAME "decor" array, SAME heading colour scheme, SAME icon colour, SAME background treatment. Standardise STYLE, NOT TEXT.
+- DISTINCT PER-PAGE TITLES: only the COVER shows the main headline. Every other page MUST have its OWN short heading that describes THAT page's content (from its vision) — e.g. "Formal Recognition", "Voice and Oath", "March and Celebrate". NEVER repeat the cover headline on later pages, and do NOT put the same subheading/tagline on every page.
 - The top-left LOGO is composited automatically, and the bottom CONTACT FOOTER is drawn automatically from the school's details. Always set reserveLogo & reserveFooter true; NEVER add a logo, footer, or contact band yourself, and never draw a coloured band across the bottom.
 - photoGrid.photos MUST be the exact paths listed for that page, in order. Omit photoGrid if a page has none. Do NOT set "layout" — the renderer picks a balanced one for the photo count.
 - COVER: eyebrow + divider + a strong two-tone heading + subheading + a photoGrid (frameStyle "card"). MIDDLE: a title + divider + a photoGrid collage. CLOSING: a photoGrid + heading + subheading (+ optional iconRow).
