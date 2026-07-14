@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type ChatMessage = {
   id: string;
@@ -51,8 +51,31 @@ export function VariationChat({
   const [currentUrls, setCurrentUrls] = useState(posterUrls);
   const [rounds, setRounds] = useState(roundsUsed);
   const [activePage, setActivePage] = useState(0);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Lightbox holds the full set of URLs plus the page being viewed, so you can
+  // page through a whole carousel without closing and reopening the preview.
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef<number | null>(null);
+
+  function stepLightbox(delta: number) {
+    setLightbox((lb) =>
+      lb
+        ? { ...lb, index: Math.min(Math.max(lb.index + delta, 0), lb.urls.length - 1) }
+        : lb,
+    );
+  }
+
+  // Keyboard navigation while the lightbox is open: ← → to page, Esc to close.
+  useEffect(() => {
+    if (!lightbox) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setLightbox(null);
+      else if (e.key === "ArrowRight") stepLightbox(1);
+      else if (e.key === "ArrowLeft") stepLightbox(-1);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
 
   async function pollForResponse(messageId: string): Promise<void> {
     // Reels take 3-5 min to re-render; posters take ~60s
@@ -164,41 +187,92 @@ export function VariationChat({
 
   return (
     <div className="space-y-4">
-      {/* Fullscreen lightbox */}
-      {lightboxUrl && (
+      {/* Fullscreen lightbox — page through the whole set without reopening */}
+      {lightbox && (
         <div
           className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90"
-          onClick={() => setLightboxUrl(null)}
+          onClick={() => setLightbox(null)}
+          onTouchStart={(e) => {
+            touchStartX.current = e.touches[0].clientX;
+          }}
+          onTouchEnd={(e) => {
+            if (touchStartX.current === null) return;
+            const dx = e.changedTouches[0].clientX - touchStartX.current;
+            touchStartX.current = null;
+            if (Math.abs(dx) > 40) stepLightbox(dx < 0 ? 1 : -1);
+          }}
         >
           {/* Top bar — safe from notch, large touch targets */}
-          <div className="absolute left-0 right-0 top-0 flex items-center justify-end gap-3 px-4 pb-3 pt-[env(safe-area-inset-top,12px)]">
+          <div className="absolute left-0 right-0 top-0 flex items-center justify-between gap-3 px-4 pb-3 pt-[env(safe-area-inset-top,12px)]">
+            {lightbox.urls.length > 1 ? (
+              <span className="rounded-full bg-white/15 px-3 py-1 text-sm font-medium tabular-nums text-white">
+                {lightbox.index + 1} / {lightbox.urls.length}
+              </span>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(lightbox.urls[lightbox.index], "_blank");
+                }}
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:bg-white/40"
+                title="Download"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
+                  <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                  <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLightbox(null)}
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:bg-white/40"
+                aria-label="Close preview"
+              >
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {lightbox.index > 0 && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                window.open(lightboxUrl, "_blank");
+                stepLightbox(-1);
               }}
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:bg-white/40"
-              title="Download"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
-                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => setLightboxUrl(null)}
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:bg-white/40"
+              className="absolute left-3 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white active:bg-white/40"
+              aria-label="Previous page"
             >
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M18 6L6 18M6 6l12 12" />
+                <path d="M15 18l-6-6 6-6" />
               </svg>
             </button>
-          </div>
+          )}
+          {lightbox.index < lightbox.urls.length - 1 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                stepLightbox(1);
+              }}
+              className="absolute right-3 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white active:bg-white/40"
+              aria-label="Next page"
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            </button>
+          )}
+
           <img
-            src={lightboxUrl}
-            alt="Full preview"
+            src={lightbox.urls[lightbox.index]}
+            alt={`Page ${lightbox.index + 1}`}
             className="max-h-[80vh] max-w-[95vw] rounded-lg object-contain"
             onClick={(e) => e.stopPropagation()}
           />
@@ -240,7 +314,7 @@ export function VariationChat({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setLightboxUrl(url)}
+                    onClick={() => setLightbox({ urls: currentUrls, index: i })}
                     className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
                     style={{ opacity: 1 }}
                     title="View full size"
@@ -321,7 +395,7 @@ export function VariationChat({
                           key={i}
                           src={url}
                           alt="Updated poster"
-                          onClick={() => setLightboxUrl(url)}
+                          onClick={() => setLightbox({ urls: msg.imageUrls, index: i })}
                           className="h-40 w-auto cursor-pointer rounded-lg border border-zinc-200 object-contain hover:opacity-80 dark:border-zinc-700"
                         />
                       )
