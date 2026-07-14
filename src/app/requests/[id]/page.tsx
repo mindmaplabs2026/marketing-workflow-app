@@ -196,6 +196,7 @@ export default async function RequestDetailPage({
     poster_type: "single" | "carousel";
     is_accepted: boolean;
     chat_rounds_used: number;
+    created_at: string;
   }[] = [];
 
   if (req.ai_generated) {
@@ -212,7 +213,7 @@ export default async function RequestDetailPage({
     // Fetch ALL variations across all jobs for this request
     const { data: vars } = await supabase
       .from("ai_variations")
-      .select("id, variation_index, creative_brief, storage_paths, poster_type, is_accepted, chat_rounds_used")
+      .select("id, variation_index, creative_brief, storage_paths, poster_type, is_accepted, chat_rounds_used, created_at")
       .eq("request_id", id)
       .order("created_at", { ascending: false });
     aiVariations = (vars ?? []) as typeof aiVariations;

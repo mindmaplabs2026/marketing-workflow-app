@@ -19,7 +19,18 @@ type Variation = {
   poster_type: "single" | "carousel" | "reel";
   is_accepted: boolean;
   chat_rounds_used: number;
+  created_at: string;
 };
+
+function formatGeneratedAt(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+}
 
 function formatMediaTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return "0:00";
@@ -335,7 +346,7 @@ export function AiVariations({
               }`}
             >
               {/* Media preview */}
-              <div className={`relative ${v.poster_type === "reel" ? "aspect-[4/5] max-h-[340px]" : "aspect-[5/4] lg:aspect-[5/3]"} bg-zinc-100 dark:bg-zinc-800`}>
+              <div className="relative aspect-[4/5] max-h-[360px] bg-zinc-100 dark:bg-zinc-800">
                 {urls.length > 0 ? (
                   <>
                     {v.poster_type === "reel" ? (
@@ -352,7 +363,7 @@ export function AiVariations({
                       <img
                         src={urls[idx]}
                         alt={`Variation ${v.variation_index}`}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-contain"
                       />
                     )}
                     <a
@@ -421,11 +432,7 @@ export function AiVariations({
                   </div>
                 )}
                 <p className="text-[9px] text-zinc-400 lg:text-[10px]">
-                  {v.poster_type === "reel"
-                    ? "Video reel"
-                    : v.poster_type === "carousel"
-                    ? `${v.storage_paths.length} pages`
-                    : "Single poster"}
+                  {formatGeneratedAt(v.created_at)}
                   {v.chat_rounds_used > 0 &&
                     ` · ${v.chat_rounds_used}/25 edits used`}
                 </p>
