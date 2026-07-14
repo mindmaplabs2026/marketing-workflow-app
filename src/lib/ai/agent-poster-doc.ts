@@ -1,0 +1,334 @@
+import "server-only";
+import { withRateLimitRetry } from "./openai-client";
+import { getModelClient } from "./model-client";
+import { PosterDocSchema, type PosterDoc, type PosterPalette } from "./poster-doc";
+import { fontMenu } from "./poster-schema-renderer";
+import type { VariationBrief } from "./agent-creative";
+import type { CostTracker } from "./cost-tracker";
+
+/** Input for building a PosterDoc — a subset of Agent 3's input. */
+export type PosterDocInput = {
+  brief: VariationBrief;
+  schoolName: string;
+  /** Paths of photos actually available to composite (validates photoGrid refs). */
+  availablePhotoPaths: string[];
+};
+
+// ── Colour helpers ───────────────────────────────────────────────────────────
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = hex.trim().replace(/^#/, "");
+  const s = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
+  if (!/^[0-9a-fA-F]{6}$/.test(s)) return null;
+  return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+}
+function relLum(hex: string): number {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0.5;
+  const [r, g, b] = rgb.map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrast(a: string, b: string): number {
+  const l1 = relLum(a), l2 = relLum(b);
+  const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+  return (hi + 0.05) / (lo + 0.05);
+}
+function saturation(hex: string): number {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const [r, g, b] = rgb.map((v) => v / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  return max === 0 ? 0 : (max - min) / max;
+}
+
+const DEFAULT_PALETTE: PosterPalette = { bg: "#f7f1e1", ink: "#14284b", accent: "#8a1c24", accent2: "#e0a924", muted: "#b8ad8f" };
+
+/** Map a brief's flat colour list into named palette roles by luminance/saturation. */
+function derivePalette(colors: string[]): PosterPalette {
+  const valid = (colors ?? []).map((c) => c?.trim()).filter((c): c is string => !!c && !!hexToRgb(c));
+  if (valid.length < 2) return DEFAULT_PALETTE;
+  const byLum = [...valid].sort((a, b) => relLum(b) - relLum(a));
+  const bg = byLum[0];
+  const ink = byLum[byLum.length - 1];
+  const rest = valid.filter((c) => c !== bg && c !== ink);
+  const bySat = [...(rest.length ? rest : valid)].sort((a, b) => saturation(b) - saturation(a));
+  const accent = bySat[0] ?? DEFAULT_PALETTE.accent;
+  const accent2 = bySat[1] ?? DEFAULT_PALETTE.accent2;
+  const muted = bySat[Math.floor(bySat.length / 2)] ?? DEFAULT_PALETTE.muted;
+  return { bg, ink, accent, accent2, muted };
+}
+
+/** Best-contrast palette role for text over the given background colour. */
+function contrastText(bg: string, palette: PosterPalette, prefer: (keyof PosterPalette)[]): keyof PosterPalette {
+  const bgHex = (palette as Record<string, string>)[bg] ?? bg;
+  const candidates: (keyof PosterPalette)[] = [...prefer, "ink", "bg", "accent2", "accent"];
+  let best: keyof PosterPalette = prefer[0] ?? "ink";
+  let bestC = 0;
+  for (const role of candidates) {
+    const c = contrast((palette as Record<string, string>)[role], bgHex);
+    if (c > bestC) { bestC = c; best = role; }
+  }
+  return best;
+}
+
+// ── Font selection from the curated menu ─────────────────────────────────────
+function familiesByCategory(): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const f of fontMenu()) (out[f.category] ??= []).push(f.family);
+  return out;
+}
+function pick(list: string[] | undefined, fallback: string): string {
+  return list && list.length ? list[0] : fallback;
+}
+
+/** Choose heading/body/accent fonts by matching theme/direction keywords. */
+function pickFonts(brief: VariationBrief): { heading: string; body: string; accent: string } {
+  const cat = familiesByCategory();
+  const t = `${brief.theme} ${brief.direction} ${brief.designPrompt}`.toLowerCase();
+  const has = (...kw: string[]) => kw.some((k) => t.includes(k));
+  if (has("elegant", "premium", "heritage", "formal", "classic", "graduation", "prestige")) {
+    return { heading: pick(cat.serif, "Playfair Display"), body: pick(cat["sans-body"], "Lato"), accent: cat.serif?.[1] ?? "Cormorant Garamond" };
+  }
+  if (has("playful", "kids", "fun", "celebration", "joy", "colorful", "festive", "carnival")) {
+    return { heading: pick(cat.rounded, "Fredoka"), body: pick(cat["sans-body"], "Work Sans"), accent: pick(cat.display, "Oswald") };
+  }
+  if (has("bold", "sport", "energy", "impact", "power", "champion", "strong")) {
+    return { heading: pick(cat["sans-heading"], "Barlow"), body: pick(cat["sans-body"], "Work Sans"), accent: pick(cat.display, "Bebas Neue") };
+  }
+  // Modern default.
+  return { heading: pick(cat["sans-heading"], "Montserrat"), body: cat["sans-heading"]?.[1] ?? "Poppins", accent: pick(cat.display, "Oswald") };
+}
+
+function pickDecor(brief: VariationBrief): ("arcs" | "dots" | "corners" | "bars")[] {
+  const t = `${brief.theme} ${brief.direction}`.toLowerCase();
+  if (/elegant|premium|heritage|formal|classic|graduation/.test(t)) return ["arcs", "dots"];
+  if (/playful|kids|fun|celebration|festive/.test(t)) return ["dots", "bars"];
+  if (/bold|sport|energy|impact/.test(t)) return ["corners", "bars"];
+  return ["dots", "corners"];
+}
+
+const VALID_FAMILIES = new Set(fontMenu().map((f) => f.family.toLowerCase()));
+
+// ── Deterministic builder (fallback + safety net) ────────────────────────────
+function shorten(s: string | undefined, words: number): string {
+  return (s ?? "").trim().split(/\s+/).slice(0, words).join(" ");
+}
+
+/** Build a valid, sensible PosterDoc from the brief with zero AI. */
+export function briefToPosterDoc(input: PosterDocInput): PosterDoc {
+  const { brief } = input;
+  const palette = derivePalette(brief.colorPalette);
+  const fonts = pickFonts(brief);
+  const decor = pickDecor(brief);
+  const isCarousel = brief.layout.type === "carousel" && brief.layout.pages.length > 1;
+  const total = isCarousel ? brief.layout.pages.length : 1;
+  const avail = new Set(input.availablePhotoPaths);
+
+  const pathsFor = (pageIdx: number): string[] => {
+    const page = brief.layout.pages[pageIdx];
+    const raw = (page?.selectedImages ?? []).map((s) => s.path).filter(Boolean);
+    const list = (raw.length ? raw : brief.selectedImages.map((s) => s.path)).filter((p) => avail.has(p));
+    return [...new Set(list)].slice(0, 6);
+  };
+
+  const pages = brief.layout.pages.slice(0, total).map((page, i) => {
+    const isCover = i === 0;
+    const isClosing = isCarousel && i === total - 1;
+    const photos = pathsFor(i);
+    const bands: PosterDoc["pages"][number]["bands"] = [];
+
+    if (isCover) {
+      bands.push({ type: "eyebrow", text: (brief.theme || "").toUpperCase().slice(0, 42), color: "ink" });
+      bands.push({ type: "divider", style: "line-diamond", color: "accent2" });
+      const words = brief.textContent.headline.trim().split(/\s+/);
+      const mid = Math.ceil(words.length / 2);
+      const lines = words.length > 2
+        ? [{ text: words.slice(0, mid).join(" "), color: "accent" }, { text: words.slice(mid).join(" "), color: "accent2" }]
+        : [{ text: brief.textContent.headline, color: "accent" }];
+      bands.push({ type: "heading", lines });
+      if (brief.textContent.subheadline) bands.push({ type: "subheading", text: brief.textContent.subheadline, color: "ink" });
+      if (photos.length) bands.push({ type: "photoGrid", photos, frameStyle: "card", flex: 1 });
+      else bands.push({ type: "spacer", flex: 1 });
+    } else if (isClosing) {
+      if (photos.length) bands.push({ type: "photoGrid", photos, frameStyle: "card", flex: 1 });
+      else bands.push({ type: "spacer", flex: 1 });
+      bands.push({ type: "heading", lines: [{ text: shorten(page.description, 4) || "Thank You", color: "accent" }], size: 60 });
+      const tag = brief.textContent.callToAction || brief.textContent.subheadline;
+      if (tag) bands.push({ type: "subheading", text: tag, color: "ink" });
+    } else {
+      // Middle page: title + collage.
+      bands.push({ type: "heading", lines: [{ text: (shorten(page.description, 4) || "Highlights").toUpperCase(), color: "ink" }], size: 62 });
+      if (brief.textContent.subheadline && i === 1) bands.push({ type: "subheading", text: brief.textContent.subheadline, color: "accent" });
+      bands.push({ type: "divider", style: "line-diamond", color: "accent2" });
+      if (photos.length) bands.push({ type: "photoGrid", photos, flex: 1 });
+      else bands.push({ type: "spacer", flex: 1 });
+    }
+
+    return {
+      id: page.description ? shorten(page.description, 3).toLowerCase().replace(/\s+/g, "-") || `page-${i + 1}` : `page-${i + 1}`,
+      background: { type: "color" as const, color: "bg" },
+      reserveLogo: true,
+      reserveFooter: true,
+      decor,
+      bands,
+    };
+  });
+
+  return { version: 1, palette, fonts, pages };
+}
+
+// ── Sanitiser — harden any PosterDoc (Codex or fallback) ─────────────────────
+function nearestFamily(name: string, role: "heading" | "body" | "accent"): string {
+  if (VALID_FAMILIES.has(name?.toLowerCase())) return name;
+  const cat = familiesByCategory();
+  if (role === "body") return pick(cat["sans-body"], "Lato");
+  if (role === "accent") return pick(cat.display, "Oswald");
+  return pick(cat["sans-heading"], "Montserrat");
+}
+
+/** Coerce fonts to the menu, palette roles present, photo paths valid, brand
+ *  zones reserved, and text colours contrasting with their page background. */
+function sanitize(doc: PosterDoc, input: PosterDocInput): PosterDoc {
+  const palette: PosterPalette = { ...DEFAULT_PALETTE, ...doc.palette };
+  const fonts = {
+    heading: nearestFamily(doc.fonts?.heading, "heading"),
+    body: nearestFamily(doc.fonts?.body, "body"),
+    accent: doc.fonts?.accent ? nearestFamily(doc.fonts.accent, "accent") : undefined,
+  };
+  const avail = new Set(input.availablePhotoPaths);
+
+  const isDark = (bgRef: string) => relLum((palette as Record<string, string>)[bgRef] ?? bgRef) < 0.4;
+
+  const pages = doc.pages.map((page) => {
+    const bgRef = page.background.type === "color" ? page.background.color
+      : page.background.type === "split" ? page.background.color1
+        : page.background.from;
+    const dark = isDark(bgRef);
+    // On dark backgrounds prefer light text; on light, prefer dark.
+    const prefLight: (keyof PosterPalette)[] = ["bg", "accent2", "accent"];
+    const prefDark: (keyof PosterPalette)[] = ["ink", "accent", "accent2"];
+
+    const fixColor = (c: string | undefined, fallbackPrefer: (keyof PosterPalette)[]): string => {
+      const resolved = (palette as Record<string, string>)[c ?? ""] ?? c;
+      const bgHex = (palette as Record<string, string>)[bgRef] ?? bgRef;
+      if (resolved && contrast(resolved, bgHex) >= 3) return c!; // keep good choices
+      return contrastText(bgRef, palette, fallbackPrefer);
+    };
+    const pref = dark ? prefLight : prefDark;
+
+    const bands = page.bands.map((b) => {
+      if (b.type === "heading") return { ...b, lines: b.lines.map((ln) => ({ ...ln, color: fixColor(ln.color, pref) })) };
+      if (b.type === "eyebrow" || b.type === "subheading" || b.type === "textBlock" || b.type === "chip") {
+        return { ...b, color: fixColor((b as { color?: string }).color, pref) };
+      }
+      if (b.type === "photoGrid") {
+        const photos = b.photos.filter((p) => avail.has(p)).slice(0, 6);
+        return { ...b, photos: photos.length ? photos : b.photos.slice(0, 6) };
+      }
+      return b;
+    }).filter((b) => !(b.type === "photoGrid" && b.photos.length === 0));
+
+    return { ...page, reserveLogo: true, reserveFooter: true, bands: bands.length ? bands : page.bands };
+  });
+
+  return { version: 1, palette, fonts, pages };
+}
+
+// ── Codex-authored generation ────────────────────────────────────────────────
+function buildPrompt(input: PosterDocInput): string {
+  const { brief } = input;
+  const cats = familiesByCategory();
+  const menu = Object.entries(cats).map(([c, fs]) => `  ${c}: ${fs.join(", ")}`).join("\n");
+  const isCarousel = brief.layout.type === "carousel" && brief.layout.pages.length > 1;
+  const pagesSpec = brief.layout.pages.slice(0, isCarousel ? brief.layout.pages.length : 1).map((p, i) => {
+    const photos = (p.selectedImages ?? []).map((s) => s.path).filter((path) => input.availablePhotoPaths.includes(path));
+    const role = i === 0 ? "COVER" : isCarousel && i === brief.layout.pages.length - 1 ? "CLOSING" : "MIDDLE";
+    return `Page ${i + 1} [${role}]\n  vision: ${(p.creativeVision || p.description || "").slice(0, 300)}\n  photos (use these EXACT paths in photoGrid, in this order): ${JSON.stringify(photos)}`;
+  }).join("\n");
+
+  return `You are a senior poster designer. Produce a PosterDoc JSON for a school Instagram poster (${isCarousel ? `${brief.layout.pages.length}-page carousel` : "single page"}). A fixed renderer turns this JSON into the image — you choose CONTENT, STRUCTURE, COLOUR and FONTS; it computes all geometry, so you never give coordinates.
+
+School: ${input.schoolName}
+Theme: ${brief.theme}
+Direction: ${brief.direction}
+Headline: ${brief.textContent.headline}
+Subheadline: ${brief.textContent.subheadline}
+Call to action: ${brief.textContent.callToAction}
+Brand palette (hex): ${brief.colorPalette.join(", ")}
+
+Pages:
+${pagesSpec}
+
+OUTPUT — a JSON object exactly matching this shape:
+{
+  "version": 1,
+  "palette": { "bg": hex, "ink": hex, "accent": hex, "accent2": hex, "muted": hex },
+  "fonts": { "heading": <family>, "body": <family>, "accent": <family> },
+  "pages": [ {
+    "id": string,
+    "background": { "type":"color","color":<hex|role> } | { "type":"gradient","from":..,"to":..,"angle":num } | { "type":"split","color1":..,"color2":..,"direction":"diagonal|horizontal|vertical","ratio":num },
+    "reserveLogo": true, "reserveFooter": true,
+    "decor": array of any of ["arcs","dots","corners","bars"],
+    "bands": [ ...ordered bands... ]
+  } ]
+}
+BANDS (each has optional "align": left|center|right):
+  { "type":"eyebrow","text":..,"color":role }                         small-caps label
+  { "type":"heading","lines":[{ "text":..,"color":role }],"size":num } 1-3 lines; per-line colour = two-tone titles
+  { "type":"subheading","text":..,"color":role }
+  { "type":"chip","text":..,"background":role,"color":role }
+  { "type":"divider","style":"line-diamond|line","color":role }
+  { "type":"photoGrid","photos":[paths],"layout":"single|duo|trio|quad|quadFeature|featured|mosaic6|grid6|hero-strip","frameStyle":"plain|card","flex":1 }
+  { "type":"iconRow","icons":[any of heart,star,people,book,trophy,bulb,flag,medal],"color":role }
+  { "type":"spacer","flex":1 }
+
+FONTS — choose families ONLY from this menu (exact names):
+${menu}
+
+RULES:
+- Colour values may be a hex OR a palette role name ("bg","ink","accent","accent2","muted").
+- CONTRAST IS CRITICAL: every text colour must clearly contrast with its page background. On a light background use dark text (ink/accent); on a dark background use light text (bg/accent2). Never put dark text on a dark background or light on light.
+- The top-left logo and bottom footer are composited automatically — always set reserveLogo & reserveFooter true; never add a logo/footer/contact band yourself.
+- photoGrid.photos MUST be the exact paths listed for that page, in order. Omit photoGrid if a page has none.
+- COVER: eyebrow + divider + a strong heading (two-tone looks great) + subheading + a photoGrid (frameStyle "card"). MIDDLE: a title + divider + a photoGrid collage. CLOSING: a photoGrid + heading + subheading (+ optional iconRow).
+- Keep headlines short (<= 6 words). Return ONLY the JSON, no markdown.`;
+}
+
+/**
+ * Generate a PosterDoc: Codex authors it, we zod-validate + sanitise, and fall
+ * back to the deterministic builder if anything is malformed.
+ */
+export async function generatePosterDoc(input: PosterDocInput, costTracker?: CostTracker): Promise<PosterDoc> {
+  const openai = await getModelClient();
+  const prompt = buildPrompt(input);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await withRateLimitRetry(() => openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "You output only valid PosterDoc JSON for a fixed poster renderer. No markdown, no prose." },
+          { role: "user", content: attempt === 0 ? prompt : `${prompt}\n\nYour previous output was invalid JSON or failed schema validation. Return ONLY a valid JSON object.` },
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 4000,
+      }));
+      costTracker?.addLLMCall(`agent_poster_doc_v3${attempt ? "_retry" : ""}`, "gpt-4o-mini", response.usage);
+      const raw = response.choices[0]?.message?.content ?? "";
+      const json = JSON.parse(raw.replace(/```(?:json)?/gi, "").trim());
+      const parsed = PosterDocSchema.safeParse(json);
+      if (parsed.success) {
+        console.log(`[PosterDoc] Codex authored a valid PosterDoc (${parsed.data.pages.length} page(s))`);
+        return sanitize(parsed.data, input);
+      }
+      console.warn(`[PosterDoc] attempt ${attempt + 1} failed schema: ${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    } catch (err) {
+      console.warn(`[PosterDoc] attempt ${attempt + 1} error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  console.warn("[PosterDoc] Codex generation failed — using deterministic briefToPosterDoc fallback");
+  return sanitize(briefToPosterDoc(input), input);
+}

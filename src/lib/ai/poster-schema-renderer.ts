@@ -60,11 +60,22 @@ export function fontMenu(): { family: string; category: string }[] {
 }
 
 // ── Text metrics + outlining ─────────────────────────────────────────────────
+// Measured glyph-by-glyph via charToGlyph (matching outline()), NOT
+// font.getAdvanceWidth — that runs stringToGlyphs/the GSUB shaper, which throws
+// "substFormat 2 not supported" on some of the curated fonts.
 function advance(font: opentype.Font, text: string, size: number, tracking = 0): number {
-  if (!tracking) return font.getAdvanceWidth(text, size);
+  const scale = size / font.unitsPerEm;
   let w = 0;
-  for (const ch of text) w += font.getAdvanceWidth(ch, size) + tracking;
-  return Math.max(0, w - tracking);
+  let prev: opentype.Glyph | null = null;
+  for (const ch of Array.from(text)) {
+    const g = font.charToGlyph(ch);
+    if (prev && !tracking) {
+      try { w += font.getKerningValue(prev, g) * scale; } catch { /* no kern table */ }
+    }
+    w += (g.advanceWidth ?? 0) * scale + tracking;
+    prev = g;
+  }
+  return Math.max(0, w - (tracking || 0));
 }
 
 /** Round to 2 decimals. opentype.js emits NaN in path data when a glyph pen
