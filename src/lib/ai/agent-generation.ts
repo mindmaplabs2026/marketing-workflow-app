@@ -1,7 +1,7 @@
 import "server-only";
 import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
-import { getModelEngineKind } from "../config/engine";
+import { getModelEngineKind, getPosterCompositionMode } from "../config/engine";
 import {
   defaultPhotoFrames,
   compositeOriginalPhotos,
@@ -990,6 +990,51 @@ Return only the corrected SVG.`;
     }));
     costTracker?.addLLMCall(`agent3_v3_repair_p${pageIndex + 1}`, "gpt-4o-mini", response.usage);
     return sanitizeSvg(response.choices[0]?.message?.content ?? "");
+  }
+
+  // ── Schema composition mode (POSTER_COMPOSITION_MODE=schema) ──────────────
+  // The model emits a structured PosterDoc; a fixed flow renderer lays it out
+  // (no blind SVG coordinates → no overlaps/dead-space). Real photos + logo +
+  // footer are still composited exactly as in the SVG path. Falls back to a
+  // deterministic doc internally, so it can't produce a broken poster.
+  if (getPosterCompositionMode() === "schema") {
+    const { generatePosterDoc } = await import("./agent-poster-doc");
+    const { renderPosterDoc } = await import("./poster-schema-renderer");
+    const availablePhotoPaths = [...photoBuffers.keys()];
+    console.log(`[Agent3:v3:schema] Generating PosterDoc for variation ${brief.variationIndex} (${availablePhotoPaths.length} photos available)`);
+    const doc = await generatePosterDoc({ brief, schoolName: input.schoolName, availablePhotoPaths }, costTracker);
+
+    for (let i = 0; i < doc.pages.length; i++) {
+      const { svg, photoFrames } = renderPosterDoc(doc, i);
+      const photos = photoFrames
+        .map((f) => {
+          const buffer = photoBuffers.get(f.path);
+          return buffer ? { path: f.path, buffer } : null;
+        })
+        .filter((p): p is { path: string; buffer: Buffer } => !!p);
+      const background = await (await import("sharp")).default(Buffer.from(svg)).png().toBuffer();
+      const withPhotos = await compositeOriginalPhotos({ background, photos, frames: photoFrames });
+      const finalBuffer = await compositeBrand(withPhotos as Buffer);
+      imageUrls.push(`data:image/png;base64,${finalBuffer.toString("base64")}`);
+      prompts.push(`schema:${doc.pages[i]?.id ?? `page${i + 1}`}`);
+      artifacts.push({ relativePath: `composition/page${i + 1}.svg`, contentType: "image/svg+xml", body: svg });
+      console.log(`[Agent3:v3:schema] Page ${i + 1}/${doc.pages.length}: ${photoFrames.length} photo(s) composited`);
+    }
+    // Persist the whole PosterDoc so chat-edit can mutate it later (Phase 3).
+    artifacts.push({
+      relativePath: "composition/poster-doc.json",
+      contentType: "application/json",
+      body: JSON.stringify({ renderer: "poster-schema-v3", doc }, null, 2),
+    });
+
+    return {
+      imageUrls,
+      model: "poster-schema-v3",
+      prompts,
+      referenceImageCount: photoBuffers.size,
+      refinementRounds: 0,
+      artifacts,
+    };
   }
 
   // Up to this many audit→repair passes per page (each = 1 vision call + at most

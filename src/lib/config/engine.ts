@@ -17,6 +17,19 @@
 
 export type PosterEngine = "inngest" | "server";
 export type ModelEngineKind = "openai" | "codex";
+export type PosterCompositionMode = "svg" | "schema";
+
+/**
+ * POSTER_COMPOSITION_MODE: HOW the V3 poster path builds each page.
+ *   "svg" (default)  → today's path: a model writes freeform SVG chrome, then
+ *                      real photos + logo/footer are composited on top.
+ *   "schema"         → the model emits a structured PosterDoc; a fixed flow
+ *                      renderer lays it out (no blind coordinates, no overlaps).
+ * Defaults to "svg" so nothing changes until the flag is set (safe rollback).
+ */
+export function getPosterCompositionMode(): PosterCompositionMode {
+  return process.env.POSTER_COMPOSITION_MODE === "schema" ? "schema" : "svg";
+}
 
 export function getPosterEngine(): PosterEngine {
   return process.env.POSTER_ENGINE === "server" ? "server" : "inngest";
