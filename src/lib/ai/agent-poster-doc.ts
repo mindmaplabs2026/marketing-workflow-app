@@ -2,7 +2,7 @@ import "server-only";
 import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
 import { PosterDocSchema, type PosterDoc, type PosterPalette, type PosterPage, type PosterBand } from "./poster-doc";
-import { fontMenu, autoLayout } from "./poster-schema-renderer";
+import { fontMenu } from "./poster-schema-renderer";
 import type { VariationBrief } from "./agent-creative";
 import type { CostTracker } from "./cost-tracker";
 
@@ -155,6 +155,20 @@ function pickDecor(brief: VariationBrief): ("arcs" | "dots" | "corners" | "bars"
 
 const VALID_FAMILIES = new Set(fontMenu().map((f) => f.family.toLowerCase()));
 
+/**
+ * Layouts that fill COMPLETELY for a given photo count — no blank/orphan cell.
+ * This is the hard rule: the AI may pick any of these for variety, but a layout
+ * that would leave a gap for the count is never allowed. Order = preference.
+ */
+function balancedLayouts(n: number): string[] {
+  if (n <= 1) return ["single"];
+  if (n === 2) return ["duo", "duoV"];
+  if (n === 3) return ["trio", "trioRow"];
+  if (n === 4) return ["quad", "quadFeature"];
+  if (n === 5) return ["featured", "hero-strip"];
+  return ["mosaic6", "grid6"]; // 6
+}
+
 // ── Deterministic builder (fallback + safety net) ────────────────────────────
 function shorten(s: string | undefined, words: number): string {
   return (s ?? "").trim().split(/\s+/).slice(0, words).join(" ");
@@ -256,6 +270,8 @@ export function sanitize(doc: PosterDoc, input: PosterDocInput): PosterDoc {
 
   const avail = new Set(input.availablePhotoPaths);
   const isDark = (bgRef: string) => relLum((palette as Record<string, string>)[bgRef] ?? bgRef) < 0.4;
+  // De-clone consecutive same-count collages so two 6-photo pages don't look identical.
+  const lastLayoutByCount = new Map<number, string>();
 
   const pages = doc.pages.map((page, i) => {
     const bgRef = page.background.type === "color" ? page.background.color
@@ -289,8 +305,16 @@ export function sanitize(doc: PosterDoc, input: PosterDocInput): PosterDoc {
       if (b.type === "iconRow") return { ...b, color: iconColor };
       if (b.type === "photoGrid") {
         const photos = (b.photos.filter((p) => avail.has(p)).length ? b.photos.filter((p) => avail.has(p)) : b.photos).slice(0, 6);
-        // Force a balanced, orphan-free layout for the count.
-        return { ...b, photos, layout: autoLayout(photos.length) as typeof b.layout };
+        const opts = balancedLayouts(photos.length);
+        // Hard rule: only an orphan-free layout may be used. Respect the AI's
+        // choice if it fills cleanly, else pick a clean one by page position.
+        let chosen = b.layout && opts.includes(b.layout) ? b.layout : opts[i % opts.length];
+        // De-clone: if the previous same-count page used this exact layout, swap.
+        if (opts.length > 1 && lastLayoutByCount.get(photos.length) === chosen) {
+          chosen = opts[(opts.indexOf(chosen) + 1) % opts.length];
+        }
+        lastLayoutByCount.set(photos.length, chosen);
+        return { ...b, photos, layout: chosen as typeof b.layout };
       }
       return b;
     }).filter((b) => !(b.type === "photoGrid" && b.photos.length === 0));
@@ -399,7 +423,7 @@ RULES:
 - ONE CONSISTENT VISUAL SYSTEM across ALL pages: SAME "decor" array, SAME heading colour scheme, SAME icon colour, SAME background treatment. Standardise STYLE, NOT TEXT.
 - DISTINCT PER-PAGE TITLES: only the COVER shows the main headline. Every other page MUST have its OWN short heading that describes THAT page's content (from its vision) — e.g. "Formal Recognition", "Voice and Oath", "March and Celebrate". NEVER repeat the cover headline on later pages, and do NOT put the same subheading/tagline on every page.
 - The top-left LOGO is composited automatically, and the bottom CONTACT FOOTER is drawn automatically from the school's details. Always set reserveLogo & reserveFooter true; NEVER add a logo, footer, or contact band yourself, and never draw a coloured band across the bottom.
-- photoGrid.photos MUST be the exact paths listed for that page, in order. Omit photoGrid if a page has none. Do NOT set "layout" — the renderer picks a balanced one for the photo count.
+- photoGrid.photos MUST be the exact paths listed for that page, in order. Omit photoGrid if a page has none. You MAY set "layout" to vary the collage between pages (e.g. mosaic6 vs grid6 for 6 photos, quad vs quadFeature for 4) — but it is only honoured if it fills the photo count with NO blank cell; otherwise the renderer substitutes a clean layout. Prefer varying it so consecutive photo pages don't look identical.
 - COVER: eyebrow + divider + a strong two-tone heading + subheading + a photoGrid (frameStyle "card"). MIDDLE: a title + divider + a photoGrid collage. CLOSING: a photoGrid + heading + subheading (+ optional iconRow).
 - Keep headlines short (<= 6 words). Return ONLY the JSON, no markdown.`;
 }
