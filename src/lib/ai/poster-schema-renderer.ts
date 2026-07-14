@@ -15,7 +15,7 @@
  */
 import fs from "fs";
 import path from "path";
-import opentype from "opentype.js";
+import * as opentype from "opentype.js";
 import type { NormalizedPhotoFrame } from "./poster-compositor";
 import type { PosterDoc, PosterPage, PosterBand, PosterPalette, PosterBackground } from "./poster-doc";
 
