@@ -771,7 +771,8 @@ export async function runGenerationAgentV3(
   const footerBuf = footerAsset ? await downloadImage(footerAsset.signedUrl) : null;
   console.log(`[Agent3:v3] Brand assets to composite: logo=${!!logoBuf}, footer=${!!footerBuf}`);
 
-  async function compositeBrand(pageBuffer: Buffer): Promise<Buffer> {
+  async function compositeBrand(pageBuffer: Buffer, opts?: { footer?: boolean }): Promise<Buffer> {
+    const withFooter = opts?.footer ?? true;
     const sharpMod = (await import("sharp")).default;
     const W = 1024, H = 1536;
     const overlays: { input: Buffer; left: number; top: number }[] = [];
@@ -785,7 +786,7 @@ export async function runGenerationAgentV3(
         .toBuffer();
       overlays.push({ input: resized, left: pad, top: pad });
     }
-    if (footerBuf) {
+    if (footerBuf && withFooter) {
       // Full-width strip pinned to the bottom.
       const resized = await sharpMod(footerBuf).resize({ width: W, fit: "inside" }).png().toBuffer();
       const h = (await sharpMod(resized).metadata()).height ?? 60;
@@ -1003,6 +1004,10 @@ Return only the corrected SVG.`;
     const availablePhotoPaths = [...photoBuffers.keys()];
     console.log(`[Agent3:v3:schema] Generating PosterDoc for variation ${brief.variationIndex} (${availablePhotoPaths.length} photos available)`);
     const doc = await generatePosterDoc({ brief, schoolName: input.schoolName, availablePhotoPaths }, costTracker);
+    // The renderer draws a native contact footer when the doc has one — so skip
+    // pasting the footer image in that case (still composite the real logo).
+    const nativeFooter = !!(doc.footer?.phone || doc.footer?.website);
+    console.log(`[Agent3:v3:schema] fonts=${JSON.stringify(doc.fonts)} footer=${nativeFooter ? "native" : "image"}`);
 
     for (let i = 0; i < doc.pages.length; i++) {
       const { svg, photoFrames } = renderPosterDoc(doc, i);
@@ -1014,7 +1019,7 @@ Return only the corrected SVG.`;
         .filter((p): p is { path: string; buffer: Buffer } => !!p);
       const background = await (await import("sharp")).default(Buffer.from(svg)).png().toBuffer();
       const withPhotos = await compositeOriginalPhotos({ background, photos, frames: photoFrames });
-      const finalBuffer = await compositeBrand(withPhotos as Buffer);
+      const finalBuffer = await compositeBrand(withPhotos as Buffer, { footer: !nativeFooter });
       imageUrls.push(`data:image/png;base64,${finalBuffer.toString("base64")}`);
       prompts.push(`schema:${doc.pages[i]?.id ?? `page${i + 1}`}`);
       artifacts.push({ relativePath: `composition/page${i + 1}.svg`, contentType: "image/svg+xml", body: svg });

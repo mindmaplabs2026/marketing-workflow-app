@@ -164,8 +164,8 @@ function fontFor(doc: PosterDoc, role: "heading" | "body" | "accent" | undefined
 
 // ── Layout: measure each band's natural height ───────────────────────────────
 const SCALE = {
-  eyebrow: 30, eyebrowTracking: 6,
-  heading: 112, headingLine: 1.04,
+  eyebrow: 32, eyebrowTracking: 6,
+  heading: 124, headingLine: 1.02,
   subheading: 40, textBlock: 30, chip: 30,
   divider: 34, icon: 92, bodyLine: 1.28,
 };
@@ -279,8 +279,9 @@ function hBands(rect: PxRect, fracs: number[], gap: number): PxRect[] {
   return bands;
 }
 
-/** Default layout for a photo count — favours editorial collages over flat grids. */
-function autoLayout(n: number): string {
+/** Default layout for a photo count — favours editorial collages over flat grids.
+ *  Every returned layout fills cleanly (no orphan cells). */
+export function autoLayout(n: number): string {
   return n <= 1 ? "single" : n === 2 ? "duo" : n === 3 ? "trio" : n === 4 ? "quadFeature" : n === 5 ? "featured" : "mosaic6";
 }
 
@@ -465,6 +466,49 @@ function shadowDefs(): string {
     `<feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.22"/></filter></defs>`;
 }
 
+// ── Native footer strip ──────────────────────────────────────────────────────
+const FOOTER_H = Math.round(CANVAS_H * 0.075);
+
+// A white circle "badge" with a glyph knocked out in the strip colour (EKAM style).
+function footerBadge(cx: number, cy: number, r: number, glyph: string, badgeFill: string, glyphColor: string): string {
+  const s = (r * 1.5) / 100; // glyph authored in a 0..100 box
+  const gx = cx - (r * 0.75), gy = cy - (r * 0.75);
+  return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${badgeFill}"/>` +
+    `<g transform="translate(${gx.toFixed(1)},${gy.toFixed(1)}) scale(${s.toFixed(4)})"><path d="${glyph}" fill="none" stroke="${glyphColor}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g>`;
+}
+const PHONE_GLYPH = "M30 22 C26 22 22 26 24 40 C28 66 42 78 66 80 C74 80 78 76 78 72 L70 62 C67 60 64 62 62 64 L58 68 C48 63 41 55 37 46 L41 42 C43 40 45 37 43 34 Z";
+const GLOBE_GLYPH = "M50 18 A32 32 0 1 1 49.9 18 M18 50 L82 50 M50 18 C34 34 34 66 50 82 C66 66 66 34 50 18";
+
+/** Draw the contact strip natively in the reserved bottom zone (matches the
+ *  poster palette instead of pasting a footer image). */
+function renderFooter(doc: PosterDoc, page: PosterPage): string {
+  if (!page.reserveFooter || !doc.footer) return "";
+  const { phone, website } = doc.footer;
+  if (!phone && !website) return "";
+  const palette = doc.palette;
+  const y0 = CANVAS_H - FOOTER_H;
+  const bg = color(doc.footer.background, palette, palette.accent);
+  const fg = color(doc.footer.color, palette, palette.bg);
+  const f = getFont(doc.fonts.body ?? doc.fonts.heading);
+  const size = Math.round(FOOTER_H * 0.32);
+  const cy = y0 + FOOTER_H / 2;
+  const baseline = cy + size * 0.34;
+  const r = size * 0.62;
+  const pad = 44;
+  const parts = [`<rect x="0" y="${y0}" width="${CANVAS_W}" height="${FOOTER_H}" fill="${bg}"/>`];
+  if (phone) {
+    parts.push(footerBadge(pad + r, cy, r, PHONE_GLYPH, fg, bg));
+    parts.push(`<path d="${outline(f, phone, size, pad + r * 2 + 16, baseline)}" fill="${fg}"/>`);
+  }
+  if (website) {
+    const w = advance(f, website, size);
+    const badgeCx = CANVAS_W - pad - w - 16 - r;
+    parts.push(footerBadge(badgeCx, cy, r, GLOBE_GLYPH, fg, bg));
+    parts.push(`<path d="${outline(f, website, size, badgeCx + r + 16, baseline)}" fill="${fg}"/>`);
+  }
+  return parts.join("");
+}
+
 // ── Band rendering ───────────────────────────────────────────────────────────
 function renderBand(
   doc: PosterDoc, b: PosterBand, p: Placed, contentX: number, contentW: number,
@@ -600,7 +644,7 @@ export function renderPosterDoc(doc: PosterDoc, pageIndex: number): { svg: strin
   if (!page) throw new Error(`PosterDoc has no page ${pageIndex}`);
   const { placed, contentX, contentW } = layout(doc, page);
 
-  // Layer order: shadow filter defs -> background -> ornaments -> content.
+  // Layer order: shadow filter defs -> background -> ornaments -> content -> footer.
   const layers: string[] = [shadowDefs(), renderBackground(page.background, doc.palette), renderDecor(page.decor, doc.palette)];
   const photoFrames: NormalizedPhotoFrame[] = [];
   for (const p of placed) {
@@ -608,6 +652,8 @@ export function renderPosterDoc(doc: PosterDoc, pageIndex: number): { svg: strin
     if (svg) layers.push(svg);
     photoFrames.push(...frames);
   }
+  // Native contact strip on top, in the reserved bottom zone.
+  layers.push(renderFooter(doc, page));
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}">${layers.join("")}</svg>`;
   return { svg, photoFrames };

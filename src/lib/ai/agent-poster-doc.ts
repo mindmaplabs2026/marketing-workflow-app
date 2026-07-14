@@ -1,8 +1,8 @@
 import "server-only";
 import { withRateLimitRetry } from "./openai-client";
 import { getModelClient } from "./model-client";
-import { PosterDocSchema, type PosterDoc, type PosterPalette } from "./poster-doc";
-import { fontMenu } from "./poster-schema-renderer";
+import { PosterDocSchema, type PosterDoc, type PosterPalette, type PosterPage } from "./poster-doc";
+import { fontMenu, autoLayout } from "./poster-schema-renderer";
 import type { VariationBrief } from "./agent-creative";
 import type { CostTracker } from "./cost-tracker";
 
@@ -83,8 +83,52 @@ function pick(list: string[] | undefined, fallback: string): string {
   return list && list.length ? list[0] : fallback;
 }
 
-/** Choose heading/body/accent fonts by matching theme/direction keywords. */
+function categoryOf(family: string): string | undefined {
+  return fontMenu().find((f) => f.family.toLowerCase() === family.toLowerCase())?.category;
+}
+
+/** The typography prose Agent 2 wrote (top-level creativeVision) — not on the
+ *  VariationBrief type but present at runtime. */
+function visionText(brief: VariationBrief): string {
+  const cv = (brief as unknown as { creativeVision?: string }).creativeVision ?? "";
+  return `${cv} ${brief.designPrompt ?? ""}`;
+}
+
+/** Honour Agent 2: pull any curated-menu font families named in its brief. */
+function extractFonts(brief: VariationBrief): { heading?: string; accent?: string } {
+  const text = visionText(brief).toLowerCase();
+  const matches: string[] = [];
+  for (const f of fontMenu()) {
+    if (text.includes(f.family.toLowerCase()) && !matches.includes(f.family)) matches.push(f.family);
+  }
+  if (!matches.length) return {};
+  const heading = matches.find((m) => ["sans-heading", "display", "serif", "rounded"].includes(categoryOf(m) ?? "")) ?? matches[0];
+  const accent = matches.find((m) => m !== heading);
+  return { heading, accent };
+}
+
+/** Pull a phone number + website out of Agent 2's contact/branding text. */
+function parseContact(brief: VariationBrief): { phone?: string; website?: string } {
+  const src = `${brief.brandingPlacement?.contactInfo ?? ""} ${brief.brandingPlacement?.affiliations ?? ""} ${brief.textContent?.bodyText ?? ""}`;
+  const phone = src.match(/\+?\d[\d\s()/-]{7,}\d/)?.[0]?.replace(/\s{2,}/g, " ").trim();
+  const website = src.match(/(?:https?:\/\/)?(?:www\.)?[a-z0-9][a-z0-9-]*\.[a-z]{2,}(?:\.[a-z]{2,})?/i)?.[0]?.trim();
+  return { phone, website };
+}
+
+/** Choose heading/body/accent fonts — honouring Agent 2's named fonts first,
+ *  then falling back to a theme-keyword heuristic. */
 function pickFonts(brief: VariationBrief): { heading: string; body: string; accent: string } {
+  const cat = familiesByCategory();
+  const base = pickFontsByKeyword(brief);
+  const named = extractFonts(brief);
+  return {
+    heading: named.heading ?? base.heading,
+    body: base.body,
+    accent: named.accent ?? base.accent ?? pick(cat.display, "Oswald"),
+  };
+}
+
+function pickFontsByKeyword(brief: VariationBrief): { heading: string; body: string; accent: string } {
   const cat = familiesByCategory();
   const t = `${brief.theme} ${brief.direction} ${brief.designPrompt}`.toLowerCase();
   const has = (...kw: string[]) => kw.some((k) => t.includes(k));
@@ -188,27 +232,37 @@ function nearestFamily(name: string, role: "heading" | "body" | "accent"): strin
   return pick(cat["sans-heading"], "Montserrat");
 }
 
-/** Coerce fonts to the menu, palette roles present, photo paths valid, brand
- *  zones reserved, and text colours contrasting with their page background. */
-function sanitize(doc: PosterDoc, input: PosterDocInput): PosterDoc {
+/** Harden any PosterDoc (Codex or deterministic) and enforce a consistent
+ *  system across pages. Coerces fonts to the menu (honouring Agent 2's named
+ *  fonts), guarantees palette roles + brand zones + valid photos, forces
+ *  balanced (orphan-free) photo layouts, sizes headings big-and-consistent,
+ *  unifies decor/icon colour/heading scheme across pages, fixes low-contrast
+ *  text, and attaches a native contact footer. */
+export function sanitize(doc: PosterDoc, input: PosterDocInput): PosterDoc {
   const palette: PosterPalette = { ...DEFAULT_PALETTE, ...doc.palette };
-  const fonts = {
-    heading: nearestFamily(doc.fonts?.heading, "heading"),
-    body: nearestFamily(doc.fonts?.body, "body"),
-    accent: doc.fonts?.accent ? nearestFamily(doc.fonts.accent, "accent") : undefined,
-  };
-  const avail = new Set(input.availablePhotoPaths);
 
+  // Fonts: honour Agent 2's named fonts, else the doc's (coerced to the menu).
+  const named = extractFonts(input.brief);
+  const fonts = {
+    heading: nearestFamily(named.heading ?? doc.fonts?.heading, "heading"),
+    body: nearestFamily(doc.fonts?.body, "body"),
+    accent: nearestFamily(named.accent ?? doc.fonts?.accent ?? "", "accent"),
+  };
+
+  // One consistent system for the whole set.
+  const decor = (doc.pages.find((p) => p.decor?.length)?.decor ?? ["dots", "corners"]) as PosterPage["decor"];
+  const iconColor = "accent2";
+  const footer = doc.footer ?? footerFromBrief(input.brief);
+
+  const avail = new Set(input.availablePhotoPaths);
   const isDark = (bgRef: string) => relLum((palette as Record<string, string>)[bgRef] ?? bgRef) < 0.4;
 
-  const pages = doc.pages.map((page) => {
+  const pages = doc.pages.map((page, i) => {
     const bgRef = page.background.type === "color" ? page.background.color
       : page.background.type === "split" ? page.background.color1
         : page.background.from;
     const dark = isDark(bgRef);
-    // On dark backgrounds prefer light text; on light, prefer dark.
-    const prefLight: (keyof PosterPalette)[] = ["bg", "accent2", "accent"];
-    const prefDark: (keyof PosterPalette)[] = ["ink", "accent", "accent2"];
+    const pref: (keyof PosterPalette)[] = dark ? ["bg", "accent2", "accent"] : ["ink", "accent", "accent2"];
 
     const fixColor = (c: string | undefined, fallbackPrefer: (keyof PosterPalette)[]): string => {
       const resolved = (palette as Record<string, string>)[c ?? ""] ?? c;
@@ -216,24 +270,42 @@ function sanitize(doc: PosterDoc, input: PosterDocInput): PosterDoc {
       if (resolved && contrast(resolved, bgHex) >= 3) return c!; // keep good choices
       return contrastText(bgRef, palette, fallbackPrefer);
     };
-    const pref = dark ? prefLight : prefDark;
+
+    // Consistent heading scale by page role: cover dominant, others uniform.
+    const headingSize = i === 0 ? 112 : 74;
+    // Consistent two-tone heading colour scheme across every page.
+    const headingColorFor = (idx: number): string => {
+      const role = idx === 0 ? (dark ? "bg" : "accent") : "accent2";
+      return fixColor(role, pref);
+    };
 
     const bands = page.bands.map((b) => {
-      if (b.type === "heading") return { ...b, lines: b.lines.map((ln) => ({ ...ln, color: fixColor(ln.color, pref) })) };
+      if (b.type === "heading") {
+        return { ...b, size: headingSize, lines: b.lines.map((ln, li) => ({ ...ln, color: headingColorFor(li) })) };
+      }
       if (b.type === "eyebrow" || b.type === "subheading" || b.type === "textBlock" || b.type === "chip") {
         return { ...b, color: fixColor((b as { color?: string }).color, pref) };
       }
+      if (b.type === "iconRow") return { ...b, color: iconColor };
       if (b.type === "photoGrid") {
-        const photos = b.photos.filter((p) => avail.has(p)).slice(0, 6);
-        return { ...b, photos: photos.length ? photos : b.photos.slice(0, 6) };
+        const photos = (b.photos.filter((p) => avail.has(p)).length ? b.photos.filter((p) => avail.has(p)) : b.photos).slice(0, 6);
+        // Force a balanced, orphan-free layout for the count.
+        return { ...b, photos, layout: autoLayout(photos.length) as typeof b.layout };
       }
       return b;
     }).filter((b) => !(b.type === "photoGrid" && b.photos.length === 0));
 
-    return { ...page, reserveLogo: true, reserveFooter: true, bands: bands.length ? bands : page.bands };
+    return { ...page, reserveLogo: true, reserveFooter: true, decor, bands: bands.length ? bands : page.bands };
   });
 
-  return { version: 1, palette, fonts, pages };
+  return { version: 1, palette, fonts, footer, pages };
+}
+
+/** Build the native footer from Agent 2's contact info (undefined if none). */
+function footerFromBrief(brief: VariationBrief): PosterDoc["footer"] {
+  const { phone, website } = parseContact(brief);
+  if (!phone && !website) return undefined;
+  return { phone, website, background: "accent", color: "bg" };
 }
 
 // ── Codex-authored generation ────────────────────────────────────────────────
@@ -257,6 +329,8 @@ Headline: ${brief.textContent.headline}
 Subheadline: ${brief.textContent.subheadline}
 Call to action: ${brief.textContent.callToAction}
 Brand palette (hex): ${brief.colorPalette.join(", ")}
+Art director's typography + style notes (HONOUR these — if a named font is in the menu, use it): ${visionText(brief).slice(0, 500)}
+Recommended fonts (from the notes, already matched to the menu): heading=${pickFonts(brief).heading}, accent=${pickFonts(brief).accent}
 
 Pages:
 ${pagesSpec}
@@ -290,9 +364,11 @@ ${menu}
 RULES:
 - Colour values may be a hex OR a palette role name ("bg","ink","accent","accent2","muted").
 - CONTRAST IS CRITICAL: every text colour must clearly contrast with its page background. On a light background use dark text (ink/accent); on a dark background use light text (bg/accent2). Never put dark text on a dark background or light on light.
-- The top-left logo and bottom footer are composited automatically — always set reserveLogo & reserveFooter true; never add a logo/footer/contact band yourself.
-- photoGrid.photos MUST be the exact paths listed for that page, in order. Omit photoGrid if a page has none.
-- COVER: eyebrow + divider + a strong heading (two-tone looks great) + subheading + a photoGrid (frameStyle "card"). MIDDLE: a title + divider + a photoGrid collage. CLOSING: a photoGrid + heading + subheading (+ optional iconRow).
+- BIG, BOLD HEADINGS: the cover headline should dominate the page — set a large heading "size" (~110). Make it two-tone (per-line colour). Middle/closing headings are smaller (~74) but still strong.
+- ONE CONSISTENT SYSTEM across ALL pages: use the SAME "decor" array, the SAME heading colour scheme, and the SAME icon colour on every page. The carousel must read as one unified series, not five different designs.
+- The top-left LOGO is composited automatically, and the bottom CONTACT FOOTER is drawn automatically from the school's details. Always set reserveLogo & reserveFooter true; NEVER add a logo, footer, or contact band yourself, and never draw a coloured band across the bottom.
+- photoGrid.photos MUST be the exact paths listed for that page, in order. Omit photoGrid if a page has none. Do NOT set "layout" — the renderer picks a balanced one for the photo count.
+- COVER: eyebrow + divider + a strong two-tone heading + subheading + a photoGrid (frameStyle "card"). MIDDLE: a title + divider + a photoGrid collage. CLOSING: a photoGrid + heading + subheading (+ optional iconRow).
 - Keep headlines short (<= 6 words). Return ONLY the JSON, no markdown.`;
 }
 

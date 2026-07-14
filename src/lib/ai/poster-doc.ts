@@ -160,11 +160,22 @@ const PageSchema = z.object({
   bands: z.array(BandSchema).min(1),
 });
 
+/** Native footer strip (phone + website) drawn by the renderer in the reserved
+ *  bottom zone — styled to match the poster instead of pasting a footer image. */
+const FooterSchema = z.object({
+  phone: z.string().optional(),
+  website: z.string().optional(),
+  background: ColorSchema.optional(),
+  color: ColorSchema.optional(),
+});
+
 export const PosterDocSchema = z.object({
   version: z.literal(1),
   canvas: z.object({ width: z.number(), height: z.number() }).optional(),
   palette: PaletteSchema,
   fonts: FontsSchema,
+  /** School contact strip rendered natively across every page's footer zone. */
+  footer: FooterSchema.optional(),
   pages: z.array(PageSchema).min(1),
 });
 
