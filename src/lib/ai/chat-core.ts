@@ -19,11 +19,38 @@ export type ChatEditInput = {
   variationId: string;
   message: string;
   pageIndex: number | null;
+  /**
+   * Storage paths (in the `designs` bucket) of user-attached reference images —
+   * annotated screenshots pointing at the exact scene/element to change.
+   */
+  attachmentPaths?: string[];
 };
 
-export async function runChatEdit({ variationId, message, pageIndex }: ChatEditInput): Promise<void> {
+/** Download user-attached reference images from the `designs` bucket (best-effort). */
+async function downloadAttachments(
+  admin: ReturnType<typeof createAdminClient>,
+  attachmentPaths: string[] | undefined,
+): Promise<Buffer[]> {
+  const buffers: Buffer[] = [];
+  for (const p of attachmentPaths ?? []) {
+    if (!p) continue;
+    try {
+      const { data, error } = await admin.storage.from("designs").download(p);
+      if (error || !data) {
+        console.warn(`[chat-edit] attachment download failed: ${p} (${error?.message ?? "no data"})`);
+        continue;
+      }
+      buffers.push(Buffer.from(await data.arrayBuffer()));
+    } catch (e) {
+      console.warn(`[chat-edit] attachment download errored: ${p} (${e instanceof Error ? e.message : e})`);
+    }
+  }
+  return buffers;
+}
+
+export async function runChatEdit({ variationId, message, pageIndex, attachmentPaths }: ChatEditInput): Promise<void> {
   const startTime = Date.now();
-  console.log(`[chat-edit] ── START ── variation=${variationId}, message="${message.slice(0, 80)}${message.length > 80 ? "..." : ""}"`);
+  console.log(`[chat-edit] ── START ── variation=${variationId}, message="${message.slice(0, 80)}${message.length > 80 ? "..." : ""}", ${attachmentPaths?.length ?? 0} attachment(s)`);
 
   const admin = createAdminClient();
   const openai = await getModelClient();
@@ -37,9 +64,13 @@ export async function runChatEdit({ variationId, message, pageIndex }: ChatEditI
   if (!variation) throw new Error("Variation not found");
   const requestId = variation.request_id;
 
+  // User-attached reference/annotation images (best-effort — a missing one just
+  // means that engine gets fewer references, never a hard failure).
+  const referenceImages = await downloadAttachments(admin, attachmentPaths);
+
   // Route reel edits to the reel-specific chat path
   if (variation.poster_type === "reel") {
-    await runReelChatEdit(variation, message);
+    await runReelChatEdit(variation, message, referenceImages);
     return;
   }
   console.log(`[chat-edit] Variation v${variation.variation_index}, ${variation.poster_type}, ${variation.storage_paths.length} pages, round ${variation.chat_rounds_used + 1}/25`);
@@ -110,16 +141,52 @@ export async function runChatEdit({ variationId, message, pageIndex }: ChatEditI
   let base64Result: string;
   const isCodex = getModelEngineKind() === "codex";
 
-  console.log(`[chat-edit] Step 3: Generating edited image (engine=${isCodex ? "codex" : "openai"})`);
+  console.log(`[chat-edit] Step 3: Generating edited image (engine=${isCodex ? "codex" : "openai"}, ${referenceImages.length} reference image(s))`);
   if (isCodex) {
     const { codexChatEdit } = await import("./codex-chat-edit");
     base64Result = await codexChatEdit({
       currentPoster: currentImageBuffer,
       editMessage: message,
+      referenceImages,
       size: "1024x1536",
     });
   } else {
-    const editPrompt = `This is an existing Instagram poster. Make ONLY this change: ${message}
+    // OpenAI's images.edit takes only the base image (+ optional mask) — there is
+    // no slot for a separate annotation image. So when the user attached
+    // reference images, run a gpt-4o vision pre-step that reads the current
+    // poster + the annotations and rewrites the request into one precise, literal
+    // instruction the image edit can then follow.
+    let effectiveMessage = message;
+    if (referenceImages.length > 0) {
+      try {
+        const toDataUrl = (b: Buffer) => `data:image/png;base64,${b.toString("base64")}`;
+        const visionContent: Array<
+          | { type: "text"; text: string }
+          | { type: "image_url"; image_url: { url: string } }
+        > = [
+          {
+            type: "text",
+            text: `The user wants to edit the CURRENT Instagram poster (the first image). They attached ${referenceImages.length} annotated reference image(s) marking the EXACT area/element to change. Their request: "${message}".\n\nRewrite this as ONE precise, literal editing instruction that names the specific element and the exact change, grounded in what is visible in the images. Output ONLY the instruction — no preamble, no explanation.`,
+          },
+          { type: "image_url", image_url: { url: toDataUrl(currentImageBuffer) } },
+          ...referenceImages.map((b) => ({ type: "image_url" as const, image_url: { url: toDataUrl(b) } })),
+        ];
+        const vision = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: visionContent }],
+          max_tokens: 300,
+        });
+        const refined = vision.choices[0]?.message?.content?.trim();
+        if (refined) {
+          effectiveMessage = refined;
+          console.log(`[chat-edit] Vision pre-step refined instruction: "${refined.slice(0, 120)}"`);
+        }
+      } catch (e) {
+        console.warn(`[chat-edit] Vision pre-step failed, using raw message: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
+    const editPrompt = `This is an existing Instagram poster. Make ONLY this change: ${effectiveMessage}
 
 Keep EVERYTHING else exactly the same — same layout, same images, same colors, same branding, same logo, same header, same footer. Only modify what was specifically requested. The poster dimensions are portrait 1080x1350px.`;
 
@@ -267,6 +334,7 @@ async function runReelChatEdit(
     creative_brief: unknown;
   },
   message: string,
+  referenceImages: Buffer[] = [],
 ): Promise<void> {
   const startTime = Date.now();
   const admin = createAdminClient();
@@ -461,7 +529,7 @@ async function runReelChatEdit(
     const { renderReelDoc } = await import("@/lib/remotion/render");
     const currentDoc = brief._reelDoc as import("./reel-doc").ReelDoc;
     console.log(`[reel-chat] Schema reel — editing ReelDoc (${currentDoc.scenes?.length ?? 0} scenes)`);
-    const newDoc = await editReelDoc({ doc: currentDoc, instruction: message, mediaManifest, hasLogo, hasFooter, hasMusic });
+    const newDoc = await editReelDoc({ doc: currentDoc, instruction: message, mediaManifest, hasLogo, hasFooter, hasMusic, referenceImages });
     console.log(`[reel-chat] Re-rendering edited ReelDoc (${newDoc.scenes.length} scenes) with ${mediaFiles.size} media files, music=${hasMusic}`);
     renderResult = await renderReelDoc({ doc: newDoc, mediaFiles, musicFile });
     briefComposition = { _reelDoc: newDoc, _compositionMode: "schema" };
@@ -478,6 +546,7 @@ async function runReelChatEdit(
       logoProfile,
       hasFooter,
       hasMusic,
+      referenceImages,
     });
     console.log(`[reel-chat] Got edited composition: ${edited.reelTsx.length} chars`);
     console.log(`[reel-chat] Re-rendering with ${mediaFiles.size} media files, music=${hasMusic}`);

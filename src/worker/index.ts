@@ -129,7 +129,7 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
   };
 }
 
-type ClaimedChatEdit = { id: string; variation_id: string; content: string; page_index: number | null };
+type ClaimedChatEdit = { id: string; variation_id: string; content: string; page_index: number | null; image_paths: string[] };
 
 /**
  * Atomically claim the oldest queued chat-edit (queued → processing).
@@ -158,7 +158,7 @@ async function claimNextChatEdit(): Promise<ClaimedChatEdit | null> {
     .update({ status: "processing" })
     .eq("id", id)
     .eq("status", "queued")
-    .select("id, variation_id, content, page_index");
+    .select("id, variation_id, content, page_index, image_paths");
 
   if (!claimed || claimed.length === 0) return null;
   const row = claimed[0] as Record<string, unknown>;
@@ -167,13 +167,14 @@ async function claimNextChatEdit(): Promise<ClaimedChatEdit | null> {
     variation_id: row.variation_id as string,
     content: row.content as string,
     page_index: (row.page_index as number | null) ?? null,
+    image_paths: (row.image_paths as string[] | null) ?? [],
   };
 }
 
 async function processChatEdit(edit: ClaimedChatEdit) {
   const admin = createAdminClient();
   try {
-    await runChatEdit({ variationId: edit.variation_id, message: edit.content, pageIndex: edit.page_index });
+    await runChatEdit({ variationId: edit.variation_id, message: edit.content, pageIndex: edit.page_index, attachmentPaths: edit.image_paths });
     await admin.from("ai_chat_messages").update({ status: "done" }).eq("id", edit.id);
     console.log(`[Worker] chat-edit ${edit.id} | done`);
   } catch (err) {

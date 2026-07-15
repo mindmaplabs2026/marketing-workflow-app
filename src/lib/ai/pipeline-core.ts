@@ -957,7 +957,13 @@ export async function runReelPipeline(
     const mediaManifest = new Map<string, { type: "image" | "video"; description: string; orientation?: "landscape" | "portrait" | "square" }>();
     const allMediaPaths = new Set<string>();
     for (const v of reelCreative.variations) {
-      for (const s of v.scenes) if (s.mediaPath) allMediaPaths.add(s.mediaPath);
+      for (const s of v.scenes) {
+        if (s.mediaPath) allMediaPaths.add(s.mediaPath);
+        // Collage scenes reference several photos; download every one of them.
+        if (s.collage?.mediaPaths) {
+          for (const p of s.collage.mediaPaths) if (p) allMediaPaths.add(p);
+        }
+      }
     }
     for (const mediaPath of allMediaPaths) {
       const match = ctx.images.find((img: UploadedImage) => img.path === mediaPath);

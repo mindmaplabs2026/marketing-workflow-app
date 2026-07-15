@@ -54,8 +54,30 @@ export function VariationChat({
   // Lightbox holds the full set of URLs plus the page being viewed, so you can
   // page through a whole carousel without closing and reopening the preview.
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  // Pending reference images the user has attached but not yet sent. `url` is an
+  // object URL for local preview (kept alive on the sent message bubble).
+  const [attachments, setAttachments] = useState<{ file: File; url: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  function addFiles(files: FileList | null) {
+    if (!files) return;
+    const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (imgs.length === 0) return;
+    setAttachments((prev) => [...prev, ...imgs.map((file) => ({ file, url: URL.createObjectURL(file) }))]);
+  }
+
+  function removeAttachment(i: number) {
+    setAttachments((prev) => {
+      const next = [...prev];
+      const [removed] = next.splice(i, 1);
+      if (removed) URL.revokeObjectURL(removed.url);
+      return next;
+    });
+  }
 
   function stepLightbox(delta: number) {
     setLightbox((lb) =>
@@ -135,7 +157,7 @@ export function VariationChat({
 
   async function handleSend() {
     const text = input.trim();
-    if (!text || sending) return;
+    if ((!text && attachments.length === 0) || sending) return;
     if (rounds >= maxRounds) {
       setError("Maximum edit rounds reached.");
       return;
@@ -144,15 +166,44 @@ export function VariationChat({
     setError(null);
     setSending(true);
 
+    // Upload any attached reference images first, collecting their storage paths.
+    const attachmentPaths: string[] = [];
+    const previewUrls = attachments.map((a) => a.url);
+    if (attachments.length > 0) {
+      setUploading(true);
+      try {
+        for (const a of attachments) {
+          const fd = new FormData();
+          fd.append("variation_id", variationId);
+          fd.append("file", a.file);
+          const upRes = await fetch("/api/ai/chat/attachment", { method: "POST", body: fd });
+          const upData = (await upRes.json()) as { path?: string; error?: string };
+          if (!upRes.ok || !upData.path) throw new Error(upData.error ?? "Attachment upload failed.");
+          attachmentPaths.push(upData.path);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to upload attachment.");
+        setUploading(false);
+        setSending(false);
+        return;
+      }
+      setUploading(false);
+    }
+
+    // A reference image with no words still needs an instruction for the backend.
+    const messageToSend = text || "Please apply the change shown in the attached reference image(s).";
+
     const userMsg: ChatMessage = {
       id: `temp-${Date.now()}`,
       role: "user",
-      content: text,
-      imageUrls: [],
+      content: messageToSend,
+      imageUrls: previewUrls,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setAttachments([]); // previews stay alive on the sent bubble via previewUrls
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     try {
       // Submit the message — returns immediately
@@ -161,8 +212,9 @@ export function VariationChat({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           variation_id: variationId,
-          message: text,
+          message: messageToSend,
           page_index: posterType === "carousel" ? activePage : undefined,
+          attachment_paths: attachmentPaths,
         }),
       });
 
@@ -442,35 +494,90 @@ export function VariationChat({
 
         {/* Input */}
         {canChat && rounds < maxRounds ? (
-          <div className="flex gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
+          <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+            {/* Pending attachment previews */}
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {attachments.map((a, i) => (
+                  <div key={i} className="relative">
+                    <img
+                      src={a.url}
+                      alt={`Attachment ${i + 1}`}
+                      className="h-16 w-16 rounded-lg border border-zinc-200 object-cover dark:border-zinc-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(i)}
+                      disabled={sending}
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white shadow hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-200 dark:text-zinc-900"
+                      aria-label="Remove attachment"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-end gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending}
+                title="Attach a reference image (annotate the exact area to change)"
+                aria-label="Attach reference image"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-zinc-300 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
+              <textarea
+                ref={textareaRef}
+                value={input}
+                rows={1}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  const el = e.target;
+                  el.style.height = "auto";
+                  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder={
+                  posterType === "reel"
+                    ? "Describe the change (Shift+Enter for a new line)…"
+                    : currentUrls.length > 1
+                    ? `Describe changes for page ${activePage + 1} (Shift+Enter for a new line)…`
+                    : "Describe the change (Shift+Enter for a new line)…"
                 }
-              }}
-              placeholder={
-                posterType === "reel"
-                  ? "Describe the change (e.g., speed up transitions, change music mood)..."
-                  : currentUrls.length > 1
-                  ? `Describe changes for page ${activePage + 1}...`
-                  : "Describe the change you want..."
-              }
-              disabled={sending}
-              className="flex-1 rounded-full border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:focus:bg-zinc-900"
-            />
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={sending || !input.trim()}
-              className="rounded-full bg-violet-600 px-5 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
-            >
-              {sending ? "..." : "Send"}
-            </button>
+                disabled={sending}
+                className="max-h-40 flex-1 resize-none rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm leading-5 text-zinc-900 placeholder:text-zinc-400 focus:border-violet-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:focus:bg-zinc-900"
+              />
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={sending || (!input.trim() && attachments.length === 0)}
+                className="h-10 shrink-0 rounded-full bg-violet-600 px-5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-600"
+              >
+                {uploading ? "Uploading…" : sending ? "…" : "Send"}
+              </button>
+            </div>
           </div>
         ) : rounds >= maxRounds ? (
           <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">

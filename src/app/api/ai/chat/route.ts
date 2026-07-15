@@ -24,10 +24,11 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { variation_id, message, page_index } = body as {
+  const { variation_id, message, page_index, attachment_paths } = body as {
     variation_id?: string;
     message?: string;
     page_index?: number;
+    attachment_paths?: string[];
   };
 
   if (!variation_id || !message?.trim()) {
@@ -36,6 +37,11 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  // User-attached reference images (uploaded via /api/ai/chat/attachment).
+  const attachmentPaths = Array.isArray(attachment_paths)
+    ? attachment_paths.filter((p): p is string => typeof p === "string" && p.length > 0)
+    : [];
 
   const { data: variation, error: varErr } = await supabase
     .from("ai_variations")
@@ -92,6 +98,7 @@ export async function POST(request: Request) {
       role: "user" as const,
       content: message.trim(),
       page_index: page_index ?? null,
+      image_paths: attachmentPaths,
       ...(isLocal ? { status: "queued" as const } : {}),
     })
     .select("id")
@@ -112,6 +119,7 @@ export async function POST(request: Request) {
         requestId: variation.request_id,
         message: message.trim(),
         pageIndex: page_index ?? null,
+        attachmentPaths,
       },
     });
   }

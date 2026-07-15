@@ -470,6 +470,14 @@ Title Card (${script.titleCard.durationSec}s):
   Subtitle: "${script.titleCard.subtitle}"
 
 ${script.scenes.map((s) => {
+  if (s.collage && s.collage.mediaPaths.length > 1) {
+    const files = s.collage.mediaPaths.map((p) => `media/${path.basename(p)}`).join(" + ");
+    let line = `Scene ${s.index} (${s.durationSec}s, COLLAGE ${s.collage.layout}, ${s.collage.mediaPaths.length} photos): ${files}`;
+    line += `\n  → Render these photos TOGETHER in ONE frame as a "${s.collage.layout}" collage (see COLLAGE SCENES in the rules). Do NOT show them one at a time.`;
+    if (s.textOverlay) line += `\n  Text: "${s.textOverlay.text}" at ${s.textOverlay.position} (${s.textOverlay.style})`;
+    line += `\n  Transition out: ${s.transition}`;
+    return line;
+  }
   let line = `Scene ${s.index} (${s.durationSec}s, ${s.mediaType}): media/${path.basename(s.mediaPath)}`;
   if (s.trimStartSec != null) line += ` [trim ${s.trimStartSec}-${s.trimEndSec}s]`;
   if (s.mediaType === "video" && s.containsSpeech) line += ` 🔊 SPEECH (play clip audio, duck music)`;
@@ -621,6 +629,27 @@ ${audioMixGuidance(script, hasMusic)}
      to ensure readability without covering the subject on the opposite side.
    - For framed scenes: place text OUTSIDE the photo frame (above/below the card) OR over the media on the side away from the subject with a scrim/chip behind it — whichever looks more designed.
    - Text should be SHORT (3-6 words). Long text blocks = more photo coverage = bad.
+14. COLLAGE SCENES — a scene tagged "COLLAGE <layout>" lists SEVERAL photos and MUST show
+   them TOGETHER in one frame as a grid (never one-at-a-time). All photos are <Img> images.
+   - Build the grid with CSS grid/flex inside the scene's <AbsoluteFill>. Every cell is a box
+     with a DEFINITE size (the grid gives it one) that clips its photo: overflow:"hidden", and
+     inside it an <Img> at width/height 100% with objectFit:"cover" and objectPosition to keep
+     subjects in frame. Never let a photo overflow or leave an empty cell.
+   - Layouts (fill EXACTLY the photos listed, in order — no blank cells):
+       • split2    → 2 cells. Two equal halves; use columns (1fr 1fr) for portrait photos,
+         rows for landscape photos.
+       • triptych3 → 3 cells. Three equal columns, OR one tall feature column + two stacked cells.
+       • grid4     → 4 cells. A 2×2 grid, equal cells.
+       • mosaic6   → 5-6 cells. One wide/tall FEATURE cell (spanning 2 columns or 2 rows) plus
+         the rest as smaller equal cells — an editorial mosaic, not a flat uniform grid.
+   - Use a small gap (~8-16px) between cells; the gap colour may be white or a palette colour, and
+     cells may have gently rounded corners if it suits the register. Keep the whole collage inside
+     the safe-area margins (it is a GRAPHIC block, not full-bleed background media).
+   - STILL ANIMATE — a collage must not sit frozen: stagger a spring() entrance across the cells
+     (each cell scales/fades in a few frames after the previous), and apply a subtle continuous
+     Ken Burns (scale ~1.0→1.04) to the whole collage or to the feature cell. A static grid is WRONG.
+   - Text overlay (if any) sits in the gap/margin or over the feature cell with a scrim behind it —
+     never covering faces across multiple cells.
 
 OUTPUT FORMAT:
 Write the COMPLETE Reel.tsx file inside a single \`\`\`tsx code fence.
@@ -977,8 +1006,31 @@ type EditCompositionInput = {
   logoProfile?: LogoProfile;
   hasFooter?: boolean;
   hasMusic: boolean;
+  /**
+   * Optional user-attached reference images (annotated frames/screenshots that
+   * point at the exact scene or element to change). Passed to Codex as vision
+   * inputs alongside the edit request.
+   */
+  referenceImages?: Buffer[];
   timeoutMs?: number;
 };
+
+/** Write reference-image buffers into a workDir; returns their file paths. */
+async function writeReferenceImages(workDir: string, buffers?: Buffer[]): Promise<string[]> {
+  const paths: string[] = [];
+  for (let i = 0; i < (buffers?.length ?? 0); i++) {
+    const p = path.join(workDir, `reference-${i + 1}.png`);
+    await fs.writeFile(p, buffers![i]);
+    paths.push(p);
+  }
+  return paths;
+}
+
+/** Prompt block describing user-attached reference images (empty if none). */
+function referenceImageGuidance(count: number): string {
+  if (count <= 0) return "";
+  return `\nATTACHED — ${count} user REFERENCE image(s) (reference-1.png…): annotated screenshots the user marked up to point at the EXACT scene/element the request is about. LOOK at them to locate precisely what to change and where.\n`;
+}
 
 /** Files the composition is allowed to reference, formatted for an edit prompt. */
 function editMediaLines(input: EditCompositionInput): string {
@@ -1033,12 +1085,14 @@ async function editCompositionSurgical(input: EditCompositionInput): Promise<Com
   const workDir = path.join(os.tmpdir(), "codex-edit", `${process.pid}-${Date.now()}-sr`);
   await fs.mkdir(workDir, { recursive: true });
   try {
+    const refPaths = await writeReferenceImages(workDir, input.referenceImages);
     let feedback = "";
     for (let attempt = 1; attempt <= 2; attempt++) {
       const prompt = `You are editing a WORKING Remotion composition (React/TypeScript) for an Instagram Reel. Make the SMALLEST change that satisfies the user's request by emitting SEARCH/REPLACE blocks. Do NOT output the whole file. Do NOT touch anything the request doesn't mention.
 
 USER'S EDIT REQUEST:
 "${input.instruction}"
+${referenceImageGuidance(refPaths.length)}
 
 CURRENT Reel.tsx:
 \`\`\`tsx
@@ -1065,9 +1119,9 @@ BLOCK RULES:
 ${input.hasLogo ? `7. If you touch the logo, keep its longest visible edge ${LOGO_MIN_PX}px–${LOGO_MAX_PX}px (size the <Img> itself, objectFit:"contain"; never a padded square card).\n` : ""}8. Keep text/logo inside the safe area (≥${SAFE_TOP_PX}px top, ≥${SAFE_SIDE_PX}px sides, ≥${SAFE_RIGHT_PX}px right, ≥${SAFE_BOTTOM_PX}px bottom); no font smaller than ${MIN_FONT_PX}px.
 ${feedback}BEGIN:`;
 
-      console.log(`[Edit] Surgical attempt ${attempt}/2 — requesting SEARCH/REPLACE blocks (${prompt.length} chars)`);
+      console.log(`[Edit] Surgical attempt ${attempt}/2 — requesting SEARCH/REPLACE blocks (${prompt.length} chars, ${refPaths.length} reference image(s))`);
       const outFile = path.join(workDir, `sr${attempt}.txt`);
-      await runCodexCapture(prompt, outFile, workDir, timeoutMs);
+      await runCodexCapture(prompt, outFile, workDir, timeoutMs, refPaths);
       const raw = (await fs.readFile(outFile, "utf8")).trim();
       const blocks = parseSearchReplaceBlocks(raw);
       if (blocks.length === 0) {
@@ -1114,10 +1168,12 @@ async function editCompositionFullFile(input: EditCompositionInput): Promise<Com
   await fs.mkdir(workDir, { recursive: true });
 
   try {
+    const refPaths = await writeReferenceImages(workDir, input.referenceImages);
     const prompt = `You are editing a WORKING Remotion composition (React/TypeScript) for an Instagram Reel based on a user's request. Apply ONLY the requested change; keep everything else (structure, other scenes, branding, timing not affected) intact.
 
 USER'S EDIT REQUEST:
 "${input.instruction}"
+${referenceImageGuidance(refPaths.length)}
 
 CURRENT Reel.tsx:
 \`\`\`tsx
@@ -1144,8 +1200,8 @@ OUTPUT: the COMPLETE updated Reel.tsx inside a single \`\`\`tsx code fence.
 
 BEGIN:`;
 
-    console.log(`[Edit] Asking Codex to apply edit — ${prompt.length} chars prompt`);
-    const code = await runCodexForCode("Edit", prompt, workDir, timeoutMs);
+    console.log(`[Edit] Asking Codex to apply edit — ${prompt.length} chars prompt, ${refPaths.length} reference image(s)`);
+    const code = await runCodexForCode("Edit", prompt, workDir, timeoutMs, refPaths);
     console.log(`[Edit] Got ${code.reelTsx.length} chars edited Reel.tsx`);
     return code;
   } finally {

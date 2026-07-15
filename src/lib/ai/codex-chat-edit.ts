@@ -94,6 +94,12 @@ export type CodexChatEditInput = {
   currentPoster: Buffer;
   /** The user's edit instruction (e.g., "Remove the logo in the middle"). */
   editMessage: string;
+  /**
+   * Optional user-attached reference images (annotated screenshots pointing at
+   * the exact area/element to change). Shown to Codex alongside the current
+   * poster so the edit is targeted.
+   */
+  referenceImages?: Buffer[];
   /** Image size (e.g., "1024x1536"). */
   size?: string;
   timeoutMs?: number;
@@ -115,10 +121,22 @@ export async function codexChatEdit(input: CodexChatEditInput): Promise<string> 
     const posterPath = path.join(workDir, "current-poster.png");
     await fs.writeFile(posterPath, input.currentPoster);
 
+    // Write any user-attached reference/annotation images so Codex can see them too.
+    const refImages = input.referenceImages ?? [];
+    const refPaths: string[] = [];
+    for (let i = 0; i < refImages.length; i++) {
+      const rp = path.join(workDir, `reference-${i + 1}.png`);
+      await fs.writeFile(rp, refImages[i]);
+      refPaths.push(rp);
+    }
+    const referenceNote = refPaths.length
+      ? `\nThe user also attached ${refPaths.length} REFERENCE image(s) (reference-1.png…). These are annotations/screenshots the user marked up to point at the EXACT element or area they want changed. Use them to locate precisely what the request refers to.\n`
+      : "";
+
     const prompt = `I am attaching the CURRENT version of an Instagram poster image (current-poster.png).
 
 LOOK at this poster carefully. Study every element: the layout, colors, text, images, header, footer, logo placement, and overall composition.
-
+${referenceNote}
 The user wants this SPECIFIC change made:
 "${input.editMessage}"
 
@@ -137,7 +155,7 @@ Generate exactly one edited poster image with the built-in image tool.`;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const start = Date.now();
-        await runCodex(prompt, [posterPath], workDir, timeoutMs);
+        await runCodex(prompt, [posterPath, ...refPaths], workDir, timeoutMs);
         const newest = await newestImageSince(start);
         if (!newest) {
           throw new Error("Codex chat-edit produced no image");

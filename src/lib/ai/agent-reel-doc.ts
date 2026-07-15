@@ -235,8 +235,14 @@ export async function editReelDoc(input: {
   hasLogo: boolean;
   hasFooter: boolean;
   hasMusic: boolean;
+  /** User-attached reference/annotation images pointing at the exact scene/element to change. */
+  referenceImages?: Buffer[];
   timeoutMs?: number;
 }): Promise<ReelDoc> {
+  const refImages = (input.referenceImages ?? []).map((buffer) => ({ buffer, detail: "high" as const }));
+  const referenceNote = refImages.length
+    ? `\n\nATTACHED: ${refImages.length} user REFERENCE image(s) — annotated screenshots/frames the user marked up to point at the EXACT scene or element the request is about. Use them to locate precisely what to change.`
+    : "";
   const available = new Set<string>([
     ...[...input.mediaManifest.keys()].map((f) => `media/${f}`),
     ...(input.hasLogo ? ["media/logo.png"] : []),
@@ -252,7 +258,7 @@ export async function editReelDoc(input: {
       const prompt = `You are editing an existing Instagram Reel described as a structured JSON document (a "ReelDoc"). Apply ONLY the user's requested change and keep EVERYTHING else byte-for-byte identical — same scenes, same order, same durations, same element positions/text/colors — except what the request touches. Output ONLY the full updated JSON object (no prose, no code fence).
 
 USER'S EDIT REQUEST:
-"${input.instruction}"
+"${input.instruction}"${referenceNote}
 
 CURRENT ReelDoc:
 ${JSON.stringify(input.doc)}
@@ -269,8 +275,8 @@ RULES:
 
 Output the full updated JSON now:`;
 
-      console.log(`[ReelDoc] Edit attempt ${attempt}/2 — asking Codex to mutate the doc (${input.doc.scenes.length} scenes)`);
-      const raw = await codexText({ prompt, timeoutMs: input.timeoutMs });
+      console.log(`[ReelDoc] Edit attempt ${attempt}/2 — asking Codex to mutate the doc (${input.doc.scenes.length} scenes, ${refImages.length} reference image(s))`);
+      const raw = await codexText({ prompt, images: refImages, timeoutMs: input.timeoutMs });
       const parsed = JSON.parse(stripJsonFences(raw));
       const result = ReelDocSchema.safeParse(parsed);
       if (!result.success) {

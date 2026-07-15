@@ -9,6 +9,7 @@ type ChatEditEvent = {
     requestId: string;
     message: string;
     pageIndex: number | null;
+    attachmentPaths?: string[];
   };
 };
 
@@ -23,7 +24,7 @@ export const aiChatEdit = inngest.createFunction(
     triggers: [{ event: "ai/chat.edit" }],
   },
   async ({ event }: { event: { data: ChatEditEvent["data"] } }) => {
-    const { variationId, message, pageIndex } = event.data;
-    await runChatEdit({ variationId, message, pageIndex });
+    const { variationId, message, pageIndex, attachmentPaths } = event.data;
+    await runChatEdit({ variationId, message, pageIndex, attachmentPaths });
   },
 );

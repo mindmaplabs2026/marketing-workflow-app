@@ -4,6 +4,16 @@ import { getModelClient } from "./model-client";
 import type { UnderstandingOutput } from "./agent-understanding";
 import type { CostTracker } from "./cost-tracker";
 
+/**
+ * Named collage layouts a scene may use to show SEVERAL photos in one frame.
+ * The number in the name is the cell count the layout is designed to fill:
+ *  - "split2"    → 2 photos (side-by-side or stacked)
+ *  - "triptych3" → 3 photos (three columns, or one feature + two)
+ *  - "grid4"     → 4 photos (2×2 grid)
+ *  - "mosaic6"   → 5-6 photos (one wide feature + a mosaic of smaller cells)
+ */
+export type CollageLayout = "split2" | "triptych3" | "grid4" | "mosaic6";
+
 /** A single scene beat in the reel script. */
 export type SceneBeat = {
   index: number;
@@ -12,6 +22,17 @@ export type SceneBeat = {
   durationSec: number;
   trimStartSec?: number;
   trimEndSec?: number;
+  /**
+   * COLLAGE scene: show multiple photos at once as a grid instead of a single
+   * full-bleed image. IMAGES ONLY — never videos. When set, `mediaPath` is the
+   * first/feature photo and `mediaPaths` lists EVERY photo in the collage
+   * (including the feature), 2-6 entries, matching the cell count of `layout`.
+   * Omit entirely for a normal single-media scene.
+   */
+  collage?: {
+    layout: CollageLayout;
+    mediaPaths: string[];
+  };
   focusX: number;
   focusY: number;
   /** Video scene whose clip contains spoken words → play the clip's own audio and
@@ -193,7 +214,9 @@ DURATION RULES:
 - NEVER exceed 300 seconds (5 minutes) total regardless of requested duration.
 
 MEDIA ASSIGNMENT RULES:
-- The curated list is a list of ENTRIES. Each entry becomes exactly ONE scene.
+- The curated list is a list of ENTRIES. Each entry becomes exactly ONE scene —
+  EXCEPT that you may group several IMAGE entries into a single COLLAGE scene
+  (see COLLAGE SCENES below). Video entries are never grouped.
 - A long video may appear as SEVERAL entries, each with a DIFFERENT suggested trim
   window (e.g. the same .mp4 at 0-8s, then 40-48s, then 95-103s). This is intentional:
   treat each entry as its own distinct scene using ITS OWN trim window. Do NOT collapse
@@ -214,6 +237,32 @@ MEDIA ASSIGNMENT RULES:
   Videos should use their natural duration within the trim window (don't force them to 3s if they have 6s of good content).
 - For IMAGES: specify Ken Burns direction (zoom in, pan left, etc.). Images typically get 3-5s per scene.
 - focusX/focusY are 0-100 percentage values for the focal point
+
+COLLAGE SCENES (show several photos at once — USE THIS when you have plenty of images):
+- A collage scene packs MULTIPLE photos into ONE frame as a grid, instead of a
+  single full-bleed image. It is the right move for montage/highlights beats and
+  for grouping thematically-related shots (e.g. four sports moments, three craft
+  close-ups) so the reel doesn't feel like an endless one-photo-at-a-time slideshow.
+- COLLAGES ARE FOR IMAGES ONLY — never put a video in a collage.
+- When an image-heavy reel has clearly relatable groups of photos, turn SOME of the
+  image scenes (roughly 1 in 3 to 1 in 2 of them, NOT all) into collages. Keep your
+  strongest single photos as their own full-bleed scenes for impact — collages are a
+  variation in the rhythm, not the default for every image.
+- Available layouts (pick by how many photos the group has):
+    • "split2"    — 2 photos. Two clean cells, side-by-side or stacked.
+    • "triptych3" — 3 photos. Three columns, or one feature + two.
+    • "grid4"     — 4 photos. A 2×2 grid.
+    • "mosaic6"   — 5-6 photos. One wide feature photo + a mosaic of smaller cells.
+- To make a collage scene: set mediaType "image", set "mediaPath" to the FEATURE
+  (first) photo, and add a "collage" object: { "layout": "...", "mediaPaths": [ ... ] }
+  where mediaPaths lists EVERY photo in the collage INCLUDING the feature, in display
+  order. The count MUST match the layout (2 for split2, 3 for triptych3, 4 for grid4,
+  5-6 for mosaic6).
+- Each photo is still used ONCE across the whole reel: a photo placed in a collage
+  must NOT also appear as its own scene or in another collage.
+- Give collage scenes a touch more time (4-6s) since there is more for the eye to read.
+- Group photos in a collage that belong together (same activity/theme/moment). Do NOT
+  mix unrelated photos just to fill cells.
 
 TEXT OVERLAY PLACEMENT (CRITICAL — avoid covering faces and subjects):
 - The textOverlay position MUST be chosen based on focusY (where the subject is):
@@ -297,6 +346,7 @@ Return ONLY valid JSON matching this schema:
       "durationSec": number,
       "trimStartSec": number (for videos),
       "trimEndSec": number (for videos),
+      "collage": { "layout": "split2|triptych3|grid4|mosaic6", "mediaPaths": ["path1", "path2", "..."] } (OPTIONAL — images only; omit for single-media scenes; mediaPaths includes the feature path and its count must match the layout),
       "containsSpeech": true_or_false (copy from the curated video entry),
       "focusX": 50, "focusY": 50,
       "kenBurns": { "direction": "in|out|left|right", "intensity": "subtle|moderate|dramatic" },
