@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type ChatMessage = {
   id: string;
@@ -172,13 +173,22 @@ export function VariationChat({
     if (attachments.length > 0) {
       setUploading(true);
       try {
+        const supabase = createClient();
         for (const a of attachments) {
-          const fd = new FormData();
-          fd.append("variation_id", variationId);
-          fd.append("file", a.file);
-          const upRes = await fetch("/api/ai/chat/attachment", { method: "POST", body: fd });
-          const upData = (await upRes.json()) as { path?: string; error?: string };
-          if (!upRes.ok || !upData.path) throw new Error(upData.error ?? "Attachment upload failed.");
+          // 1) Ask the API for a signed upload URL (tiny JSON — no file bytes,
+          //    so it never hits the platform's request-body limit).
+          const upRes = await fetch("/api/ai/chat/attachment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ variation_id: variationId, content_type: a.file.type, size: a.file.size }),
+          });
+          const upData = (await upRes.json()) as { path?: string; token?: string; error?: string };
+          if (!upRes.ok || !upData.path || !upData.token) throw new Error(upData.error ?? "Attachment upload failed.");
+          // 2) Upload the file DIRECTLY to Supabase Storage (bypasses the function).
+          const { error: putErr } = await supabase.storage
+            .from("designs")
+            .uploadToSignedUrl(upData.path, upData.token, a.file, { contentType: a.file.type });
+          if (putErr) throw new Error(`Upload failed: ${putErr.message}`);
           attachmentPaths.push(upData.path);
         }
       } catch (e) {

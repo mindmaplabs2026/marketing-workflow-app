@@ -3,12 +3,16 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * POST /api/ai/chat/attachment  (multipart/form-data)
- * Fields: variation_id (string), file (image)
+ * POST /api/ai/chat/attachment  (application/json)
+ * Body: { variation_id: string, content_type: string, size?: number }
  *
- * Uploads a user-attached reference/annotation image to the `designs` bucket and
- * returns its storage path. The chat POST then carries these paths in
- * `attachment_paths` so the edit engine can see the annotations.
+ * Issues a short-lived SIGNED UPLOAD URL for the `designs` bucket so the browser
+ * can upload the reference/annotation image DIRECTLY to Supabase Storage — the
+ * bytes never pass through this function. (Uploading via the function tripped
+ * Vercel's ~4.5 MB request-body limit → an opaque 413 for larger images.)
+ *
+ * Returns { path, token }; the client uploads with storage.uploadToSignedUrl().
+ * The chat POST then carries these paths in `attachment_paths`.
  */
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -23,26 +27,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 
-  let form: FormData;
+  let body: { variation_id?: unknown; content_type?: unknown; size?: unknown };
   try {
-    form = await request.formData();
+    body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Expected multipart form data." }, { status: 400 });
+    return NextResponse.json({ error: "Expected JSON body." }, { status: 400 });
   }
 
-  const variationId = form.get("variation_id");
-  const file = form.get("file");
+  const variationId = body.variation_id;
+  const contentType = body.content_type;
+  const size = body.size;
 
   if (typeof variationId !== "string" || !variationId) {
     return NextResponse.json({ error: "variation_id is required." }, { status: 400 });
   }
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "file is required." }, { status: 400 });
-  }
-  if (!ALLOWED.includes(file.type)) {
+  if (typeof contentType !== "string" || !ALLOWED.includes(contentType)) {
     return NextResponse.json({ error: "Only PNG, JPEG, WEBP or GIF images are allowed." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) {
+  if (typeof size === "number" && size > MAX_BYTES) {
     return NextResponse.json({ error: "Image must be 10 MB or smaller." }, { status: 400 });
   }
 
@@ -76,21 +78,16 @@ export async function POST(request: Request) {
   }
 
   const schoolId = req?.school_id ?? "unknown";
-  const ext = file.type === "image/jpeg" ? "jpg" : file.type.split("/")[1] ?? "png";
+  const ext = contentType === "image/jpeg" ? "jpg" : contentType.split("/")[1] ?? "png";
   const storagePath = `${schoolId}/${variation.request_id}/ai/${variation.variation_index}/chat-uploads/${Date.now()}-${Math.round(Math.random() * 1e9)}.${ext}`;
 
-  const buffer = Buffer.from(await file.arrayBuffer());
   const admin = createAdminClient();
-  const { error: uploadErr } = await admin.storage.from("designs").upload(storagePath, buffer, {
-    contentType: file.type,
-    upsert: false,
-  });
-  if (uploadErr) {
-    return NextResponse.json({ error: `Upload failed: ${uploadErr.message}` }, { status: 500 });
+  const { data: signed, error: signErr } = await admin.storage
+    .from("designs")
+    .createSignedUploadUrl(storagePath);
+  if (signErr || !signed) {
+    return NextResponse.json({ error: `Could not create upload URL: ${signErr?.message ?? "unknown"}` }, { status: 500 });
   }
 
-  // Return a short-lived signed URL too, so the client can preview it immediately.
-  const { data: signed } = await admin.storage.from("designs").createSignedUrl(storagePath, 3600);
-
-  return NextResponse.json({ path: storagePath, url: signed?.signedUrl ?? null });
+  return NextResponse.json({ path: storagePath, token: signed.token });
 }
