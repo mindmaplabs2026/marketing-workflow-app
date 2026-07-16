@@ -444,7 +444,10 @@ export function VariationChat({
                 {msg.imageUrls.length > 0 && (
                   <div className="mt-2 flex gap-2">
                     {msg.imageUrls.map((url, i) => (
-                      posterType === "reel" ? (
+                      // Only the assistant's reel OUTPUT is a video. A user message's
+                      // imageUrls are attached reference photos (always images), even
+                      // in a reel chat — so never wrap those in <video>.
+                      posterType === "reel" && msg.role !== "user" ? (
                         <video
                           key={i}
                           controls
@@ -456,7 +459,7 @@ export function VariationChat({
                         <img
                           key={i}
                           src={url}
-                          alt="Updated poster"
+                          alt={msg.role === "user" ? "Reference image" : "Updated poster"}
                           onClick={() => setLightbox({ urls: msg.imageUrls, index: i })}
                           className="h-40 w-auto cursor-pointer rounded-lg border border-zinc-200 object-contain hover:opacity-80 dark:border-zinc-700"
                         />
