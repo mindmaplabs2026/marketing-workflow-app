@@ -453,6 +453,21 @@ async function runReelChatEdit(
     } else if (a.asset_type === "footer") { mediaFiles.set("footer.png", buf); hasFooter = true; }
   }
 
+  // User-attached reference images. For a REEL these must be BOTH shown to the
+  // editor (vision) AND made real render assets: an instruction like "replace the
+  // first image with the attached one" needs staticFile("media/attachment-N.png")
+  // to actually exist in the bundle — otherwise the render 404s on it. They stay
+  // annotation-only unless the edit explicitly asks to insert/replace with them.
+  referenceImages.forEach((buf, i) => {
+    const fn = `attachment-${i + 1}.png`;
+    mediaFiles.set(fn, buf);
+    mediaManifest.set(fn, {
+      type: "image",
+      description:
+        "user-attached image — use as new media (an <Img>/scene source) ONLY if the edit asks to insert/replace with the attached image; otherwise it is an annotation for locating the change, do NOT add it to the video",
+    });
+  });
+
   // Music — reuse the persisted track so the soundtrack stays identical across
   // edits. Only re-discover when the user explicitly asks to change it.
   let musicPath = brief._musicPath as string | undefined;

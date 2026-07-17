@@ -240,8 +240,9 @@ export async function editReelDoc(input: {
   timeoutMs?: number;
 }): Promise<ReelDoc> {
   const refImages = (input.referenceImages ?? []).map((buffer) => ({ buffer, detail: "high" as const }));
+  const refNames = refImages.map((_, i) => `media/attachment-${i + 1}.png`).join(", ");
   const referenceNote = refImages.length
-    ? `\n\nATTACHED: ${refImages.length} user REFERENCE image(s) — annotated screenshots/frames the user marked up to point at the EXACT scene or element the request is about. Use them to locate precisely what to change.`
+    ? `\n\nATTACHED: ${refImages.length} user-provided image(s), shown to you here AND listed in FILES as render assets: ${refNames}. If the request asks to INSERT or REPLACE an image WITH the attached one, set that scene's image element src to the matching "media/attachment-N.png". Otherwise treat them ONLY as annotations to locate what to change — do NOT add them to the reel. Reference ONLY the exact paths listed in FILES; never invent one.`
     : "";
   const available = new Set<string>([
     ...[...input.mediaManifest.keys()].map((f) => `media/${f}`),

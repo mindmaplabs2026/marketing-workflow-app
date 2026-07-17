@@ -1019,17 +1019,22 @@ type EditCompositionInput = {
 async function writeReferenceImages(workDir: string, buffers?: Buffer[]): Promise<string[]> {
   const paths: string[] = [];
   for (let i = 0; i < (buffers?.length ?? 0); i++) {
-    const p = path.join(workDir, `reference-${i + 1}.png`);
+    const p = path.join(workDir, `attachment-${i + 1}.png`);
     await fs.writeFile(p, buffers![i]);
     paths.push(p);
   }
   return paths;
 }
 
-/** Prompt block describing user-attached reference images (empty if none). */
+/** Prompt block describing user-attached images (empty if none). */
 function referenceImageGuidance(count: number): string {
   if (count <= 0) return "";
-  return `\nATTACHED — ${count} user REFERENCE image(s) (reference-1.png…): annotated screenshots the user marked up to point at the EXACT scene/element the request is about. LOOK at them to locate precisely what to change and where.\n`;
+  const names = Array.from({ length: count }, (_, i) => `staticFile("media/attachment-${i + 1}.png")`).join(", ");
+  return `\nATTACHED — ${count} user-provided image(s), shown to you here AND present in the FILES list as render assets: ${names}.
+- These are the user's own annotations/reference photos for THIS edit.
+- If the request asks to INSERT or REPLACE media WITH the attached image, use the matching staticFile("media/attachment-N.png") as the <Img> src (images only — <Img> from "remotion", never <Video>).
+- Otherwise treat them ONLY as ANNOTATIONS: look at them to locate exactly what to change, and do NOT add them to the video.
+- Reference render assets ONLY by the exact paths in the FILES list. NEVER invent a path like "reference-1.png" or omit the "media/" prefix.\n`;
 }
 
 /** Files the composition is allowed to reference, formatted for an edit prompt. */
