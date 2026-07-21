@@ -13,6 +13,7 @@ import { CollapsibleRows } from "@/components/collapsible-rows";
 import { MotionSurface } from "@/components/premium-motion";
 import { RequestRowActions } from "@/components/request-row-actions";
 import { AnimatedNumber } from "@/components/animated-number";
+import { OverviewRangeFilter } from "@/components/overview-range-filter";
 
 const SECTION_PAGE_SIZE = 10;
 const SECTION_COLLAPSED_ROWS = 3;
@@ -210,6 +211,54 @@ function normalizedOverviewRange(value: string | undefined): OverviewRange {
     : "this-week";
 }
 
+/** Parse a YYYY-MM-DD query value as a local date (midnight). */
+function parseDateOnly(value: string | undefined): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+type OverviewRangeMeta = {
+  label: string;
+  comparisonLabel: string;
+  start: Date;
+  end: Date;
+  previousStart: Date;
+  previousEnd: Date;
+};
+
+/**
+ * Meta for `overview=custom&from=…&to=…`: the inclusive from→to window, compared
+ * against the equal-length period immediately before it. Returns null unless both
+ * dates are valid (so a malformed URL falls back to the preset ranges).
+ */
+function customOverviewRangeMeta(
+  overview: string | undefined,
+  fromParam: string | undefined,
+  toParam: string | undefined,
+): OverviewRangeMeta | null {
+  if (overview !== "custom") return null;
+  let from = parseDateOnly(fromParam);
+  let to = parseDateOnly(toParam);
+  if (!from || !to) return null;
+  if (from > to) [from, to] = [to, from];
+  const end = new Date(to);
+  end.setDate(to.getDate() + 1); // end is exclusive
+  const days = Math.round((end.getTime() - from.getTime()) / 86_400_000);
+  const previousStart = new Date(from);
+  previousStart.setDate(from.getDate() - days);
+  const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return {
+    label: `${fmt(from)} – ${fmt(to)}`,
+    comparisonLabel: `vs previous ${days} day${days === 1 ? "" : "s"}`,
+    start: from,
+    end,
+    previousStart,
+    previousEnd: from,
+  };
+}
+
 function RequestIcon({ type, className }: { type: "needs" | "design" | "review" | "published"; className?: string }) {
   if (type === "needs") {
     return (
@@ -341,7 +390,7 @@ export default async function RequestsListPage({
   searchParams,
 }: {
   searchParams: Promise<
-    { school?: string; q?: string; overview?: string } & Partial<
+    { school?: string; q?: string; overview?: string; from?: string; to?: string } & Partial<
       Record<(typeof SECTION_PAGE_KEYS)[SectionKey], string>
     >
   >;
@@ -350,6 +399,7 @@ export default async function RequestsListPage({
   const schoolFilter = params.school ?? "";
   const rawQuery = params.q ?? "";
   const searchQuery = rawQuery.trim().toLowerCase();
+  const customOverviewMeta = customOverviewRangeMeta(params.overview, params.from, params.to);
   const overviewRange = normalizedOverviewRange(params.overview);
 
   const sectionPages: Record<SectionKey, number> = {
@@ -494,7 +544,7 @@ export default async function RequestsListPage({
   const previous30Start = new Date(last30Start);
   previous30Start.setDate(last30Start.getDate() - 30);
   const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const overviewRangeMeta = {
+  const overviewRangeMeta: OverviewRangeMeta = customOverviewMeta ?? {
     "this-week": {
       label: "This week",
       comparisonLabel: "vs last week",
@@ -780,7 +830,7 @@ export default async function RequestsListPage({
 
             <Panel
               title="Request overview"
-              action={<OverviewRangeFilter />}
+              action={<OverviewRangeFilter presets={OVERVIEW_RANGE_OPTIONS} />}
               className="md:hidden"
             >
               <p className="text-xs font-medium text-zinc-500">Total requests</p>
@@ -898,7 +948,7 @@ export default async function RequestsListPage({
           <aside className="min-w-0 space-y-4 xl:-mt-8">
             <Panel
               title="Request overview"
-              action={<OverviewRangeFilter />}
+              action={<OverviewRangeFilter presets={OVERVIEW_RANGE_OPTIONS} />}
               className="hidden md:block"
             >
               <p className="text-xs font-medium text-zinc-500">Total requests</p>
@@ -1206,18 +1256,6 @@ function Panel({
       </div>
       {children}
     </MotionSurface>
-  );
-}
-
-function OverviewRangeFilter() {
-  return (
-    <SelectFilter
-      paramName="overview"
-      ariaLabel="Filter request overview range"
-      allLabel="This week"
-      options={OVERVIEW_RANGE_OPTIONS.filter((item) => item.value !== "this-week")}
-      className="h-8 rounded-lg border border-slate-200 bg-white/70 px-2.5 text-xs font-medium text-slate-600 shadow-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
-    />
   );
 }
 
