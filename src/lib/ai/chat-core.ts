@@ -64,15 +64,18 @@ export async function runChatEdit({ variationId, message, pageIndex, attachmentP
   if (!variation) throw new Error("Variation not found");
   const requestId = variation.request_id;
 
+  // Route reel edits to the reel-specific chat path. Reels get the raw storage
+  // paths, not buffers: attachments are staged as render assets and must persist
+  // across rounds, so the reel path merges them with the variation's persisted
+  // attachment list and manages its own downloads.
+  if (variation.poster_type === "reel") {
+    await runReelChatEdit(variation, message, attachmentPaths ?? []);
+    return;
+  }
+
   // User-attached reference/annotation images (best-effort — a missing one just
   // means that engine gets fewer references, never a hard failure).
   const referenceImages = await downloadAttachments(admin, attachmentPaths);
-
-  // Route reel edits to the reel-specific chat path
-  if (variation.poster_type === "reel") {
-    await runReelChatEdit(variation, message, referenceImages);
-    return;
-  }
   console.log(`[chat-edit] Variation v${variation.variation_index}, ${variation.poster_type}, ${variation.storage_paths.length} pages, round ${variation.chat_rounds_used + 1}/25`);
 
   // Determine which page to edit.
@@ -334,7 +337,7 @@ async function runReelChatEdit(
     creative_brief: unknown;
   },
   message: string,
-  referenceImages: Buffer[] = [],
+  attachmentPaths: string[] = [],
 ): Promise<void> {
   const startTime = Date.now();
   const admin = createAdminClient();
@@ -354,7 +357,7 @@ async function runReelChatEdit(
   // Step 1: Get text confirmation of the edit
   const { data: history } = await admin
     .from("ai_chat_messages")
-    .select("role, content")
+    .select("role, content, image_paths")
     .eq("variation_id", variation.id)
     .order("created_at", { ascending: true });
 
@@ -458,15 +461,46 @@ async function runReelChatEdit(
   // first image with the attached one" needs staticFile("media/attachment-N.png")
   // to actually exist in the bundle — otherwise the render 404s on it. They stay
   // annotation-only unless the edit explicitly asks to insert/replace with them.
-  referenceImages.forEach((buf, i) => {
+  //
+  // Attachments PERSIST across rounds, derived from the chat history itself
+  // (every user message's image_paths) — retroactive for existing variations, no
+  // new field needed. The bundle is rebuilt per round, so without this a
+  // composition that inserted media/attachment-1.png in round N would 404 in
+  // round N+1, and a follow-up like "you still haven't used the photo I attached"
+  // is impossible to satisfy — the photo is no longer staged. History is
+  // append-only, so attachment indices stay stable across rounds and staticFile
+  // refs from earlier rounds keep resolving. The current message is already in
+  // history (inserted at POST time); the param is unioned in as a safety net.
+  const historyAttachmentPaths = (history ?? [])
+    .filter((m) => m.role === "user")
+    .flatMap((m) => (m.image_paths as string[] | null) ?? [])
+    .filter((p) => !!p);
+  const allAttachmentPaths = [
+    ...new Set([...historyAttachmentPaths, ...attachmentPaths.filter((p) => !!p)]),
+  ];
+  const currentPaths = new Set(attachmentPaths);
+  const referenceImages: Buffer[] = [];
+  for (let i = 0; i < allAttachmentPaths.length; i++) {
+    const buf = await downloadWithRetry("designs", allAttachmentPaths[i]);
+    if (!buf) {
+      console.warn(`[reel-chat] attachment ${i + 1} (${allAttachmentPaths[i]}) unavailable — skipping`);
+      continue;
+    }
+    referenceImages.push(buf);
     const fn = `attachment-${i + 1}.png`;
+    const fromEarlierRound = !currentPaths.has(allAttachmentPaths[i]);
     mediaFiles.set(fn, buf);
     mediaManifest.set(fn, {
       type: "image",
-      description:
-        "user-attached image — use as new media (an <Img>/scene source) ONLY if the edit asks to insert/replace with the attached image; otherwise it is an annotation for locating the change, do NOT add it to the video",
+      description: fromEarlierRound
+        ? "user-attached image from an EARLIER chat round — may already be used by the composition; keep it available. Use as new media ONLY if the current edit asks for it; otherwise do not add it to the video"
+        : "user-attached image — use as new media (an <Img>/scene source) ONLY if the edit asks to insert/replace with the attached image; otherwise it is an annotation for locating the change, do NOT add it to the video",
     });
-  });
+  }
+  if (allAttachmentPaths.length > 0) {
+    const earlier = allAttachmentPaths.filter((p) => !currentPaths.has(p)).length;
+    console.log(`[reel-chat] Staged ${referenceImages.length}/${allAttachmentPaths.length} attachment(s) (${earlier} persisted from earlier rounds)`);
+  }
 
   // Music — reuse the persisted track so the soundtrack stays identical across
   // edits. Only re-discover when the user explicitly asks to change it.
@@ -533,6 +567,51 @@ async function runReelChatEdit(
 
   // Step 3+4: Apply the edit and re-render. Two paths by reel flavour; both produce
   // a `renderResult` and the composition-specific creative_brief fields to persist.
+  // SHADOW-MODE EDIT ANALYZER: reads the full conversation + frames of the current
+  // reel + attachments + the composition, and produces a structured EditSpec. The
+  // spec is LOGGED ONLY (worker log + assistant message metadata) — it does not
+  // drive the edit yet. Every real chat-edit becomes an eval case; once specs prove
+  // reliable, the editor switches to spec.instruction. Best-effort by design:
+  // any failure here must never affect the edit itself.
+  let shadowSpec: Record<string, unknown> | null = null;
+  try {
+    const currentMp4 = await downloadWithRetry("designs", variation.storage_paths[0]);
+    if (currentMp4) {
+      const { analyzeReelEdit } = await import("./agent-edit-analyzer");
+      const filesList = [
+        ...[...mediaManifest.entries()].map(([fn, i]) => `- media/${fn} (${i.type}) — ${i.description}`),
+        ...(hasLogo ? ["- media/logo.png (logo)"] : []),
+        ...(hasFooter ? ["- media/footer.png (footer strip)"] : []),
+        ...(hasMusic ? ["- music/track.mp3 (background music)"] : []),
+      ].join("\n");
+      const spec = await analyzeReelEdit({
+        history: (history ?? []).map((m) => ({
+          role: m.role,
+          content: m.content,
+          attachmentCount: m.role === "user" ? ((m.image_paths as string[] | null)?.length ?? 0) : 0,
+        })),
+        message,
+        compositionSource: isSchemaReel ? JSON.stringify(brief._reelDoc, null, 2) : compositionCode,
+        compositionKind: isSchemaReel ? "reeldoc-json" : "tsx",
+        filesList,
+        mp4: currentMp4,
+        attachments: referenceImages,
+        durationSec: reelScript.durationSec ?? 30,
+      });
+      if (spec) {
+        shadowSpec = spec as unknown as Record<string, unknown>;
+        console.log(`[reel-chat] [shadow-analyzer] ${spec.elapsedSec.toFixed(0)}s, confidence=${spec.confidence}, targets=${spec.targets.length}, anchors=[${spec.anchorMatches.join(",")}], missing=[${spec.missingAssets.join(",")}]`);
+        console.log(`[reel-chat] [shadow-analyzer] spec: ${JSON.stringify(spec)}`);
+      } else {
+        console.warn(`[reel-chat] [shadow-analyzer] no valid spec produced`);
+      }
+    } else {
+      console.warn(`[reel-chat] [shadow-analyzer] skipped — current mp4 unavailable`);
+    }
+  } catch (e) {
+    console.warn(`[reel-chat] [shadow-analyzer] failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+  }
+
   let renderResult: Awaited<ReturnType<typeof import("@/lib/remotion/render")["renderReelDoc"]>>;
   let usedFallback = false;
   let briefComposition: Record<string, unknown>;
@@ -615,7 +694,7 @@ async function runReelChatEdit(
     role: "assistant",
     content: assistantText,
     image_paths: [storagePath],
-    metadata: { model: isSchemaReel ? "codex-reeldoc" : "codex-composition", round, usedFallback },
+    metadata: { model: isSchemaReel ? "codex-reeldoc" : "codex-composition", round, usedFallback, shadowAnalyzer: shadowSpec },
   });
 
   await admin
