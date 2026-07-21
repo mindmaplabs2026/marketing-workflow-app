@@ -722,7 +722,7 @@ export default async function RequestsListPage({
 
           <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-lg">
-              <h1 className="text-3xl font-semibold leading-tight tracking-[-0.01em] text-slate-950 sm:text-[2.6rem]">Reguests in motion</h1>
+              <h1 className="text-3xl font-semibold leading-tight tracking-[-0.01em] text-slate-950 sm:text-[2.6rem]">Requests in motion</h1>
               <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-base">
                 Everything you need to plan, create and deliver impactful marketing.
               </p>
