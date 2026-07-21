@@ -15,7 +15,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * The chat POST then carries these paths in `attachment_paths`.
  */
 
-const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+// Matches the Supabase project's global file_size_limit (150 MB, paid plan) —
+// the storage layer enforces the same cap, so the two can't drift apart silently.
+const MAX_BYTES = 150 * 1024 * 1024; // 150 MB
 const ALLOWED = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 export async function POST(request: Request) {
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Only PNG, JPEG, WEBP or GIF images are allowed." }, { status: 400 });
   }
   if (typeof size === "number" && size > MAX_BYTES) {
-    return NextResponse.json({ error: "Image must be 10 MB or smaller." }, { status: 400 });
+    return NextResponse.json({ error: "Image must be 150 MB or smaller." }, { status: 400 });
   }
 
   const { data: variation } = await supabase
