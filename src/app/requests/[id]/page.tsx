@@ -475,9 +475,18 @@ export default async function RequestDetailPage({
   const canSendBack = isReviewer && req.status === "pending_admin_approval";
   const canPickUp =
     (role === "designer" || role === "super_admin") && req.status === "approved";
+  // Upload stays available while a design awaits review (the server action always
+  // allowed it — each upload just becomes the next version for the reviewer), and
+  // super admins can upload without being the assigned designer.
   const canUploadDesign =
-    isAssignedDesigner &&
-    (req.status === "in_design" || req.status === "changes_requested");
+    (isAssignedDesigner || isSuperAdmin) &&
+    (req.status === "in_design" ||
+      req.status === "changes_requested" ||
+      req.status === "design_pending_approval");
+  // Stage-chip label only: "Design in progress" would be misleading while the
+  // design is actually awaiting review.
+  const designInProgress =
+    canUploadDesign && req.status !== "design_pending_approval";
   const canApproveDesign = isReviewer && req.status === "design_pending_approval";
   const canRequestDesignChanges =
     isReviewer && req.status === "design_pending_approval";
@@ -758,7 +767,7 @@ export default async function RequestDetailPage({
                 ? "Ready for design"
                 : canApprove || canApproveDesign
                   ? "Needs approval"
-                  : canUploadDesign
+                  : designInProgress
                     ? "Design in progress"
                     : statusLabel}
             </div>
@@ -978,6 +987,11 @@ export default async function RequestDetailPage({
                 ? "Upload another revision"
                 : "Upload your design"}
           </p>
+          {req.status === "design_pending_approval" && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              The design is awaiting review — anything you upload now is added as the next version for the reviewer.
+            </p>
+          )}
           <UploadDesignForm requestId={req.id} schoolId={req.school_id} />
         </section>
       )}
@@ -1186,7 +1200,7 @@ export default async function RequestDetailPage({
                   ? "Ready for design"
                   : canApprove || canApproveDesign
                     ? "Needs approval"
-                    : canUploadDesign
+                    : designInProgress
                       ? "Design in progress"
                       : statusLabel}
               </div>

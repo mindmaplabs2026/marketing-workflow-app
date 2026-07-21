@@ -596,22 +596,56 @@ export async function attachDesign(formData: FormData) {
 
 export async function removeDesign(formData: FormData) {
   const designId = String(formData.get("design_id") ?? "");
-  const requestId = String(formData.get("request_id") ?? "");
-  const storagePath = String(formData.get("storage_path") ?? "");
-  if (!designId || !requestId || !storagePath) {
-    throw new Error("Missing design fields.");
-  }
+  if (!designId) throw new Error("Missing design fields.");
+
+  const actor = await loadActor();
+  if ("error" in actor) throw new Error(actor.error);
 
   const supabase = await createClient();
+  // Resolve request/storage from the DB row (not the form) so the action can
+  // only ever delete the file belonging to this design.
+  const { data: design } = await supabase
+    .from("designs")
+    .select("id, request_id, storage_path, uploaded_by")
+    .eq("id", designId)
+    .maybeSingle<{ id: string; request_id: string; storage_path: string; uploaded_by: string }>();
+  if (!design) throw new Error("Design not found.");
+  // Mirrors the RLS delete policy (owner or super admin) at the app layer.
+  if (design.uploaded_by !== actor.userId && actor.role !== "super_admin") {
+    throw new Error("Only the uploader or a super admin can remove a design.");
+  }
+
   const { error: dbErr } = await supabase
     .from("designs")
     .delete()
     .eq("id", designId);
   if (dbErr) throw new Error(dbErr.message);
 
-  await supabase.storage.from("designs").remove([storagePath]);
+  await supabase.storage.from("designs").remove([design.storage_path]);
 
-  revalidatePath(`/requests/${requestId}`);
+  // Deleting the last design while the request awaits review used to leave a
+  // dead end: design_pending_approval with nothing to review and (formerly) no
+  // upload form. Send the request back to in_design so the flow can continue.
+  const { count } = await supabase
+    .from("designs")
+    .select("id", { count: "exact", head: true })
+    .eq("request_id", design.request_id);
+  if ((count ?? 0) === 0) {
+    const { data: reqRow } = await supabase
+      .from("requests")
+      .select("status")
+      .eq("id", design.request_id)
+      .maybeSingle<{ status: RequestStatus }>();
+    if (reqRow?.status === "design_pending_approval") {
+      await supabase
+        .from("requests")
+        .update({ status: "in_design" })
+        .eq("id", design.request_id);
+      revalidatePath("/requests");
+    }
+  }
+
+  revalidatePath(`/requests/${design.request_id}`);
 }
 
 export async function approveDesign(formData: FormData) {
