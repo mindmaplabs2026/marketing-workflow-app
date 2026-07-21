@@ -26,7 +26,7 @@ const SECTION_PAGE_KEYS = {
 } as const;
 
 type SectionKey = keyof typeof SECTION_PAGE_KEYS;
-type OverviewRange = "this-week" | "last-week" | "last-30-days";
+type OverviewRange = "all-time" | "this-week" | "last-week" | "last-30-days";
 
 type RequestListRow = {
   id: string;
@@ -45,6 +45,7 @@ type ProfileLite = { id: string; full_name: string | null };
 
 
 const OVERVIEW_RANGE_OPTIONS: { value: OverviewRange; label: string }[] = [
+  { value: "all-time", label: "All time" },
   { value: "this-week", label: "This week" },
   { value: "last-week", label: "Last week" },
   { value: "last-30-days", label: "Last 30 days" },
@@ -208,7 +209,7 @@ function rowTimingDotClass(request: RequestListRow, todayUtcMs: number): string 
 function normalizedOverviewRange(value: string | undefined): OverviewRange {
   return OVERVIEW_RANGE_OPTIONS.some((item) => item.value === value)
     ? (value as OverviewRange)
-    : "this-week";
+    : "all-time";
 }
 
 /** Parse a YYYY-MM-DD query value as a local date (midnight). */
@@ -487,6 +488,67 @@ export default async function RequestsListPage({
     });
   }
 
+  // ── Global date-range filter ────────────────────────────────────────────
+  // The overview range (presets or custom from/to) filters the WHOLE page —
+  // tiles, section lists, high priority and the overview card — by created_at.
+  // "All time" (the default) applies no date filter.
+  const nowMs = Date.now();
+  const today = new Date(nowMs);
+  today.setHours(0, 0, 0, 0);
+  const dayIndex = (today.getDay() + 6) % 7;
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - dayIndex);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+  const lastWeekStart = new Date(weekStart);
+  lastWeekStart.setDate(weekStart.getDate() - 7);
+  const previousWeekStart = new Date(lastWeekStart);
+  previousWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const last30Start = new Date(today);
+  last30Start.setDate(today.getDate() - 29);
+  const nextDay = new Date(today);
+  nextDay.setDate(today.getDate() + 1);
+  const previous30Start = new Date(last30Start);
+  previous30Start.setDate(last30Start.getDate() - 30);
+  const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const presetOverviewMeta: Record<Exclude<OverviewRange, "all-time">, OverviewRangeMeta> = {
+    "this-week": {
+      label: "This week",
+      comparisonLabel: "vs last week",
+      start: weekStart,
+      end: weekEnd,
+      previousStart: lastWeekStart,
+      previousEnd: weekStart,
+    },
+    "last-week": {
+      label: "Last week",
+      comparisonLabel: "vs previous week",
+      start: lastWeekStart,
+      end: weekStart,
+      previousStart: previousWeekStart,
+      previousEnd: lastWeekStart,
+    },
+    "last-30-days": {
+      label: "Last 30 days",
+      comparisonLabel: "vs previous 30 days",
+      start: last30Start,
+      end: nextDay,
+      previousStart: previous30Start,
+      previousEnd: last30Start,
+    },
+  };
+  const overviewRangeMeta: OverviewRangeMeta | null =
+    customOverviewMeta ??
+    (overviewRange === "all-time" ? null : presetOverviewMeta[overviewRange]);
+  // Pre-range set: the comparison period lies OUTSIDE the selected range.
+  const requestsAllTime = requests;
+  if (overviewRangeMeta) {
+    requests = requests.filter((request) => {
+      const createdAt = new Date(request.created_at);
+      return createdAt >= overviewRangeMeta.start && createdAt < overviewRangeMeta.end;
+    });
+  }
+
   const needsYou: RequestListRow[] = [];
   const inFlight: RequestListRow[] = [];
   const published: RequestListRow[] = [];
@@ -525,59 +587,15 @@ export default async function RequestsListPage({
   const pendingReviewCount =
     (statusCounts.pending_admin_approval ?? 0) +
     (statusCounts.design_pending_approval ?? 0);
-  const nowMs = Date.now();
-  const today = new Date(nowMs);
-  today.setHours(0, 0, 0, 0);
-  const dayIndex = (today.getDay() + 6) % 7;
-  const weekStart = new Date(today);
-  weekStart.setDate(today.getDate() - dayIndex);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
-  const lastWeekStart = new Date(weekStart);
-  lastWeekStart.setDate(weekStart.getDate() - 7);
-  const previousWeekStart = new Date(lastWeekStart);
-  previousWeekStart.setDate(lastWeekStart.getDate() - 7);
-  const last30Start = new Date(today);
-  last30Start.setDate(today.getDate() - 29);
-  const nextDay = new Date(today);
-  nextDay.setDate(today.getDate() + 1);
-  const previous30Start = new Date(last30Start);
-  previous30Start.setDate(last30Start.getDate() - 30);
-  const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const overviewRangeMeta: OverviewRangeMeta = customOverviewMeta ?? {
-    "this-week": {
-      label: "This week",
-      comparisonLabel: "vs last week",
-      start: weekStart,
-      end: weekEnd,
-      previousStart: lastWeekStart,
-      previousEnd: weekStart,
-    },
-    "last-week": {
-      label: "Last week",
-      comparisonLabel: "vs previous week",
-      start: lastWeekStart,
-      end: weekStart,
-      previousStart: previousWeekStart,
-      previousEnd: lastWeekStart,
-    },
-    "last-30-days": {
-      label: "Last 30 days",
-      comparisonLabel: "vs previous 30 days",
-      start: last30Start,
-      end: nextDay,
-      previousStart: previous30Start,
-      previousEnd: last30Start,
-    },
-  }[overviewRange];
-  const overviewRequests = requests.filter((request) => {
-    const createdAt = new Date(request.created_at);
-    return createdAt >= overviewRangeMeta.start && createdAt < overviewRangeMeta.end;
-  });
-  const previousOverviewRequests = requests.filter((request) => {
-    const createdAt = new Date(request.created_at);
-    return createdAt >= overviewRangeMeta.previousStart && createdAt < overviewRangeMeta.previousEnd;
-  });
+  // The page's `requests` set is already range-filtered above, so the overview
+  // card simply reflects it. The comparison period comes from the PRE-range set.
+  const overviewRequests = requests;
+  const previousOverviewRequests = overviewRangeMeta
+    ? requestsAllTime.filter((request) => {
+        const createdAt = new Date(request.created_at);
+        return createdAt >= overviewRangeMeta.previousStart && createdAt < overviewRangeMeta.previousEnd;
+      })
+    : [];
   const overviewWeekdayCounts = Array.from({ length: 7 }, () => 0);
 
   for (const request of overviewRequests) {
@@ -601,13 +619,15 @@ export default async function RequestsListPage({
   const overviewTotal = overviewRequests.length;
   const overviewPercent = (value: number) =>
     overviewTotal > 0 ? Math.round((value / overviewTotal) * 100) : 0;
-  const overviewChange =
-    previousOverviewRequests.length > 0
+  // Comparison vs the previous period — only meaningful when a range is active.
+  const overviewChange = !overviewRangeMeta
+    ? null
+    : previousOverviewRequests.length > 0
       ? Math.round(((overviewTotal - previousOverviewRequests.length) / previousOverviewRequests.length) * 100)
       : overviewTotal > 0
         ? 100
         : 0;
-  const overviewChangePrefix = overviewChange >= 0 ? "+" : "-";
+  const overviewChangePrefix = (overviewChange ?? 0) >= 0 ? "+" : "-";
   const todayUtcMs = todayInKolkataUtcMs();
   const highPriority = requests
     .map((request) => ({
@@ -821,8 +841,8 @@ export default async function RequestsListPage({
               />
               <MetricCard
                 label="Published"
-                value={publishedLast30}
-                note="Last 30 days"
+                value={overviewRangeMeta ? published.length : publishedLast30}
+                note={overviewRangeMeta ? overviewRangeMeta.label : "Last 30 days"}
                 icon="published"
                 color="emerald"
               />
@@ -830,7 +850,7 @@ export default async function RequestsListPage({
 
             <Panel
               title="Request overview"
-              action={<OverviewRangeFilter presets={OVERVIEW_RANGE_OPTIONS} />}
+              action={<OverviewRangeFilter presets={OVERVIEW_RANGE_OPTIONS} defaultValue="all-time" />}
               className="md:hidden"
             >
               <p className="text-xs font-medium text-zinc-500">Total requests</p>
@@ -838,9 +858,11 @@ export default async function RequestsListPage({
                 <p className="text-3xl font-semibold text-zinc-950">
                   <AnimatedNumber value={overviewTotal} />
                 </p>
-                <p className={`pb-1 text-xs font-semibold ${overviewChange >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                  {overviewChangePrefix}<AnimatedNumber value={Math.abs(overviewChange)} suffix="%" /> {overviewRangeMeta.comparisonLabel}
-                </p>
+                {overviewChange !== null && overviewRangeMeta && (
+                  <p className={`pb-1 text-xs font-semibold ${overviewChange >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                    {overviewChangePrefix}<AnimatedNumber value={Math.abs(overviewChange)} suffix="%" /> {overviewRangeMeta.comparisonLabel}
+                  </p>
+                )}
               </div>
               <div className="mt-5">
                 <MiniBars data={overviewRequestBars} />
@@ -948,7 +970,7 @@ export default async function RequestsListPage({
           <aside className="min-w-0 space-y-4 xl:-mt-8">
             <Panel
               title="Request overview"
-              action={<OverviewRangeFilter presets={OVERVIEW_RANGE_OPTIONS} />}
+              action={<OverviewRangeFilter presets={OVERVIEW_RANGE_OPTIONS} defaultValue="all-time" />}
               className="hidden md:block"
             >
               <p className="text-xs font-medium text-zinc-500">Total requests</p>
@@ -956,9 +978,11 @@ export default async function RequestsListPage({
                 <p className="text-3xl font-semibold text-zinc-950">
                   <AnimatedNumber value={overviewTotal} />
                 </p>
-                <p className={`pb-1 text-xs font-semibold ${overviewChange >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                  {overviewChangePrefix}<AnimatedNumber value={Math.abs(overviewChange)} suffix="%" /> {overviewRangeMeta.comparisonLabel}
-                </p>
+                {overviewChange !== null && overviewRangeMeta && (
+                  <p className={`pb-1 text-xs font-semibold ${overviewChange >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                    {overviewChangePrefix}<AnimatedNumber value={Math.abs(overviewChange)} suffix="%" /> {overviewRangeMeta.comparisonLabel}
+                  </p>
+                )}
               </div>
               <div className="mt-5">
                 <MiniBars data={overviewRequestBars} />
