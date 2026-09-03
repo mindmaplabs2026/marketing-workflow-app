@@ -38,7 +38,11 @@ export default async function NewCalendarItemPage({
     .single<{ role: UserRole }>();
   const role: UserRole = profile?.role ?? "teacher";
 
-  if (role !== "designer" && role !== "super_admin") {
+  if (
+    role !== "designer" &&
+    role !== "school_admin" &&
+    role !== "super_admin"
+  ) {
     redirect("/calendar");
   }
 

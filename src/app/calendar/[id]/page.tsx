@@ -17,9 +17,11 @@ import {
 import {
   approveCalendarItem,
   cancelCalendarItem,
+  deleteCalendarItem,
   updateCalendarItem,
 } from "../actions";
 import { BackLink } from "@/components/back-link";
+import { ConfirmForm } from "@/components/confirm-form";
 
 type CalendarItemDetail = {
   id: string;
@@ -119,6 +121,9 @@ export default async function CalendarItemDetailPage({
     item.status !== "fulfilled" &&
     item.status !== "cancelled" &&
     (isDesigner || isReviewer);
+  const canDelete =
+    !item.linked_request_id &&
+    (role === "school_admin" || role === "super_admin");
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -278,6 +283,22 @@ export default async function CalendarItemDetailPage({
               </div>
             </details>
           </form>
+        )}
+        {canDelete && (
+          <ConfirmForm
+            action={deleteCalendarItem}
+            title="Delete calendar item?"
+            message="This permanently deletes the calendar item. This cannot be undone."
+            confirmLabel="Delete item"
+          >
+            <input type="hidden" name="id" value={item.id} />
+            <button
+              type="submit"
+              className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-300"
+            >
+              Delete item
+            </button>
+          </ConfirmForm>
         )}
       </section>
     </div>
