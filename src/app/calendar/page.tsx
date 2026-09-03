@@ -465,7 +465,8 @@ export default async function CalendarPage({
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayYMD = toYMD(today);
-  const canPlan = role === "designer" || role === "super_admin";
+  const canPlan =
+    role === "designer" || role === "school_admin" || role === "super_admin";
   const selectedMonthParam = toMonthParam(year, month);
   const weekItems = calendarItems.filter((item) => isWithinRange(item.planned_date, today, 7));
   const scheduledCount = calendarItems.filter((item) => item.status !== "cancelled").length;

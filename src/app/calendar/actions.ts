@@ -80,8 +80,12 @@ export async function createCalendarItem(
 
   const actor = await loadActor();
   if ("error" in actor) return { error: actor.error };
-  if (actor.role !== "designer" && actor.role !== "super_admin") {
-    return { error: "Only designers plan calendar items." };
+  if (
+    actor.role !== "designer" &&
+    actor.role !== "school_admin" &&
+    actor.role !== "super_admin"
+  ) {
+    return { error: "Only designers or school admins can plan calendar items." };
   }
 
   const supabase = await createClient();
@@ -224,4 +228,36 @@ export async function cancelCalendarItem(formData: FormData) {
 
   revalidatePath(`/calendar/${id}`);
   revalidatePath("/calendar");
+}
+
+export async function deleteCalendarItem(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("Missing id.");
+
+  const actor = await loadActor();
+  if ("error" in actor) throw new Error(actor.error);
+  if (actor.role !== "school_admin" && actor.role !== "super_admin") {
+    throw new Error("Only a school admin can delete calendar items.");
+  }
+
+  const item = await loadItem(id);
+  if ("error" in item) throw new Error(item.error);
+
+  // Keep the calendar and request pipeline consistent: deleting a calendar
+  // item must never leave its already-created request without context.
+  if (item.linked_request_id) {
+    throw new Error(
+      "This item is already linked to a request. Archive or remove the request first.",
+    );
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("calendar_items")
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/calendar");
+  redirect(`/calendar?school=${item.school_id}`);
 }
