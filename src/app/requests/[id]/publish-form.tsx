@@ -18,10 +18,19 @@ const PLATFORMS = Object.keys(PLATFORM_LABEL) as SocialPlatform[];
 
 type LinkRow = { platform: SocialPlatform; url: string };
 
+function localToday(): string {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function PublishForm({ requestId }: { requestId: string }) {
   const [rows, setRows] = useState<LinkRow[]>([
     { platform: "facebook", url: "" },
   ]);
+  const [publishedDate, setPublishedDate] = useState(localToday);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +56,7 @@ export function PublishForm({ requestId }: { requestId: string }) {
     try {
       const fd = new FormData();
       fd.set("id", requestId);
+      fd.set("published_date", publishedDate);
       for (const r of filled) {
         fd.append("platform", r.platform);
         fd.append("url", r.url.trim());
@@ -110,6 +120,26 @@ export function PublishForm({ requestId }: { requestId: string }) {
       >
         + Add another platform
       </button>
+      <div>
+        <label
+          htmlFor="published_date"
+          className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
+          Published date
+        </label>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          This post will appear on the calendar for this day.
+        </p>
+        <input
+          id="published_date"
+          name="published_date"
+          type="date"
+          required
+          value={publishedDate}
+          onChange={(event) => setPublishedDate(event.target.value)}
+          className="mt-2 block rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        />
+      </div>
       {error && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
           {error}

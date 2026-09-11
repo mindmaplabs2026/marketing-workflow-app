@@ -29,6 +29,17 @@ function isSocialPlatform(v: string): v is SocialPlatform {
   return (SOCIAL_PLATFORMS as readonly string[]).includes(v);
 }
 
+function isDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
 type RequestRow = {
   id: string;
   school_id: string;
@@ -731,7 +742,14 @@ export async function requestDesignChanges(formData: FormData) {
 
 export async function publishRequest(formData: FormData) {
   const id = String(formData.get("id") ?? "");
+  const publishedDate = String(formData.get("published_date") ?? "").trim();
   if (!id) throw new Error("Missing id.");
+  if (!isDateOnly(publishedDate)) {
+    throw new Error("Choose the date this post was published.");
+  }
+  // Store the chosen calendar day on each live-link record as well. Noon in
+  // the app's primary timezone avoids a UTC date rollover for date-only input.
+  const publishedAt = new Date(`${publishedDate}T12:00:00+05:30`).toISOString();
 
   const platforms = formData.getAll("platform").map(String);
   const urls = formData.getAll("url").map(String);
@@ -786,6 +804,7 @@ export async function publishRequest(formData: FormData) {
       posted_by: actor.userId,
       platform: l.platform,
       url: l.url,
+      posted_at: publishedAt,
     })),
   );
   if (linksErr) throw new Error(linksErr.message);
@@ -804,10 +823,42 @@ export async function publishRequest(formData: FormData) {
     metadata: { platforms: links.map((link) => link.platform) },
   });
 
-  await supabase
+  const { data: linkedCalendarItems, error: linkedCalendarItemsErr } = await supabase
     .from("calendar_items")
-    .update({ status: "fulfilled" })
-    .eq("linked_request_id", id);
+    .select("id")
+    .eq("linked_request_id", id)
+    .limit(1);
+  if (linkedCalendarItemsErr) throw new Error(linkedCalendarItemsErr.message);
+
+  if (linkedCalendarItems && linkedCalendarItems.length > 0) {
+    const { error: calendarUpdateErr } = await supabase
+      .from("calendar_items")
+      .update({ planned_date: publishedDate, status: "fulfilled" })
+      .eq("linked_request_id", id);
+    if (calendarUpdateErr) throw new Error(calendarUpdateErr.message);
+  } else {
+    const { data: requestContent, error: requestContentErr } = await supabase
+      .from("requests")
+      .select("title, description")
+      .eq("id", id)
+      .single<{ title: string; description: string | null }>();
+    if (requestContentErr || !requestContent) {
+      throw new Error(requestContentErr?.message ?? "Could not prepare the calendar item.");
+    }
+
+    const { error: calendarInsertErr } = await supabase
+      .from("calendar_items")
+      .insert({
+        school_id: req.school_id,
+        created_by: actor.userId,
+        linked_request_id: id,
+        planned_date: publishedDate,
+        title: requestContent.title,
+        description: requestContent.description,
+        status: "fulfilled",
+      });
+    if (calendarInsertErr) throw new Error(calendarInsertErr.message);
+  }
 
   revalidatePath(`/requests/${id}`);
   revalidatePath("/requests");
