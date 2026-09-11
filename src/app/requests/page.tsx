@@ -415,7 +415,10 @@ export default async function RequestsListPage({
   const { id: userId, role } = session;
   const supabase = await createClient();
 
-  const canRaise = role === "teacher" || role === "school_admin";
+  // Keep the Requests UI aligned with the create action and /requests/new:
+  // super admins can raise an approved request for any school.
+  const canRaise =
+    role === "teacher" || role === "school_admin" || role === "super_admin";
   const isTeacher = role === "teacher";
   const isReviewer = role === "school_admin" || role === "super_admin";
   const isDesigner = role === "designer" || role === "super_admin";
