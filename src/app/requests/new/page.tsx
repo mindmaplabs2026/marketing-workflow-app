@@ -72,7 +72,7 @@ export default async function NewRequestPage() {
   const willAutoApprove = role === "school_admin" || role === "super_admin";
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-2 sm:px-6 lg:px-8">
       <div>
         <BackLink href="/requests">All requests</BackLink>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -85,7 +85,9 @@ export default async function NewRequestPage() {
         </p>
       </div>
 
-      <NewRequestForm schools={schools} />
+      <div className="rounded-[24px] border border-white/85 bg-white/95 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/70 sm:p-7">
+        <NewRequestForm schools={schools} />
+      </div>
     </div>
   );
 }
