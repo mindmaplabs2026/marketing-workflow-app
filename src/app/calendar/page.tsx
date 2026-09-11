@@ -21,6 +21,7 @@ import {
   CalendarOptimizerTrigger,
 } from "./calendar-optimizer-modal";
 import { CAL_STATUS_LABELS } from "./status";
+import { CalendarDatePreview } from "./calendar-date-preview";
 import { CalendarFilterMenu, StatusFilterMenu } from "./status-filter-menu";
 
 type SchoolLite = { id: string; name: string };
@@ -33,6 +34,8 @@ type CalendarItemRow = {
   id: string;
   planned_date: string;
   title: string;
+  description: string | null;
+  linked_request_id: string | null;
   status: CalendarItemStatus;
 };
 
@@ -438,7 +441,7 @@ export default async function CalendarPage({
 
   let itemsQuery = supabase
     .from("calendar_items")
-    .select("id, planned_date, title, status")
+    .select("id, planned_date, title, description, linked_request_id, status")
     .eq("school_id", selectedSchool.id)
     .gte("planned_date", toYMD(gridStart))
     .lte("planned_date", toYMD(gridEnd))
@@ -467,6 +470,8 @@ export default async function CalendarPage({
   const todayYMD = toYMD(today);
   const canPlan =
     role === "designer" || role === "school_admin" || role === "super_admin";
+  const canDeleteCalendarItems =
+    role === "school_admin" || role === "super_admin";
   const selectedMonthParam = toMonthParam(year, month);
   const weekItems = calendarItems.filter((item) => isWithinRange(item.planned_date, today, 7));
   const scheduledCount = calendarItems.filter((item) => item.status !== "cancelled").length;
@@ -772,37 +777,57 @@ export default async function CalendarPage({
                       ))}
                     </div>
 
-                    <ul className="hidden space-y-1.5 sm:block">
-                      {cellItems.slice(0, 2).map((item) => {
-                        const channel = itemChannel(item);
-                        return (
-                          <li key={item.id}>
-                            <Link
-                              href={`/calendar/${item.id}`}
-                              className={`block rounded-xl border px-2.5 py-2 text-[11px] leading-tight shadow-sm transition ${channel.card} ${
-                                item.status === "cancelled" ? "opacity-50 line-through" : ""
-                              }`}
-                            >
-                              <span className="flex items-start gap-1.5">
-                                <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${channel.dot}`} />
-                                <span className="min-w-0">
-                                  <span className="block truncate font-semibold">{item.title}</span>
-                                  <span className={`mt-1 block truncate text-[10px] font-medium ${channel.muted}`}>
-                                    {channel.name}
+                    {cellItems.length > 0 && (
+                      <CalendarDatePreview
+                        dateLabel={cell.date.toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                        items={cellItems.map((item) => ({
+                          id: item.id,
+                          linkedRequestId: item.linked_request_id,
+                          title: item.title,
+                          description: item.description,
+                          statusLabel: CAL_STATUS_LABELS[item.status],
+                          channel: itemChannel(item).name,
+                          canDelete:
+                            canDeleteCalendarItems && !item.linked_request_id,
+                        }))}
+                      >
+                        <ul className="hidden space-y-1.5 sm:block">
+                          {cellItems.slice(0, 2).map((item) => {
+                            const channel = itemChannel(item);
+                            return (
+                              <li key={item.id}>
+                                <Link
+                                  href={`/calendar/${item.id}`}
+                                  className={`block rounded-xl border px-2.5 py-2 text-[11px] leading-tight shadow-sm transition ${channel.card} ${
+                                    item.status === "cancelled" ? "opacity-50 line-through" : ""
+                                  }`}
+                                >
+                                  <span className="flex items-start gap-1.5">
+                                    <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${channel.dot}`} />
+                                    <span className="min-w-0">
+                                      <span className="block truncate font-semibold">{item.title}</span>
+                                      <span className={`mt-1 block truncate text-[10px] font-medium ${channel.muted}`}>
+                                        {channel.name}
+                                      </span>
+                                    </span>
                                   </span>
-                                </span>
-                              </span>
-                              {isToday && <AvatarStack />}
-                            </Link>
-                          </li>
-                        );
-                      })}
-                      {cellItems.length > 2 && (
-                        <li className="px-2 text-[11px] font-semibold text-violet-600">
-                          +{cellItems.length - 2} more
-                        </li>
-                      )}
-                    </ul>
+                                  {isToday && <AvatarStack />}
+                                </Link>
+                              </li>
+                            );
+                          })}
+                          {cellItems.length > 2 && (
+                            <li className="px-2 text-[11px] font-semibold text-violet-600">
+                              +{cellItems.length - 2} more
+                            </li>
+                          )}
+                        </ul>
+                      </CalendarDatePreview>
+                    )}
                   </div>
                 );
               })}
