@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import type { UserRole } from "@/lib/supabase/types";
 import { updateUserRole } from "./actions";
 
@@ -58,8 +59,12 @@ export function RoleSelect({
       if (result?.error) {
         setRole(previous);
         setError(result.error);
+        toast.error(result.error);
         return;
       }
+      toast.success("Role updated", {
+        description: `User is now a ${ROLE_LABEL[newRole]}.`,
+      });
       // Force the server component to re-fetch profiles so neighbouring
       // rows + counts reflect the change too. revalidatePath inside the
       // action marks the route stale; router.refresh() is what actually

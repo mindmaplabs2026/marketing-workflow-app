@@ -13,6 +13,7 @@ import { CollapsibleRows } from "@/components/collapsible-rows";
 import { MotionSurface } from "@/components/premium-motion";
 import { RequestRowActions } from "@/components/request-row-actions";
 import { AnimatedNumber } from "@/components/animated-number";
+import { InvalidSchoolSelectionToast } from "./invalid-school-selection-toast";
 import { OverviewRangeFilter } from "@/components/overview-range-filter";
 
 const SECTION_PAGE_SIZE = 10;
@@ -397,7 +398,7 @@ export default async function RequestsListPage({
   >;
 }) {
   const params = await searchParams;
-  const schoolFilter = params.school ?? "";
+  const requestedSchoolFilter = params.school ?? "";
   const rawQuery = params.q ?? "";
   const searchQuery = rawQuery.trim().toLowerCase();
   const customOverviewMeta = customOverviewRangeMeta(params.overview, params.from, params.to);
@@ -464,6 +465,10 @@ export default async function RequestsListPage({
   const allRequests = requestsRes.data ?? [];
   const schoolsList = schoolsRes.data ?? [];
   const schoolsById = new Map(schoolsList.map((s) => [s.id, s.name]));
+  const hasSchoolAccess =
+    !requestedSchoolFilter || schoolsById.has(requestedSchoolFilter);
+  const schoolFilter = hasSchoolAccess ? requestedSchoolFilter : "";
+  const hasInvalidSchoolSelection = Boolean(requestedSchoolFilter) && !hasSchoolAccess;
 
   const creatorIds = Array.from(new Set(allRequests.map((r) => r.created_by)));
   let creators: ProfileLite[] = [];
@@ -693,10 +698,12 @@ export default async function RequestsListPage({
     );
   }
 
-  const showSchoolFilter = isDesigner && schoolsList.length > 1;
+  const showSchoolFilter =
+    (isDesigner || role === "school_admin") && schoolsList.length > 1;
 
   return (
     <div className="min-h-full overflow-x-hidden bg-[radial-gradient(circle_at_78%_4%,rgba(124,58,237,0.13),transparent_29%),radial-gradient(circle_at_18%_18%,rgba(14,165,233,0.08),transparent_25%),linear-gradient(180deg,#ffffff_0%,#fbfbff_48%,#f8fafc_100%)] px-3 pb-5 pt-0 text-slate-950 sm:px-6 lg:px-8">
+      {hasInvalidSchoolSelection ? <InvalidSchoolSelectionToast /> : null}
       <div className="mx-auto max-w-[1360px] space-y-4">
         <section className="relative min-h-24 overflow-hidden pb-2 pt-2 sm:pt-3">
           <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[58%] overflow-hidden lg:block">
@@ -1123,7 +1130,7 @@ export default async function RequestsListPage({
                 key={request.id}
                 className="group relative flex items-center gap-2 border-b border-slate-100/90 px-4 py-3.5 last:border-b-0 transition duration-200 hover:bg-white hover:shadow-[inset_3px_0_0_rgba(124,58,237,0.22)]"
               >
-                <Link href={`/requests/${request.id}`} className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 lg:grid-cols-[auto_minmax(0,1fr)_124px_54px]">
+                <Link href={`/requests/${request.id}`} className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 lg:grid-cols-[auto_minmax(0,1fr)_150px_88px]">
                   <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-lg transition duration-200 group-hover:scale-105 motion-reduce:transform-none ${rowIconClass(request.status)}`}>
                     <RequestIcon type={activityIconType(request.status)} className="h-5 w-5" />
                   </span>
@@ -1135,10 +1142,10 @@ export default async function RequestsListPage({
                       {schoolName}
                     </span>
                   </span>
-                  <span className={`hidden min-w-[92px] justify-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm ring-1 ring-white/70 sm:inline-flex lg:justify-self-end ${STATUS_BADGE_CLASS[request.status]}`}>
+                  <span className={`hidden w-full max-w-[150px] justify-center truncate whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm ring-1 ring-white/70 sm:inline-flex lg:justify-self-end ${STATUS_BADGE_CLASS[request.status]}`}>
                     {STATUS_SHORT[request.status]}
                   </span>
-                  <span className="hidden items-center gap-2 whitespace-nowrap text-xs font-medium text-slate-500 md:flex lg:justify-self-end">
+                  <span className="hidden min-w-[88px] items-center gap-2 whitespace-nowrap text-xs font-medium text-slate-500 md:flex lg:justify-self-end">
                     <span className={`h-1.5 w-1.5 rounded-full ${rowTimingDotClass(request, todayUtcMs)}`} />
                     {rowTimingLabel(request, todayUtcMs)}
                   </span>
