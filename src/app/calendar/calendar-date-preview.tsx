@@ -11,26 +11,21 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import type { CalendarItemStatus } from "@/lib/supabase/types";
 import { ConfirmForm } from "@/components/confirm-form";
 import { deleteCalendarItem } from "./actions";
+import { CAL_STATUS_BADGE_CLASS } from "./status";
 
 export type CalendarPreviewItem = {
   id: string;
   linkedRequestId: string | null;
   title: string;
   description: string | null;
+  status: CalendarItemStatus;
   statusLabel: string;
   channel: string;
   canDelete: boolean;
 };
-
-function channelBadgeClass(channel: string) {
-  if (channel === "Instagram") return "bg-pink-50 text-pink-700 ring-pink-100";
-  if (channel === "Facebook") return "bg-blue-50 text-blue-700 ring-blue-100";
-  if (channel === "Email") return "bg-amber-50 text-amber-700 ring-amber-100";
-  if (channel === "Others") return "bg-violet-50 text-violet-700 ring-violet-100";
-  return "bg-emerald-50 text-emerald-700 ring-emerald-100";
-}
 
 /**
  * A small fixed preview avoids clipping inside the calendar's scrollable grid.
@@ -185,10 +180,10 @@ export function CalendarDatePreview({
               {items.map((previewItem) => (
                 <article key={previewItem.id} className="min-w-full rounded-xl border border-slate-100 bg-slate-50/70 p-3">
                   <div className="flex items-start justify-between gap-2">
-                    <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ring-1 ${channelBadgeClass(previewItem.channel)}`}>
-                      {previewItem.channel}
+                    <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ring-1 ${CAL_STATUS_BADGE_CLASS[previewItem.status]}`}>
+                      {previewItem.statusLabel}
                     </span>
-                    <span className="shrink-0 text-[10px] font-medium text-slate-500">{previewItem.statusLabel}</span>
+                    <span className="shrink-0 text-[10px] font-medium text-slate-500">{previewItem.channel}</span>
                   </div>
                   <h3 className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-950">
                     {previewItem.title}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Filter, type LucideIcon } from "lucide-react";
+import { Building2, ChevronRight, Filter, type LucideIcon } from "lucide-react";
 
 export type CalendarFilterOption = {
   href: string;
@@ -36,6 +36,25 @@ export function StatusFilterMenu({
   options: CalendarFilterOption[];
 }) {
   return <CalendarFilterMenu label={label} options={options} />;
+}
+
+export function SchoolFilterMenu({
+  label,
+  options,
+  compact = false,
+}: {
+  label: string;
+  options: CalendarFilterOption[];
+  compact?: boolean;
+}) {
+  return (
+    <CalendarFilterMenu
+      label={label}
+      options={options}
+      icon={Building2}
+      compact={compact}
+    />
+  );
 }
 
 function FilterMenuBase({
@@ -83,7 +102,7 @@ function FilterMenuBase({
         className={buttonClass}
       >
         {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
-        {label}
+        <span className="max-w-40 truncate">{label}</span>
         <ChevronRight className="h-3.5 w-3.5 rotate-90 text-slate-400" />
       </button>
 
