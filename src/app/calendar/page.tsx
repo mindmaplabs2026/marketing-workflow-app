@@ -20,9 +20,18 @@ import {
   CalendarOptimizerModal,
   CalendarOptimizerTrigger,
 } from "./calendar-optimizer-modal";
-import { CAL_STATUS_LABELS } from "./status";
+import {
+  CAL_STATUS_CARD_CLASS,
+  CAL_STATUS_DOT_CLASS,
+  CAL_STATUS_LABELS,
+  CAL_STATUS_META_CLASS,
+} from "./status";
 import { CalendarDatePreview } from "./calendar-date-preview";
-import { CalendarFilterMenu, StatusFilterMenu } from "./status-filter-menu";
+import {
+  CalendarFilterMenu,
+  SchoolFilterMenu,
+  StatusFilterMenu,
+} from "./status-filter-menu";
 
 type SchoolLite = { id: string; name: string };
 type MembershipRow = {
@@ -62,6 +71,12 @@ const MONTH_NAMES = [
 
 const DAY_HEADERS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const STATUS_FILTERS = ["all", "drafted", "admin_approved", "fulfilled", "cancelled"] as const;
+const CALENDAR_STATUS_LEGEND: CalendarItemStatus[] = [
+  "drafted",
+  "admin_approved",
+  "fulfilled",
+  "cancelled",
+];
 const MIX_FILTERS = ["month", "week"] as const;
 
 type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -237,11 +252,13 @@ function calendarHref({
 }
 
 function mobileEventDotClass(status: CalendarItemStatus) {
-  if (status === "fulfilled") return "bg-emerald-500 shadow-emerald-200";
-  if (status === "drafted" || status === "admin_approved") {
-    return "bg-violet-600 shadow-violet-200";
-  }
-  return "bg-slate-300 shadow-slate-200";
+  const shadowClass: Record<CalendarItemStatus, string> = {
+    drafted: "shadow-zinc-200",
+    admin_approved: "shadow-violet-200",
+    fulfilled: "shadow-emerald-200",
+    cancelled: "shadow-zinc-200",
+  };
+  return `${CAL_STATUS_DOT_CLASS[status]} ${shadowClass[status]}`;
 }
 
 function AvatarStack() {
@@ -524,6 +541,16 @@ export default async function CalendarPage({
   const selectedStatusLabel =
     selectedStatus === "all" ? "All status" : CAL_STATUS_LABELS[selectedStatus];
   const selectedMixLabel = selectedMix === "week" ? "This week" : "This month";
+  const schoolFilterOptions = schools.map((school) => ({
+    label: school.name,
+    selected: school.id === selectedSchool.id,
+    href: calendarHref({
+      school: school.id,
+      month: selectedMonthParam,
+      status: selectedStatus,
+      mix: selectedMix,
+    }),
+  }));
 
   return (
     <div className="-mx-4 -mt-3 min-h-full overflow-x-hidden bg-[radial-gradient(circle_at_78%_4%,rgba(124,58,237,0.13),transparent_29%),radial-gradient(circle_at_18%_18%,rgba(14,165,233,0.08),transparent_25%),linear-gradient(180deg,#ffffff_0%,#fbfbff_48%,#f8fafc_100%)] px-4 pb-6 pt-3 text-slate-950 sm:-mx-6 sm:px-6 lg:-ml-8 lg:-mr-4 lg:px-8">
@@ -541,42 +568,7 @@ export default async function CalendarPage({
             </p>
           </div>
 
-          <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-wrap sm:gap-3 lg:-mt-0.5 lg:w-auto lg:flex-nowrap lg:justify-end">
-            {schools.length > 1 ? (
-              <form method="get" action="/calendar" className="col-span-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 min-[390px]:col-span-1 sm:flex sm:w-auto sm:flex-none">
-                <input type="hidden" name="month" value={toMonthParam(year, month)} />
-                <label className="sr-only" htmlFor="school">
-                  School
-                </label>
-                <div className="relative min-w-0 flex-1">
-                  <Building2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <select
-                    id="school"
-                    name="school"
-                    defaultValue={selectedSchool.id}
-                    className="h-12 w-full min-w-0 appearance-none rounded-xl border border-slate-200 bg-white/95 pl-10 pr-9 text-sm font-medium text-slate-900 shadow-[0_14px_32px_rgba(15,23,42,0.08)] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100 sm:min-w-56 lg:w-64"
-                  >
-                    {schools.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronRight className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 rotate-90 -translate-y-1/2 text-slate-400" />
-                </div>
-                <button
-                  type="submit"
-                  className="h-12 shrink-0 rounded-xl border border-slate-200 bg-white/95 px-4 text-sm font-semibold text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:bg-slate-50 motion-reduce:transform-none"
-                >
-                  Go
-                </button>
-              </form>
-            ) : (
-              <div className="col-span-2 inline-flex h-12 min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-4 text-sm font-semibold text-slate-900 shadow-[0_14px_32px_rgba(15,23,42,0.08)] min-[390px]:col-span-1 sm:flex-none lg:w-64">
-                <Building2 className="h-4 w-4 text-slate-500" />
-                <span className="truncate">{selectedSchool.name}</span>
-              </div>
-            )}
+          <div className="flex w-full justify-end lg:-mt-0.5 lg:w-auto">
             {canPlan && (
               <Link
                 href={`/calendar/new?school=${selectedSchool.id}&date=${todayYMD}`}
@@ -695,7 +687,23 @@ export default async function CalendarPage({
                 Today
               </Link>
             </div>
-            <div className="hidden items-center gap-2 sm:flex">
+            <div className="flex shrink-0 items-center gap-2">
+              {schools.length > 1 && (
+                <div className="sm:hidden">
+                  <SchoolFilterMenu
+                    label="School"
+                    options={schoolFilterOptions}
+                    compact
+                  />
+                </div>
+              )}
+              <div className="hidden items-center gap-2 sm:flex">
+                {schools.length > 1 && (
+                  <SchoolFilterMenu
+                    label={selectedSchool.name}
+                    options={schoolFilterOptions}
+                  />
+                )}
               <StatusFilterMenu
                 label={selectedStatusLabel}
                 options={STATUS_FILTERS.map((status) => ({
@@ -709,6 +717,7 @@ export default async function CalendarPage({
                   }),
                 }))}
               />
+              </div>
             </div>
           </div>
 
@@ -789,6 +798,7 @@ export default async function CalendarPage({
                           linkedRequestId: item.linked_request_id,
                           title: item.title,
                           description: item.description,
+                          status: item.status,
                           statusLabel: CAL_STATUS_LABELS[item.status],
                           channel: itemChannel(item).name,
                           canDelete:
@@ -797,21 +807,20 @@ export default async function CalendarPage({
                       >
                         <ul className="hidden space-y-1.5 sm:block">
                           {cellItems.slice(0, 2).map((item) => {
-                            const channel = itemChannel(item);
                             return (
                               <li key={item.id}>
                                 <Link
                                   href={`/calendar/${item.id}`}
-                                  className={`block rounded-xl border px-2.5 py-2 text-[11px] leading-tight shadow-sm transition ${channel.card} ${
+                                  className={`block rounded-xl border px-2.5 py-2 text-[11px] leading-tight shadow-sm transition ${CAL_STATUS_CARD_CLASS[item.status]} ${
                                     item.status === "cancelled" ? "opacity-50 line-through" : ""
                                   }`}
                                 >
                                   <span className="flex items-start gap-1.5">
-                                    <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${channel.dot}`} />
+                                    <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${CAL_STATUS_DOT_CLASS[item.status]}`} />
                                     <span className="min-w-0">
                                       <span className="block truncate font-semibold">{item.title}</span>
-                                      <span className={`mt-1 block truncate text-[10px] font-medium ${channel.muted}`}>
-                                        {channel.name}
+                                      <span className={`mt-1 block truncate text-[10px] font-medium ${CAL_STATUS_META_CLASS[item.status]}`}>
+                                        {CAL_STATUS_LABELS[item.status]} · {itemChannel(item).name}
                                       </span>
                                     </span>
                                   </span>
@@ -835,11 +844,14 @@ export default async function CalendarPage({
             </div>
           </div>
 
-          <div className="mt-4 hidden flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-slate-500 sm:flex">
-            {CHANNEL_STYLES.map((channel) => (
-              <span key={channel.name} className="inline-flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${channel.dot}`} />
-                {channel.name}
+          <div
+            aria-label="Calendar status legend"
+            className="mt-4 hidden flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-medium text-slate-600 sm:flex"
+          >
+            {CALENDAR_STATUS_LEGEND.map((status) => (
+              <span key={status} className="inline-flex items-center gap-2">
+                <span className={`h-2.5 w-2.5 rounded-full ${CAL_STATUS_DOT_CLASS[status]}`} />
+                {CAL_STATUS_LABELS[status]}
               </span>
             ))}
           </div>
